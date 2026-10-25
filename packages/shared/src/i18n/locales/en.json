@@ -1043,6 +1043,17 @@
   "projectInfo.workingDirectory": "Working directory",
   "projectInfo.workingDirectoryPicker": "Choose…",
   "projectInfo.workingDirectoryPlaceholder": "/absolute/path/to/folder",
+  "projectInfo.worktree.baseBranch": "Base branch",
+  "projectInfo.worktree.baseBranchPlaceholder": "Repository default",
+  "projectInfo.worktree.cleanup": "Remove clean worktrees on archive",
+  "projectInfo.worktree.cleanupHint": "Keeps branches and worktrees with local changes. Removed worktrees return when you resume the chat.",
+  "projectInfo.worktree.directoryRequired": "Choose a repository folder before enabling automatic worktrees.",
+  "projectInfo.worktree.enabled": "New worktree for each chat",
+  "projectInfo.worktree.enabledHint": "Each new chat gets its own branch and folder on the workspace server. Several projects can share this repository.",
+  "projectInfo.worktree.invalidBaseBranch": "Choose an existing base branch available in this repository (for example, main or origin/main).",
+  "projectInfo.worktree.invalidRepository": "Choose a Git repository on the workspace server.",
+  "projectInfo.worktree.invalidSettings": "Worktree settings must use boolean switches and an optional branch name.",
+  "projectInfo.worktree.repositoryHasNoCommits": "This repository has no usable base commit. Commit code before enabling automatic worktrees.",
   "projectsList.addProject": "Add Project",
   "projectsList.createButton": "Create",
   "projectsList.createDialogNamePlaceholder": "Project name",
@@ -2126,5 +2137,9 @@
   "workspace.selectWorkspaceDesc": "Choose a workspace on this server, or create a new one.",
   "workspace.selectWorkspacePlaceholder": "Select a workspace...",
   "workspace.serverAuthToken": "Server authentication token",
-  "workspace.underDefaultFolder": "under .craft-agent folder"
+  "workspace.underDefaultFolder": "under .craft-agent folder",
+  "worktree.session.folderLocked": "This chat uses its own worktree. Start a new chat to use a different folder.",
+  "worktree.session.initialized": "This chat’s runtime was already started outside its worktree. Create a new chat to keep the repository isolated.",
+  "worktree.session.kept": "Worktree kept at {{path}}: {{reason}}",
+  "worktree.session.prepareFailed": "Could not prepare this chat’s worktree: {{reason}}"
 }

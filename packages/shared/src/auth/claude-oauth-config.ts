@@ -32,7 +32,7 @@ export const CLAUDE_OAUTH_CONFIG = {
   /**
    * OAuth scopes requested during authentication
    */
-  SCOPES: 'org:create_api_key user:profile user:inference',
+  SCOPES: 'org:create_api_key user:profile user:inference user:mcp_servers',
 } as const;
 
 export type ClaudeOAuthConfig = typeof CLAUDE_OAUTH_CONFIG;

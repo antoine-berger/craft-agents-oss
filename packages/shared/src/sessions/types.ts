@@ -34,7 +34,7 @@ export const SESSION_PERSISTENT_FIELDS = [
   // Read tracking
   'lastReadMessageId', 'hasUnread',
   // Config
-  'enabledSourceSlugs', 'permissionMode', 'previousPermissionMode', 'workingDirectory',
+  'enabledSourceSlugs', 'permissionMode', 'previousPermissionMode', 'workingDirectory', 'worktree',
   // Model/Connection
   'model', 'llmConnection', 'connectionLocked', 'thinkingLevel',
   // Coding mode (lean coding prompt + tool profile; fixed once the session has messages)
@@ -115,6 +115,28 @@ export interface SessionTokenUsage {
  */
 export type { StoredMessage } from '@craft-agent/core/types';
 
+/** A Git worktree owned by one session. Persist the plan before creating it. */
+export interface OwnedWorktree {
+  version: 1;
+  ownerId: string;
+  token: string;
+  repoPath: string;
+  gitDir: string;
+  path: string;
+  branch: string;
+  base: string;
+  baseCommit: string;
+  status: 'pending' | 'ready' | 'removed';
+}
+
+/** Project policy captured when a chat is created; existing chats keep their checkout. */
+export interface SessionWorktreeMetadata {
+  repositoryPath: string;
+  baseBranch?: string;
+  cleanupOnArchive?: boolean;
+  owned?: OwnedWorktree;
+}
+
 /**
  * Session configuration (persisted metadata)
  */
@@ -153,6 +175,8 @@ export interface SessionConfig {
   enabledSourceSlugs?: string[];
   /** Working directory for this session (used by agent for bash commands and context) */
   workingDirectory?: string;
+  /** Automatic worktree policy and durable ownership/recovery metadata. */
+  worktree?: SessionWorktreeMetadata;
   /** SDK cwd for session storage - set once at creation, never changes. Ensures SDK can find session transcripts regardless of workingDirectory changes. */
   sdkCwd?: string;
   /** Shared viewer URL (if shared via viewer) */
@@ -299,6 +323,7 @@ export interface SessionHeader {
   enabledSourceSlugs?: string[];
   /** Working directory for this session (used by agent for bash commands and context) */
   workingDirectory?: string;
+  worktree?: SessionWorktreeMetadata;
   /** SDK cwd for session storage - set once at creation, never changes */
   sdkCwd?: string;
   /** Shared viewer URL (if shared via viewer) */
@@ -418,6 +443,7 @@ export interface SessionMetadata {
   sharedId?: string;
   /** Working directory for this session */
   workingDirectory?: string;
+  worktree?: SessionWorktreeMetadata;
   /** SDK cwd for session storage - set once at creation, never changes */
   sdkCwd?: string;
   /** Role/type of the last message (for badge display without loading messages) */

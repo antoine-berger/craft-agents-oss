@@ -1043,6 +1043,17 @@
   "projectInfo.workingDirectory": "工作目录",
   "projectInfo.workingDirectoryPicker": "选择…",
   "projectInfo.workingDirectoryPlaceholder": "/绝对/路径/到/文件夹",
+  "projectInfo.worktree.baseBranch": "基础分支",
+  "projectInfo.worktree.baseBranchPlaceholder": "仓库默认分支",
+  "projectInfo.worktree.cleanup": "归档时移除无改动的工作树",
+  "projectInfo.worktree.cleanupHint": "保留分支和有本地改动的工作树。继续聊天时会恢复已移除的工作树。",
+  "projectInfo.worktree.directoryRequired": "启用自动工作树前，请选择仓库文件夹。",
+  "projectInfo.worktree.enabled": "为每个聊天创建新工作树",
+  "projectInfo.worktree.enabledHint": "每个新聊天都会在 Workspace 服务器上获得独立的分支和文件夹。多个项目可以共享此仓库。",
+  "projectInfo.worktree.invalidBaseBranch": "请选择此仓库中已有的基础分支（例如 main 或 origin/main）。",
+  "projectInfo.worktree.invalidRepository": "请选择 Workspace 服务器上的 Git 仓库。",
+  "projectInfo.worktree.invalidSettings": "工作树设置必须使用布尔开关，分支名称为可选项。",
+  "projectInfo.worktree.repositoryHasNoCommits": "此仓库没有可用的基础提交。请先创建提交，再启用自动工作树。",
   "projectsList.addProject": "添加项目",
   "projectsList.createButton": "创建",
   "projectsList.createDialogNamePlaceholder": "项目名称",
@@ -2126,5 +2137,9 @@
   "workspace.selectWorkspaceDesc": "选择此服务器上的 Workspace 或创建新的。",
   "workspace.selectWorkspacePlaceholder": "选择 Workspace...",
   "workspace.serverAuthToken": "服务器认证令牌",
-  "workspace.underDefaultFolder": ".craft-agent 文件夹下"
+  "workspace.underDefaultFolder": ".craft-agent 文件夹下",
+  "worktree.session.folderLocked": "此聊天使用独立工作树。如需使用其他文件夹，请开始新聊天。",
+  "worktree.session.initialized": "此聊天的运行环境已在其工作树之外启动。请创建新聊天，以保持仓库隔离。",
+  "worktree.session.kept": "已保留 {{path}} 中的工作树：{{reason}}",
+  "worktree.session.prepareFailed": "无法准备此聊天的工作树：{{reason}}"
 }

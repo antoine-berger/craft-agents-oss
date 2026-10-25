@@ -26,6 +26,7 @@ import { generateUniqueSlug } from '../utils/slug.ts';
 import { debug } from '../utils/debug.ts';
 import { expandPath, toPortablePath } from '../utils/paths.ts';
 import { estimateTokensDensityAware } from '../utils/large-response.ts';
+import { normalizeProjectWorktreeSettings } from './worktree-settings.ts';
 import type {
   ProjectConfig,
   ProjectAsset,
@@ -123,6 +124,7 @@ export function loadProjectConfig(
  * Save project config.json (atomic write, bumps updatedAt).
  */
 export function saveProjectConfig(workspaceRootPath: string, config: ProjectConfig): void {
+  const worktreeSettings = normalizeProjectWorktreeSettings(config.worktreeSettings, config.workingDirectory);
   const dir = getProjectPath(workspaceRootPath, config.slug);
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true });
@@ -130,6 +132,8 @@ export function saveProjectConfig(workspaceRootPath: string, config: ProjectConf
 
   const storageConfig: ProjectConfig = {
     ...config,
+    workingDirectory: config.workingDirectory?.trim() || undefined,
+    worktreeSettings,
     updatedAt: Date.now(),
   };
 
@@ -306,7 +310,8 @@ export function createProject(
     slug,
     name: input.name,
     description: input.description,
-    workingDirectory: input.workingDirectory,
+    workingDirectory: input.workingDirectory?.trim() || undefined,
+    worktreeSettings: normalizeProjectWorktreeSettings(input.worktreeSettings, input.workingDirectory),
     details: input.details,
     colorTheme: input.colorTheme,
     createdAt: now,
@@ -341,6 +346,8 @@ export function updateProject(
     createdAt: existing.createdAt,
     updatedAt: Date.now(),
   };
+  updated.worktreeSettings = normalizeProjectWorktreeSettings(updated.worktreeSettings, updated.workingDirectory);
+  updated.workingDirectory = updated.workingDirectory?.trim() || undefined;
 
   saveProjectConfig(workspaceRootPath, updated);
   return updated;

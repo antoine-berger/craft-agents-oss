@@ -1043,6 +1043,17 @@
   "projectInfo.workingDirectory": "作業ディレクトリ",
   "projectInfo.workingDirectoryPicker": "選択…",
   "projectInfo.workingDirectoryPlaceholder": "/絶対パス/から/フォルダ",
+  "projectInfo.worktree.baseBranch": "ベースブランチ",
+  "projectInfo.worktree.baseBranchPlaceholder": "リポジトリのデフォルト",
+  "projectInfo.worktree.cleanup": "アーカイブ時に未変更のワークツリーを削除",
+  "projectInfo.worktree.cleanupHint": "ブランチとローカル変更のあるワークツリーは保持されます。削除されたワークツリーはチャットを再開すると復元されます。",
+  "projectInfo.worktree.directoryRequired": "ワークツリーの自動作成を有効にする前に、リポジトリのフォルダを選択してください。",
+  "projectInfo.worktree.enabled": "チャットごとにワークツリーを作成",
+  "projectInfo.worktree.enabledHint": "新しいチャットごとに、Workspace サーバー上に専用のブランチとフォルダを作成します。複数のプロジェクトで同じリポジトリを共有できます。",
+  "projectInfo.worktree.invalidBaseBranch": "このリポジトリに存在するベースブランチを選択してください（例：main、origin/main）。",
+  "projectInfo.worktree.invalidRepository": "Workspace サーバー上の Git リポジトリを選択してください。",
+  "projectInfo.worktree.invalidSettings": "ワークツリー設定には真偽値のスイッチと、必要に応じてブランチ名を指定してください。",
+  "projectInfo.worktree.repositoryHasNoCommits": "このリポジトリには使用可能なベースコミットがありません。ワークツリーの自動作成を有効にする前にコミットを作成してください。",
   "projectsList.addProject": "プロジェクトを追加",
   "projectsList.createButton": "作成",
   "projectsList.createDialogNamePlaceholder": "プロジェクト名",
@@ -2126,5 +2137,9 @@
   "workspace.selectWorkspaceDesc": "このサーバー上のWorkspaceを選択するか、新規作成してください。",
   "workspace.selectWorkspacePlaceholder": "Workspaceを選択...",
   "workspace.serverAuthToken": "サーバー認証トークン",
-  "workspace.underDefaultFolder": ".craft-agentフォルダ内"
+  "workspace.underDefaultFolder": ".craft-agentフォルダ内",
+  "worktree.session.folderLocked": "このチャットは専用のワークツリーを使用しています。別のフォルダを使うには、新しいチャットを開始してください。",
+  "worktree.session.initialized": "このチャットの実行環境は、すでに専用のワークツリーの外で起動しています。リポジトリを分離するには、新しいチャットを作成してください。",
+  "worktree.session.kept": "{{path}} のワークツリーを保持しました: {{reason}}",
+  "worktree.session.prepareFailed": "このチャットのワークツリーを準備できませんでした：{{reason}}"
 }

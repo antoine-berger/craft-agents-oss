@@ -72,6 +72,7 @@ import {
   type SessionMetadata,
   type SessionStatus,
   type SessionHeader,
+  type SessionWorktreeMetadata,
   pickSessionFields,
 } from '@craft-agent/shared/sessions'
 import { serializeHeaderCredential, loadWorkspaceSources, loadAllSources, getSourcesBySlugs, isSourceUsable, type LoadedSource, type McpServerConfig, getSourcesNeedingAuth, getSourceCredentialManager, TokenRefreshManager } from '@craft-agent/shared/sources'
@@ -124,6 +125,8 @@ import { loadStatusConfig } from '@craft-agent/shared/statuses/storage'
 import { AutomationSystem, createPromptHistoryEntry, appendAutomationHistoryEntry, type AutomationSystemMetadataSnapshot, type PendingPrompt } from '@craft-agent/shared/automations'
 import { buildBackendRuntimeSignature, buildRestartRequiredSignature, filterAttachmentsForModelInput } from './runtime-config'
 import { validateArchiveTarget } from './archive-guards'
+import { resolveSessionWorktreePolicy, isSessionDirectoryInWorktree } from './session-worktree'
+import { planOwnedWorktree, ensureOwnedWorktree, removeOwnedWorktree } from '../services/coding-repos/owned-worktree'
 import { addTurnUsage, branchStartTotals, type BranchParent } from './turn-usage'
 
 // Import from server-core domain utilities
@@ -808,6 +811,12 @@ interface ManagedSession {
   taskDraft?: boolean
   // Working directory for this session (used by agent for bash commands)
   workingDirectory?: string
+  // Policy captured at chat creation plus ownership needed for crash recovery.
+  worktree?: SessionWorktreeMetadata
+  // A failed teardown cannot certify that all processes released the checkout.
+  worktreeCleanupBlocked?: boolean
+  // Prevent setup from recreating a runtime/session while deletion is in progress.
+  isDeleting?: boolean
   // SDK cwd for session storage - set once at creation, never changes.
   // Ensures SDK can find session transcripts regardless of workingDirectory changes.
   sdkCwd?: string
@@ -1369,6 +1378,7 @@ export class SessionManager implements ISessionManager {
    * subprocess can race the resulting `chat` against the still-pending update.
    */
   private agentRefreshLocks: Map<string, Promise<void>> = new Map()
+  private worktreeLocks: Map<string, Promise<void>> = new Map()
   /** Monotonic clock to ensure strictly increasing message timestamps */
   private lastTimestamp = 0
 
@@ -3295,6 +3305,7 @@ export class SessionManager implements ISessionManager {
       : undefined
     const requestedProjectId = options?.projectId ?? inheritedProjectId
     let resolvedProjectId: string | undefined
+    let resolvedWorktree: SessionWorktreeMetadata | undefined
     if (requestedProjectId) {
       const { loadProjectById } = await import('@craft-agent/shared/projects')
       const project = loadProjectById(workspaceRootPath, requestedProjectId)
@@ -3306,6 +3317,7 @@ export class SessionManager implements ISessionManager {
         }
       } else {
         resolvedProjectId = project.config.id
+        resolvedWorktree = resolveSessionWorktreePolicy(project.config, options)
         if (
           (options?.workingDirectory === undefined || options?.workingDirectory === 'user_default') &&
           project.config.workingDirectory
@@ -3513,6 +3525,7 @@ export class SessionManager implements ISessionManager {
       permissionMode: defaultPermissionMode,
       workingDirectory: resolvedWorkingDir,
       hidden: options?.hidden,
+      worktree: resolvedWorktree,
       sessionStatus: options?.sessionStatus,
       // Automations, spawn_session and task flows hand in labels unvalidated: store them canonical
       labels: this.canonicalLabels(workspaceRootPath, options?.labels),
@@ -3735,8 +3748,9 @@ export class SessionManager implements ISessionManager {
     return this.sessions.get(sessionId)?.workingDirectory
   }
 
-  private async disposeManagedAgentRuntime(managed: ManagedSession, reason: string): Promise<void> {
+  private async disposeManagedAgentRuntime(managed: ManagedSession, reason: string): Promise<boolean> {
     const sessionId = managed.id
+    let disposed = true
     this.recoverPendingSteers(managed)
 
     if (managed.agent) {
@@ -3747,6 +3761,7 @@ export class SessionManager implements ISessionManager {
           managed.agent.dispose()
         }
       } catch (error) {
+        disposed = false
         sessionLog.warn(`Failed to dispose agent for ${sessionId} during ${reason}: ${error instanceof Error ? error.message : error}`)
       }
     }
@@ -3755,6 +3770,7 @@ export class SessionManager implements ISessionManager {
       try {
         await managed.poolServer.stop()
       } catch (error) {
+        disposed = false
         sessionLog.warn(`Failed to stop pool server for ${sessionId} during ${reason}: ${error instanceof Error ? error.message : error}`)
       }
     }
@@ -3763,6 +3779,7 @@ export class SessionManager implements ISessionManager {
       try {
         await managed.mcpPool.disconnectAll()
       } catch (error) {
+        disposed = false
         sessionLog.warn(`Failed to disconnect MCP pool for ${sessionId} during ${reason}: ${error instanceof Error ? error.message : error}`)
       }
     }
@@ -3776,6 +3793,7 @@ export class SessionManager implements ISessionManager {
     managed.backendRuntimeSignature = undefined
     managed.backendRestartSignature = undefined
     unregisterSessionScopedToolCallbacks(sessionId)
+    return disposed
   }
 
   /**
@@ -3951,7 +3969,134 @@ export class SessionManager implements ISessionManager {
    * 3. global defaultLlmConnection
    * 4. fallback: no connection configured
    */
+  /** Serialize setup, restoration and cleanup for one chat. A failed attempt remains retryable. */
+  private async withWorktreeLock<T>(managed: ManagedSession, operation: () => Promise<T>): Promise<T> {
+    const previous = this.worktreeLocks.get(managed.id) ?? Promise.resolve()
+    const result = previous.then(operation)
+    const settled = result.then(() => {}, () => {})
+    this.worktreeLocks.set(managed.id, settled)
+    try {
+      return await result
+    } finally {
+      if (this.worktreeLocks.get(managed.id) === settled) this.worktreeLocks.delete(managed.id)
+    }
+  }
+
+  /** The queue logs I/O failures; confirm ownership reached disk before touching Git. */
+  private async persistWorktreeState(managed: ManagedSession): Promise<void> {
+    this.persistSession(managed)
+    await this.flushSession(managed.id)
+    const header = readSessionHeader(getSessionFilePath(managed.workspace.rootPath, managed.id))
+    if (JSON.stringify(header?.worktree) !== JSON.stringify(managed.worktree)) {
+      throw new Error('Could not persist worktree ownership; check the session storage directory')
+    }
+  }
+
+  /** Called under the worktree lock, before any backend is constructed. */
+  private async prepareSessionWorktree(managed: ManagedSession): Promise<void> {
+    if (managed.isDeleting) throw new DOMException('Session was deleted', 'AbortError')
+    const metadata = managed.worktree
+    if (!metadata) return
+
+    const ownerId = `${managed.workspace.id}/${managed.id}`
+    if (metadata.owned && metadata.owned.ownerId !== ownerId) {
+      throw new Error('This worktree belongs to a different session')
+    }
+    // First-turn user messages are already saved, but no SDK may have started yet.
+    if ((managed.agent || managed.sdkSessionId) && (!metadata.owned || managed.sdkCwd !== metadata.owned.path)) {
+      throw new Error(i18n.t('worktree.session.initialized'))
+    }
+
+    if (!metadata.owned) {
+      metadata.owned = await planOwnedWorktree({
+        repositoryPath: metadata.repositoryPath,
+        ownerId,
+        sessionId: managed.id,
+        baseBranch: metadata.baseBranch,
+      })
+    }
+    // Recheck even after a previous failed persistence attempt, or after a restart.
+    await this.persistWorktreeState(managed)
+    if (managed.isDeleting) throw new DOMException('Session was deleted', 'AbortError')
+
+    const ready = await ensureOwnedWorktree(metadata.owned)
+    metadata.owned = ready
+    const directoryChanged = managed.workingDirectory !== ready.path
+    managed.workingDirectory = ready.path
+    managed.sdkCwd = ready.path
+    await this.persistWorktreeState(managed)
+    if (managed.isDeleting) throw new DOMException('Session was deleted', 'AbortError')
+
+    if (directoryChanged) {
+      invalidateContextFileCache(ready.path)
+      invalidateSkillsCache()
+      this.sendEvent({ type: 'working_directory_changed', sessionId: managed.id, workingDirectory: ready.path }, managed.workspace.id)
+    }
+  }
+
+  /** Optional, conservative cleanup. Git branches and all local changes are retained. */
+  private async cleanupSessionWorktree(managed: ManagedSession): Promise<void> {
+    if (!managed.worktree?.cleanupOnArchive || !managed.worktree.owned) return
+    await this.withWorktreeLock(managed, async () => {
+      const owned = managed.worktree?.owned
+      if (!owned || owned.status === 'removed' || !managed.isArchived || managed.isDeleting || managed.worktreeCleanupBlocked) return
+      const busy = () => managed.isProcessing || managed.messageQueue.length > 0
+        || managed.authRetryInProgress || !!managed.autoRetryTimer || managed.pendingActivationResend !== undefined
+        || this.countRunningBackgroundWork(managed) > 0
+      const inUse = async () => {
+        if (busy()) return true
+        const directories = new Set([...this.sessions.values()]
+          .filter(other => other !== managed)
+          .flatMap(other => [other.workingDirectory, other.sdkCwd, other.branchFromSdkCwd]))
+        const referenced = (await Promise.all([...directories].map(directory =>
+          isSessionDirectoryInWorktree(directory, owned.path)))).some(Boolean)
+        return referenced || busy()
+      }
+      if (await inUse()) return
+
+      // A live SDK or MCP subprocess can hold the checkout open even between turns.
+      if (!await this.disposeManagedAgentRuntime(managed, 'archived worktree cleanup')) {
+        managed.worktreeCleanupBlocked = true
+        return
+      }
+      // Another send/unarchive can have arrived while disposal was awaited.
+      if (!managed.isArchived || managed.isDeleting || await inUse()) return
+      const result = await removeOwnedWorktree(owned)
+      if (result.removed) {
+        managed.worktree!.owned = { ...owned, status: 'removed' }
+        await this.persistWorktreeState(managed)
+      } else {
+        sessionLog.info(`Kept worktree for ${managed.id}: ${result.reason ?? 'cleanup was not safe'}`)
+        const message = i18n.t('worktree.session.kept', { path: owned.path, reason: result.reason })
+        await this.ensureMessagesLoaded(managed)
+        const timestamp = Date.now()
+        managed.messages.push({ id: generateMessageId(), role: 'info', content: message, timestamp })
+        this.persistSession(managed)
+        this.sendEvent({ type: 'info', sessionId: managed.id, message, timestamp }, managed.workspace.id)
+      }
+    }).catch(error => {
+      // Archiving the conversation still succeeds when its checkout must be kept.
+      sessionLog.warn(`Could not clean archived worktree for ${managed.id}:`, error)
+    })
+  }
+
   private async getOrCreateAgent(managed: ManagedSession): Promise<AgentInstance> {
+    if (managed.isDeleting) throw new DOMException('Session was deleted', 'AbortError')
+    if (managed.worktree) {
+      return this.withWorktreeLock(managed, async () => {
+        try {
+          await this.prepareSessionWorktree(managed)
+        } catch (error) {
+          if (error instanceof Error && error.name === 'AbortError') throw error
+          throw new Error(i18n.t('worktree.session.prepareFailed', { reason: error instanceof Error ? error.message : String(error) }))
+        }
+        return this.getOrCreatePreparedAgent(managed)
+      })
+    }
+    return this.getOrCreatePreparedAgent(managed)
+  }
+
+  private async getOrCreatePreparedAgent(managed: ManagedSession): Promise<AgentInstance> {
     // Refresh runtime config in-place when the connection has drifted since
     // the agent was created. May null out `managed.agent` if the in-place
     // refresh fails, in which case the create branch below rebuilds it.
@@ -5446,6 +5591,7 @@ export class SessionManager implements ISessionManager {
       // Notify all windows for this workspace
       this.sendEvent({ type: 'session_archived', sessionId }, managed.workspace.id)
       this.emitUnreadSummaryChanged()
+      await this.cleanupSessionWorktree(managed)
     }
   }
 
@@ -6164,6 +6310,11 @@ export class SessionManager implements ISessionManager {
   updateWorkingDirectory(sessionId: string, path: string): void {
     const managed = this.sessions.get(sessionId)
     if (managed) {
+      if (managed.worktree && (managed.worktree.owned || this.worktreeLocks.has(sessionId))) {
+        if (managed.worktree.owned?.path === path) return
+        this.sendEvent({ type: 'working_directory_error', sessionId, error: i18n.t('worktree.session.folderLocked') }, managed.workspace.id)
+        return
+      }
       const validation = isValidWorkingDirectory(path)
       if (!validation.valid) {
         sessionLog.warn(`Session ${sessionId}: rejected working directory "${path}" — ${validation.reason}`)
@@ -6175,6 +6326,8 @@ export class SessionManager implements ISessionManager {
         return
       }
 
+      // An explicit folder choice before setup opts this chat out of the project default.
+      managed.worktree = undefined
       managed.workingDirectory = path
 
       // Invalidate filesystem caches that depend on working directory
@@ -6444,6 +6597,12 @@ export class SessionManager implements ISessionManager {
       return
     }
 
+    managed.isDeleting = true
+    managed.stopEpoch = (managed.stopEpoch ?? 0) + 1
+    // Let any already-started Git operation finish before deleting its recovery metadata.
+    // Deleting a conversation keeps its Git branch/checkout; archive cleanup is opt-in.
+    if (managed.worktree) await this.withWorktreeLock(managed, async () => {})
+
     // Get workspace slug before deleting
     const workspaceRootPath = managed.workspace.rootPath
 
@@ -6561,7 +6720,7 @@ export class SessionManager implements ISessionManager {
     rpcContext?: { callerClientId?: string },
   ): Promise<void> {
     const managed = this.sessions.get(sessionId)
-    if (!managed) {
+    if (!managed || managed.isDeleting) {
       throw new Error(`Session ${sessionId} not found`)
     }
     this.setLastMessageClientId(sessionId, rpcContext?.callerClientId)
@@ -6891,60 +7050,60 @@ export class SessionManager implements ISessionManager {
     const enabledSlugs = managed.enabledSourceSlugs ?? []
     const hasSources = enabledSlugs.length > 0
 
-    // Load enabled sources up-front so we can refresh tokens BEFORE getOrCreateAgent
-    // runs its internal cold-session build. Otherwise that build sees stale tokens
-    // and emits AUTH_REQUIRED, causing a brief "needs_auth" UI flicker before the
-    // post-build refresh restores state (#710).
-    const sources: LoadedSource[] = hasSources
-      ? getSourcesBySlugs(workspaceRootPath, enabledSlugs)
-      : []
-
-    if (hasSources && managed.tokenRefreshManager) {
-      const refreshResult = await refreshExpiredCredentials(sources, managed.tokenRefreshManager)
-      if (refreshResult.failedSources.length > 0) {
-        sessionLog.warn('[OAuth] Some sources failed token refresh:', refreshResult.failedSources.map(f => f.slug))
-      }
-      if (refreshResult.refreshedCount > 0) {
-        sendSpan.mark('oauth.refreshed')
-      }
-    }
-
-    // Get or create the agent (lazy loading). Its internal cold-session build at
-    // ~L2956 now sees fresh tokens (or correctly-needs_auth failed sources, since
-    // ensureFreshToken mirrors the disk write to source.config in-memory).
-    const agent = await this.getOrCreateAgent(managed)
-    sendSpan.mark('agent.ready')
-
-    // Always set all sources for context (even if none are enabled), including built-ins
-    const allSources = loadAllSources(workspaceRootPath)
-    agent.setAllSources(allSources)
-    sendSpan.mark('sources.loaded')
-
-    // Apply source servers if any are enabled
-    if (hasSources) {
-      const sessionPath = getSessionStoragePath(workspaceRootPath, sessionId)
-      // Single fresh build — tokens already refreshed above.
-      const { mcpServers, apiServers, errors } = await buildServersFromSources(sources, sessionPath, managed.tokenRefreshManager, agent.getSummarizeCallback())
-      if (errors.length > 0) {
-        sessionLog.warn(`Source build errors:`, errors)
-      }
-
-      const mcpCount = Object.keys(mcpServers).length
-      const apiCount = Object.keys(apiServers).length
-      if (mcpCount > 0 || apiCount > 0 || enabledSlugs.length > 0) {
-        const usableSources = sources.filter(isSourceUsable)
-        const intendedSlugs = usableSources.map(s => s.config.slug)
-        await agent.setSourceServers(mcpServers, apiServers, intendedSlugs)
-        sessionLog.info(`Applied ${mcpCount} MCP + ${apiCount} API sources to session ${sessionId} (${allSources.length} total)`)
-      }
-      sendSpan.mark('servers.applied')
-    }
-
-    // Continued from another session: the summary this first turn carries may still be generating
-    // (the agent above was set up meanwhile)
-    if (managed.pendingHandoffSummary) await this.waitForHandoffSummary(managed)
-
     try {
+      // Load enabled sources up-front so we can refresh tokens BEFORE getOrCreateAgent
+      // runs its internal cold-session build. Otherwise that build sees stale tokens
+      // and emits AUTH_REQUIRED, causing a brief "needs_auth" UI flicker before the
+      // post-build refresh restores state (#710).
+      const sources: LoadedSource[] = hasSources
+        ? getSourcesBySlugs(workspaceRootPath, enabledSlugs)
+        : []
+
+      if (hasSources && managed.tokenRefreshManager) {
+        const refreshResult = await refreshExpiredCredentials(sources, managed.tokenRefreshManager)
+        if (refreshResult.failedSources.length > 0) {
+          sessionLog.warn('[OAuth] Some sources failed token refresh:', refreshResult.failedSources.map(f => f.slug))
+        }
+        if (refreshResult.refreshedCount > 0) {
+          sendSpan.mark('oauth.refreshed')
+        }
+      }
+
+      // Get or create the agent (lazy loading). Its internal cold-session build at
+      // ~L2956 now sees fresh tokens (or correctly-needs_auth failed sources, since
+      // ensureFreshToken mirrors the disk write to source.config in-memory).
+      const agent = await this.getOrCreateAgent(managed)
+      sendSpan.mark('agent.ready')
+
+      // Always set all sources for context (even if none are enabled), including built-ins
+      const allSources = loadAllSources(workspaceRootPath)
+      agent.setAllSources(allSources)
+      sendSpan.mark('sources.loaded')
+
+      // Apply source servers if any are enabled
+      if (hasSources) {
+        const sessionPath = getSessionStoragePath(workspaceRootPath, sessionId)
+        // Single fresh build — tokens already refreshed above.
+        const { mcpServers, apiServers, errors } = await buildServersFromSources(sources, sessionPath, managed.tokenRefreshManager, agent.getSummarizeCallback())
+        if (errors.length > 0) {
+          sessionLog.warn(`Source build errors:`, errors)
+        }
+
+        const mcpCount = Object.keys(mcpServers).length
+        const apiCount = Object.keys(apiServers).length
+        if (mcpCount > 0 || apiCount > 0 || enabledSlugs.length > 0) {
+          const usableSources = sources.filter(isSourceUsable)
+          const intendedSlugs = usableSources.map(s => s.config.slug)
+          await agent.setSourceServers(mcpServers, apiServers, intendedSlugs)
+          sessionLog.info(`Applied ${mcpCount} MCP + ${apiCount} API sources to session ${sessionId} (${allSources.length} total)`)
+        }
+        sendSpan.mark('servers.applied')
+      }
+
+      // Continued from another session: the summary this first turn carries may still be generating
+      // (the agent above was set up meanwhile)
+      if (managed.pendingHandoffSummary) await this.waitForHandoffSummary(managed)
+
       sessionLog.info('Starting chat for session:', sessionId)
       sessionLog.info('Workspace:', JSON.stringify(managed.workspace, null, 2))
       sessionLog.info('Message:', message)
@@ -7347,8 +7506,7 @@ export class SessionManager implements ISessionManager {
 
         // 2. Destroy the agent — the new agent's postInit() will refresh auth
         sessionLog.info(`[auth-retry] Destroying agent for session ${sessionId}`)
-        this.recoverPendingSteers(managed)
-        managed.agent = null
+        await this.disposeManagedAgentRuntime(managed, 'auth retry')
 
         // 3. Retry the message
         const retryMessage = managed.lastSentMessage
@@ -7521,7 +7679,7 @@ export class SessionManager implements ISessionManager {
     reason: 'complete' | 'interrupted' | 'error' | 'timeout'
   ): Promise<void> {
     const managed = this.sessions.get(sessionId)
-    if (!managed) return
+    if (!managed || managed.isDeleting) return
 
     sessionLog.info(`Processing stopped for session ${sessionId}: ${reason}`)
 
@@ -7662,6 +7820,7 @@ export class SessionManager implements ISessionManager {
 
     // 6. Always persist
     this.persistSession(managed)
+    if (managed.isArchived) void this.cleanupSessionWorktree(managed)
   }
 
   /**

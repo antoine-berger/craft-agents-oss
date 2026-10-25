@@ -2,6 +2,7 @@ import { RPC_CHANNELS } from '@craft-agent/shared/protocol'
 import { getWorkspaceByNameOrId } from '@craft-agent/shared/config'
 import { pushTyped, type RpcServer } from '@craft-agent/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
+import { validateProjectWorktreeSettings } from '../../services/coding-repos/project-settings'
 
 export const HANDLED_CHANNELS = [
   RPC_CHANNELS.projects.GET,
@@ -48,10 +49,12 @@ export function registerProjectsHandlers(server: RpcServer, deps: HandlerDeps): 
     const workspace = getWorkspaceByNameOrId(workspaceId)
     if (!workspace) throw new Error(`Workspace not found: ${workspaceId}`)
     const { createProject } = await import('@craft-agent/shared/projects')
+    await validateProjectWorktreeSettings(input)
     const project = createProject(workspace.rootPath, {
       name: input.name?.trim() || 'New Project',
       description: input.description,
       workingDirectory: input.workingDirectory,
+      worktreeSettings: input.worktreeSettings,
       details: input.details,
       colorTheme: input.colorTheme,
     })
@@ -69,7 +72,10 @@ export function registerProjectsHandlers(server: RpcServer, deps: HandlerDeps): 
   ) => {
     const workspace = getWorkspaceByNameOrId(workspaceId)
     if (!workspace) throw new Error(`Workspace not found: ${workspaceId}`)
-    const { updateProject } = await import('@craft-agent/shared/projects')
+    const { loadProjectConfig, updateProject } = await import('@craft-agent/shared/projects')
+    const existing = loadProjectConfig(workspace.rootPath, projectSlug)
+    if (!existing) throw new Error(`Project not found: ${projectSlug}`)
+    await validateProjectWorktreeSettings({ ...existing, ...patch })
     const updated = updateProject(workspace.rootPath, projectSlug, patch)
     await broadcastChanged(workspaceId, workspace.rootPath)
     return updated

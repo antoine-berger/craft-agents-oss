@@ -19,6 +19,7 @@ import type { PermissionMode } from '../agent/mode-types'
 import type { ThinkingLevel } from '../agent/thinking-levels'
 import type { BoundPr, PrMonitorState } from './pr-watch'
 import type { CustomEndpointConfig } from '../config/llm-connections'
+import type { SessionWorktreeMetadata } from '../sessions/types'
 import type {
   AuthRequest as SharedAuthRequest,
   CredentialInputMode as SharedCredentialInputMode,
@@ -70,6 +71,7 @@ export interface Session {
   hasUnread?: boolean
   enabledSourceSlugs?: string[]
   workingDirectory?: string
+  worktree?: SessionWorktreeMetadata
   sessionFolderPath?: string
   sharedUrl?: string
   sharedId?: string
@@ -145,6 +147,8 @@ export interface CreateSessionOptions {
    * - Absolute path string: Use this specific path
    */
   workingDirectory?: string | 'user_default' | 'none'
+  /** Follow the project's automatic worktree policy (default), or explicitly opt out. */
+  worktree?: 'project-default' | 'none'
   model?: string
   llmConnection?: string
   systemPromptPreset?: 'default' | 'mini' | string

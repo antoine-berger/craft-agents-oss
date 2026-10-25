@@ -1043,6 +1043,17 @@
   "projectInfo.workingDirectory": "Munkakönyvtár",
   "projectInfo.workingDirectoryPicker": "Kiválasztás…",
   "projectInfo.workingDirectoryPlaceholder": "/abszolút/útvonal/a/mappához",
+  "projectInfo.worktree.baseBranch": "Kiinduló ág",
+  "projectInfo.worktree.baseBranchPlaceholder": "A tároló alapértelmezett ága",
+  "projectInfo.worktree.cleanup": "Tiszta worktree-k törlése archiváláskor",
+  "projectInfo.worktree.cleanupHint": "Az ágak és a helyi módosításokat tartalmazó worktree-k megmaradnak. A törölt worktree-k a csevegés folytatásakor helyreállnak.",
+  "projectInfo.worktree.directoryRequired": "Válassz tárolómappát az automatikus worktree-k engedélyezése előtt.",
+  "projectInfo.worktree.enabled": "Új worktree minden csevegéshez",
+  "projectInfo.worktree.enabledHint": "Minden új csevegés saját ágat és mappát kap a Workspace szerverén. Több projekt is használhatja ugyanazt a tárolót.",
+  "projectInfo.worktree.invalidBaseBranch": "Válassz a tárolóban már létező kiinduló ágat (például main vagy origin/main).",
+  "projectInfo.worktree.invalidRepository": "Válassz Git-tárolót a Workspace szerverén.",
+  "projectInfo.worktree.invalidSettings": "A worktree-beállításokhoz logikai kapcsolók és opcionálisan egy ágnév szükséges.",
+  "projectInfo.worktree.repositoryHasNoCommits": "A tárolónak nincs használható kiinduló commitja. Hozz létre egy commitot az automatikus worktree-k engedélyezése előtt.",
   "projectsList.addProject": "Projekt hozzáadása",
   "projectsList.createButton": "Létrehozás",
   "projectsList.createDialogNamePlaceholder": "Projekt neve",
@@ -2126,5 +2137,9 @@
   "workspace.selectWorkspaceDesc": "Válassz egy munkaterületet ezen a szerveren, vagy hozz létre újat.",
   "workspace.selectWorkspacePlaceholder": "Válassz munkaterületet...",
   "workspace.serverAuthToken": "Szerver hitelesítési token",
-  "workspace.underDefaultFolder": "a .craft-agent mappában"
+  "workspace.underDefaultFolder": "a .craft-agent mappában",
+  "worktree.session.folderLocked": "Ez a csevegés saját worktree-t használ. Másik mappa használatához indíts új csevegést.",
+  "worktree.session.initialized": "A csevegés futtatókörnyezete már elindult a saját worktree-jén kívül. A tároló elkülönítéséhez hozz létre új csevegést.",
+  "worktree.session.kept": "A worktree megőrizve itt: {{path}}. Ok: {{reason}}",
+  "worktree.session.prepareFailed": "Nem sikerült előkészíteni a csevegés worktree-jét: {{reason}}"
 }
