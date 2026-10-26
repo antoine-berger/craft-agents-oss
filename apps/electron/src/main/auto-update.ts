@@ -155,10 +155,10 @@ function broadcastDownloadProgress(progress: number): void {
 // ─── Configure electron-updater ───────────────────────────────────────────────
 
 // Auto-download updates in the background after detection
-autoUpdater.autoDownload = true
+autoUpdater.autoDownload = false
 
 // Install on app quit (if update is downloaded but user hasn't clicked "Restart")
-autoUpdater.autoInstallOnAppQuit = true
+autoUpdater.autoInstallOnAppQuit = false
 
 // Use the logger for electron-updater internal logging
 autoUpdater.logger = {
@@ -357,6 +357,11 @@ function checkForExistingDownload(): { exists: boolean; version?: string } {
  * @param options.autoDownload - If false, only checks without downloading (for manual "Check Now")
  */
 export async function checkForUpdates(options: CheckOptions = {}): Promise<UpdateInfo> {
+  // Fork builds must never query or install official Craft releases.
+  // Keep the RPC API stable for existing settings/menus.
+  void options
+  return getUpdateInfo()
+
   const { autoDownload = true } = options
 
   // Temporarily override autoDownload for this check if needed
@@ -412,6 +417,7 @@ export async function checkForUpdates(options: CheckOptions = {}): Promise<Updat
  * Then relaunches the app automatically.
  */
 export async function installUpdate(): Promise<void> {
+  throw new Error('Automatic updates are disabled for this fork')
   if (updateInfo.downloadState !== 'ready') {
     throw new Error('No update ready to install')
   }
@@ -491,6 +497,7 @@ export interface UpdateOnLaunchResult {
  * - Auto-downloads if update available
  */
 export async function checkForUpdatesOnLaunch(): Promise<UpdateOnLaunchResult> {
+  return { action: 'skipped', reason: 'fork-updates-disabled' }
   autoUpdateLog.info('Checking for updates on launch...')
 
   const info = await checkForUpdates({ autoDownload: true })
