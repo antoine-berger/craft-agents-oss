@@ -2,6 +2,9 @@
 // This ensures tools like Homebrew, nvm, etc. are available to the agent
 import { loadShellEnv } from './shell-env'
 loadShellEnv()
+// Finder/Dock launches have no shell exports; restore the persisted remote connection.
+import { applyPersistentRemoteClientConfig } from './remote-client-config'
+applyPersistentRemoteClientConfig()
 
 import { app, BrowserWindow, dialog, ipcMain, nativeImage, nativeTheme, shell } from 'electron'
 import { createHash, randomUUID } from 'crypto'
