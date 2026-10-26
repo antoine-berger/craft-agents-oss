@@ -74,7 +74,7 @@ import {
 } from './model-picker-helpers'
 import { useModelVisionToggle } from './useModelVisionToggle'
 import { ComposerSourcesChip } from './ComposerSourcesChip'
-import { ComposerWorktreeChip } from './ComposerWorktreeChip'
+import { ComposerRepositorySelector } from './ComposerRepositorySelector'
 import { ComposerModelMenu } from './ComposerModelMenu'
 import { ComposerModeChip } from './ComposerModeChip'
 import { ContextUsageChip } from './ContextUsageChip'
@@ -199,6 +199,7 @@ export interface FreeFormInputProps {
   codingMode?: boolean
   requireWorktree?: boolean
   worktreeConfigured?: boolean
+  worktreeRepository?: string
   /** Toggle coding mode (only before the first message) */
   onCodingModeChange?: (enabled: boolean) => void
   /** Continue a started session in a new one with coding mode set to `enabled` */
@@ -294,6 +295,7 @@ export function FreeFormInput({
   isEmptySession = false,
   requireWorktree = false,
   worktreeConfigured = false,
+  worktreeRepository,
   contextStatus,
   followUpItems = [],
   onFollowUpClick,
@@ -1793,7 +1795,8 @@ export function FreeFormInput({
 
           {/* Working directory chip */}
           {requireWorktree && isEmptySession ? (
-            <ComposerWorktreeChip key={sessionId} workspaceId={workspaceId} sessionId={sessionId}
+            <ComposerRepositorySelector key={sessionId} workspaceId={workspaceId} sessionId={sessionId}
+              repositoryPath={worktreeConfigured ? worktreeRepository : undefined}
               configured={!needsRepository} disabled={disabled} onReady={path => {
                 setSelectedWorktree(path)
                 onWorkingDirectoryChange?.(path)

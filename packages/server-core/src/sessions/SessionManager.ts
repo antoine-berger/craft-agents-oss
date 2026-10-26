@@ -128,6 +128,7 @@ import { buildBackendRuntimeSignature, buildRestartRequiredSignature, filterAtta
 import { validateArchiveTarget } from './archive-guards'
 import { resolveSessionWorktreePolicy, defaultSessionWorktreePolicy, isSessionDirectoryInWorktree } from './session-worktree'
 import { planOwnedWorktree, ensureOwnedWorktree, removeOwnedWorktree, ownedWorktreeWorkingDirectory } from '../services/coding-repos/owned-worktree'
+import { commonGitDir } from '../services/coding-repos/discover'
 import { addTurnUsage, branchStartTotals, type BranchParent } from './turn-usage'
 
 // Import from server-core domain utilities
@@ -4073,6 +4074,9 @@ export class SessionManager implements ISessionManager {
     return this.withWorktreeLock(managed, async () => {
       if (hasConversationStarted(managed) || managed.isProcessing || managed.hidden || managed.parentSessionId) {
         throw new Error('Choose the repository before starting the conversation')
+      }
+      if (managed.worktree?.owned && await commonGitDir(repositoryPath) !== managed.worktree.owned.gitDir) {
+        throw new Error(i18n.t('worktree.session.folderLocked'))
       }
       if (!managed.worktree?.owned) managed.worktree = { repositoryPath, cleanupOnArchive: false }
       await this.prepareSessionWorktree(managed)

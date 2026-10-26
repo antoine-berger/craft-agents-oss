@@ -143,6 +143,7 @@ describe('SessionManager worktree lifecycle', () => {
     expect(readFileSync(join(repository, 'code.txt'), 'utf8')).toBe('main checkout\n')
     expect(restoreChat(a.id).worktree?.owned?.path).toBe(first.path)
     expect(await manager.prepareNewSessionWorktree(workspace.id, a.id, repository)).toEqual(first)
+    await expect(manager.prepareNewSessionWorktree(workspace.id, a.id, root)).rejects.toThrow('Start a new chat')
     await expect(manager.prepareNewSessionWorktree('another-workspace', b.id, repository)).rejects.toThrow('Session not found')
   })
 

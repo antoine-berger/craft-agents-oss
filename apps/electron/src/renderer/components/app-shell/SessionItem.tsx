@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next"
-import { AlertCircle, CodeXml, Flag, Hand } from "lucide-react"
+import { AlertCircle, Flag, Hand } from "lucide-react"
 import { useActionLabel } from "@/actions"
 import { cn } from "@/lib/utils"
 import { rendererPerf } from "@/lib/perf"
@@ -236,11 +236,8 @@ export function SessionItem({
       subtitle={subtitle}
       subtitleTrailing={hasLabels && !needsAttention ? <SessionBadges item={item} /> : undefined}
       titleSuffix={
-        (projectName || hasMessagingBinding || item.codingMode) ? (
+        (projectName || hasMessagingBinding) ? (
           <div className="flex items-center gap-1">
-            {item.codingMode && (
-              <CodeXml className="size-3.5 shrink-0 text-tertiary" aria-label={t("chat.codingMode.label")} />
-            )}
             {projectName && (
               // Revealed on hover/focus only, and out of the layout otherwise: an invisible (opacity-0)
               // name still reserved its width and cut the title short for nothing. Solved tertiary

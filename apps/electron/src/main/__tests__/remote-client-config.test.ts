@@ -2,9 +2,26 @@ import { afterEach, expect, test } from 'bun:test'
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, chmodSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { applyPersistentRemoteClientConfig, readPersistentRemoteClientConfig } from '../remote-client-config'
+import { applyPersistentRemoteClientConfig, readPersistentRemoteClientConfig, remoteClientWindowOptions } from '../remote-client-config'
 
 const roots: string[] = []
+
+test('restores a hybrid window using the server workspace while preserving the selected chat', () => {
+  const restored = remoteClientWindowOptions('remote-workspace', {
+    url: 'file:///app/index.html?workspaceId=local-workspace&ws=cloud&route=allSessions%2Fsession%2Fchat-1', focused: true,
+  })
+  const url = new URL(restored.restoreUrl!)
+  expect(restored.workspaceId).toBe('remote-workspace')
+  expect(url.searchParams.get('workspaceId')).toBe('remote-workspace')
+  expect(url.searchParams.get('ws')).toBe('remote-workspace')
+  expect(url.searchParams.get('route')).toBe('allSessions/session/chat-1')
+  expect(restored.focused).toBe(true)
+})
+
+test('a missing or invalid saved URL opens the selected server workspace', () => {
+  expect(remoteClientWindowOptions('remote-workspace').restoreUrl).toBeUndefined()
+  expect(remoteClientWindowOptions('remote-workspace', { url: 'invalid' }).workspaceId).toBe('remote-workspace')
+})
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }) })
 function fixture(data: unknown, mode = 0o600) {
   const root = mkdtempSync(join(tmpdir(), 'craft-remote-config-'))

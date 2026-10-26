@@ -85,3 +85,19 @@ export function applyPersistentRemoteClientConfig(
   env.CRAFT_SERVER_TOKEN = config.token
   if (config.workspaceId) env.CRAFT_WORKSPACE_ID = config.workspaceId
 }
+
+/** Restore hybrid-mode windows with server workspace ids in thin-client mode. */
+export function remoteClientWindowOptions(workspaceId: string, saved?: { url?: string; focused?: boolean }): {
+  workspaceId: string; focused?: boolean; restoreUrl?: string
+} {
+  let restoreUrl: string | undefined
+  if (saved?.url) {
+    try {
+      const url = new URL(saved.url)
+      url.searchParams.set('workspaceId', workspaceId)
+      url.searchParams.set('ws', workspaceId)
+      restoreUrl = url.toString()
+    } catch { /* An invalid saved URL falls back to the remote workspace's default route. */ }
+  }
+  return { workspaceId, focused: saved?.focused, restoreUrl }
+}
