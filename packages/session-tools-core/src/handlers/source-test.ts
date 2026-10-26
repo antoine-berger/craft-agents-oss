@@ -19,6 +19,7 @@ import {
   getSourceConfigPath,
   getSourceGuidePath,
   getSourcePath,
+  getSourceManagementError,
 } from '../source-helpers.ts';
 import {
   apiAuthSpecFromConfig,
@@ -101,6 +102,8 @@ export async function handleSourceTest(
   if (!source) {
     return errorResponse(`Failed to load source config for '${sourceSlug}'.`);
   }
+  const managementError = getSourceManagementError(ctx, source);
+  if (managementError) return managementError;
 
   // Validate loaded config with basic validator
   const configValidation = validateSourceConfigBasic(source);

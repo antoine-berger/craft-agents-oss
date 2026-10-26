@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'bun:test'
 import type { LlmConnection } from '../storage.ts'
+import type { CredentialManager } from '../../credentials/manager.ts'
 import {
   clearClaudeBedrockRoutingEnvVars,
   resolveAuthEnvVars,
@@ -7,10 +8,17 @@ import {
 } from '../llm-connections.ts'
 
 const ENV_KEYS = [
+  'ANTHROPIC_API_KEY',
+  'ANTHROPIC_BASE_URL',
+  'CLAUDE_CODE_OAUTH_TOKEN',
+  'CLAUDE_CODE_OAUTH_SCOPES',
   'CLAUDE_CODE_USE_BEDROCK',
   'AWS_BEARER_TOKEN_BEDROCK',
   'ANTHROPIC_BEDROCK_BASE_URL',
   'AWS_REGION',
+  'AWS_ACCESS_KEY_ID',
+  'AWS_SECRET_ACCESS_KEY',
+  'AWS_SESSION_TOKEN',
 ] as const
 
 const originalEnv = new Map<string, string | undefined>(
@@ -30,6 +38,85 @@ function restoreEnv(): void {
 
 afterEach(() => {
   restoreEnv()
+})
+
+describe('Claude OAuth account scopes in auth env', () => {
+  const manager = {} as CredentialManager
+  const connection = (slug: string): LlmConnection => ({
+    slug, name: slug, providerType: 'anthropic', authType: 'oauth', createdAt: 0,
+  })
+
+  it('forwards the token and actual grant returned for the selected connection', async () => {
+    const selectedSlugs: string[] = []
+    const result = await resolveAuthEnvVars(connection('selected'), 'selected', manager, async slug => {
+      selectedSlugs.push(slug)
+      return { accessToken: 'selected-access', scopes: ['user:profile', 'user:inference', 'user:mcp_servers'] }
+    })
+
+    expect(selectedSlugs).toEqual(['selected'])
+    expect(result).toEqual({
+      success: true,
+      envVars: {
+        CLAUDE_CODE_OAUTH_TOKEN: 'selected-access',
+        CLAUDE_CODE_OAUTH_SCOPES: 'user:profile user:inference user:mcp_servers',
+      },
+    })
+  })
+
+  it.each([{ scopes: undefined }, { scopes: [] as string[] }])(
+    'uses inference-only for an unknown or empty grant despite global connector scopes (%j)', async ({ scopes }) => {
+      process.env.CLAUDE_CODE_OAUTH_SCOPES = 'user:inference user:mcp_servers'
+
+      const result = await resolveAuthEnvVars(connection('legacy'), 'legacy', manager, async () => ({
+        accessToken: 'legacy-access', scopes,
+      }))
+
+      expect(result.success).toBe(true)
+      expect(result.envVars.CLAUDE_CODE_OAUTH_SCOPES).toBe('user:inference')
+    },
+  )
+
+  it('keeps distinct account grants separate when resolved together', async () => {
+    const grants = {
+      a: { accessToken: 'a-access', scopes: ['user:inference', 'user:mcp_servers'] },
+      b: { accessToken: 'b-access', scopes: ['user:inference'] },
+    }
+    const resolve = async (slug: string) => grants[slug as keyof typeof grants]
+    const [a, b] = await Promise.all([
+      resolveAuthEnvVars(connection('a'), 'a', manager, resolve),
+      resolveAuthEnvVars(connection('b'), 'b', manager, resolve),
+    ])
+
+    expect(a.envVars).toEqual({
+      CLAUDE_CODE_OAUTH_TOKEN: 'a-access', CLAUDE_CODE_OAUTH_SCOPES: 'user:inference user:mcp_servers',
+    })
+    expect(b.envVars).toEqual({
+      CLAUDE_CODE_OAUTH_TOKEN: 'b-access', CLAUDE_CODE_OAUTH_SCOPES: 'user:inference',
+    })
+  })
+
+  it('does not recover a failed account from globally available token or scopes', async () => {
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = 'different-account-access'
+    process.env.CLAUDE_CODE_OAUTH_SCOPES = 'user:inference user:mcp_servers'
+
+    const result = await resolveAuthEnvVars(connection('missing'), 'missing', manager, async () => ({
+      accessToken: null,
+    }))
+
+    expect(result.success).toBe(false)
+    expect(result.envVars.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined()
+    expect(result.envVars.CLAUDE_CODE_OAUTH_SCOPES).toBeUndefined()
+  })
+
+  it('resets scope metadata together with the token before switching connection auth', () => {
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = 'previous-account-access'
+    process.env.CLAUDE_CODE_OAUTH_SCOPES = 'user:inference user:mcp_servers'
+
+    resetManagedAnthropicAuthEnvVars()
+
+    expect(originalEnv.get('CLAUDE_CODE_OAUTH_TOKEN')).toBe(process.env.CLAUDE_CODE_OAUTH_TOKEN)
+    expect(originalEnv.get('CLAUDE_CODE_OAUTH_SCOPES')).toBe(process.env.CLAUDE_CODE_OAUTH_SCOPES)
+  })
 })
 
 function createBedrockConnection(

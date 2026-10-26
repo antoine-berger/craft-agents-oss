@@ -29,6 +29,16 @@ export interface KanbanColumnDef {
   color?: string;
 }
 
+/** Repository defaults for new chats in this project. */
+export interface ProjectWorktreeSettings {
+  /** Create a separate branch and worktree for each new chat. Defaults to false. */
+  enabled: boolean;
+  /** Branch to start from; omitted uses the repository's default branch. */
+  baseBranch?: string;
+  /** Remove clean checkouts on archive, keeping their branches. Defaults to false. */
+  cleanupOnArchive?: boolean;
+}
+
 /**
  * Main project configuration (stored in config.json)
  */
@@ -40,6 +50,8 @@ export interface ProjectConfig {
   description?: string;
   /** Absolute path bound to this project; new sessions inherit it when not overridden */
   workingDirectory?: string;
+  /** Optional worktree policy; workingDirectory is the repository on the workspace server. */
+  worktreeSettings?: ProjectWorktreeSettings;
   /** Free-form text injected into the system prompt as project context */
   details?: string;
   /** Optional color theme ID for project-branded UI */
@@ -73,6 +85,7 @@ export interface CreateProjectInput {
   name: string;
   description?: string;
   workingDirectory?: string;
+  worktreeSettings?: ProjectWorktreeSettings;
   details?: string;
   colorTheme?: string;
   color?: string;

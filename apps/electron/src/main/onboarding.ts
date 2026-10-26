@@ -130,6 +130,7 @@ export function registerOnboardingHandlers(server: RpcServer, deps: HandlerDeps)
         accessToken: tokens.accessToken,
         refreshToken: tokens.refreshToken,
         expiresAt: tokens.expiresAt,
+        scopes: tokens.scopes,
       })
 
       // Also save to legacy key for validation compatibility
@@ -137,6 +138,7 @@ export function registerOnboardingHandlers(server: RpcServer, deps: HandlerDeps)
         accessToken: tokens.accessToken,
         refreshToken: tokens.refreshToken,
         expiresAt: tokens.expiresAt,
+        scopes: tokens.scopes,
         source: 'native',
       })
 

@@ -389,6 +389,7 @@ const McpSourceConfigSchema = z.object({
   url: z.string().url().optional(),
   authType: z.enum(['oauth', 'bearer', 'none']).optional(),
   clientId: z.string().optional(),
+  oauthRelay: z.boolean().optional(),
   // Stdio fields
   command: z.string().optional(),
   args: z.array(z.string()).optional(),

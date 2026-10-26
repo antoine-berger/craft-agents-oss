@@ -7,9 +7,11 @@ import * as React from 'react'
 import type {
   PrCheck,
   PrDetails,
+  PrEntry,
   PrSummary,
   PrWatchState,
 } from '@/components/app-shell/chat-header/pr-watch/pr-watch-state'
+import type { PrAutoMergeChange, PrNavEntry, PrWatch } from '@/hooks/usePrWatch'
 
 const MINUTE = 60_000
 const now = Date.now()
@@ -43,10 +45,12 @@ const failingChecks: PrCheck[] = [
 ]
 
 function summary(overrides: Partial<PrSummary> = {}): PrSummary {
+  // The link follows the number, so each sample PR copies and opens its own URL
+  const number = overrides.number ?? 481
   return {
-    number: 481,
+    number,
     title: 'Coding mode: PR watcher in the chat header',
-    url: `${REPO}/pull/481`,
+    url: `${REPO}/pull/${number}`,
     state: 'open',
     headRef: 'feat/coding-mode',
     baseRef: 'main',
@@ -98,6 +102,13 @@ export type PrScenario =
   | 'everything-wrong'
   | 'details-loading'
   | 'long-title'
+  | 'carousel'
+  | 'carousel-many'
+  | 'carousel-long-numbers'
+  | 'auto-fix-on'
+  | 'auto-fix-watching'
+  | 'auto-merge-blocked'
+  | 'auto-merge-refused'
   | 'loading'
   | 'none'
   | 'no-token'
@@ -180,6 +191,39 @@ export const PR_SCENARIOS: Record<PrScenario, PrWatchState> = {
     }),
   },
   'details-loading': { kind: 'pr', summary: summary({ checks: 'pending' }) },
+  // Auto-fix on (see AUTO_FIX_ON): with open comments the Fix button works and its wrench turns;
+  // with nothing to fix the turning wrench alone says it's watching.
+  'auto-fix-on': {
+    kind: 'pr',
+    summary: summary({ reviewDecision: 'review_required', unresolvedThreads: 2 }),
+    details: details({ reviewers: [{ login: 'octocat', state: 'commented' }] }),
+  },
+  'auto-fix-watching': {
+    kind: 'pr',
+    summary: summary({ reviewDecision: 'approved', mergeState: 'clean' }),
+    details: details({ reviewers: [{ login: 'octocat', state: 'approved' }] }),
+  },
+  // GitHub won't take auto-merge here: the switch is off and says why
+  'auto-merge-blocked': {
+    kind: 'pr',
+    summary: summary({ reviewDecision: 'approved', mergeState: 'clean', autoMergeBlocked: 'repo-disabled' }),
+    details: details({ reviewers: [{ login: 'octocat', state: 'approved' }] }),
+  },
+  // Checks still running, so the switch is on offer, but GitHub refuses (see AUTO_MERGE_REFUSAL)
+  'auto-merge-refused': {
+    kind: 'pr',
+    summary: summary({ checks: 'pending', mergeState: 'blocked' }),
+    details: details({ checks: runningChecks }),
+  },
+  // The carousel scenario's first (branch) PR; the other two come from PR_MULTI below.
+  carousel: {
+    kind: 'pr',
+    summary: summary({ checks: 'failure', mergeState: 'unstable' }),
+    details: details({ checks: failingChecks }),
+  },
+  // The many-PR scenarios' first (branch) PRs; the rest come from PR_MULTI below.
+  'carousel-many': { kind: 'pr', summary: summary({ number: 510 }), details: details() },
+  'carousel-long-numbers': { kind: 'pr', summary: summary({ number: 48213 }), details: details() },
   'long-title': {
     kind: 'pr',
     summary: summary({
@@ -211,6 +255,13 @@ export const PR_SCENARIO_OPTIONS: Array<{ label: string; value: PrScenario }> = 
   { label: 'Conflicts + review + failing CI', value: 'everything-wrong' },
   { label: 'Card details loading', value: 'details-loading' },
   { label: 'Long title + branch', value: 'long-title' },
+  { label: 'Carousel · 3 PRs (branch + 2 bound)', value: 'carousel' },
+  { label: 'Carousel · 7 PRs (tabs overflow, hidden ✗)', value: 'carousel-many' },
+  { label: 'Carousel · 5 PRs, 5-digit numbers', value: 'carousel-long-numbers' },
+  { label: 'Auto-fix on · comments to fix', value: 'auto-fix-on' },
+  { label: 'Auto-fix on · watching (nothing to fix)', value: 'auto-fix-watching' },
+  { label: 'Auto-merge off for the repository', value: 'auto-merge-blocked' },
+  { label: 'Auto-merge refused by GitHub (click it)', value: 'auto-merge-refused' },
   { label: 'First lookup running (hidden)', value: 'loading' },
   { label: 'No PR for the branch (hidden)', value: 'none' },
   { label: 'Not a git repo (hidden)', value: 'not-git' },
@@ -218,16 +269,87 @@ export const PR_SCENARIO_OPTIONS: Array<{ label: string; value: PrScenario }> = 
 ]
 
 /**
- * The playground's stand-in for the future `usePrWatch` hook: the scenario's state, and a Refresh
- * that shows `refreshing` (and drops the details, like a real refetch) for a moment.
+ * What GitHub answers the 'auto-merge-refused' scenario's switch with: its recorded refusal, as when the
+ * repository's setting was turned off after the last poll (the card passes GitHub's message through).
  */
-export function useMockPrWatch(scenario: PrScenario): { state: PrWatchState; refresh: () => void; onCardOpenChange: (open: boolean) => void } {
-  const base = PR_SCENARIOS[scenario]
+const AUTO_MERGE_REFUSAL = 'Auto merge is not allowed for this repository'
+
+/** Scenarios that start with auto-fix on (the card's Fix toggle). */
+const AUTO_FIX_ON: ReadonlySet<PrScenario> = new Set(['auto-fix-on', 'auto-fix-watching'])
+
+interface MockEntry {
+  origin: PrEntry['origin']
+  state: PrWatchState
+}
+
+/** Scenarios that show more than one PR (the carousel): a branch PR plus bound PRs. */
+const PR_MULTI: Partial<Record<PrScenario, MockEntry[]>> = {
+  carousel: [
+    { origin: 'branch', state: { kind: 'pr', summary: summary({ checks: 'failure', mergeState: 'unstable' }), details: details({ checks: failingChecks }) } },
+    {
+      origin: 'bound',
+      state: {
+        kind: 'pr',
+        summary: summary({ number: 502, title: 'Bump dependency X to 2.0', headRef: 'deps/x-2', reviewDecision: 'approved', mergeState: 'clean', autoMerge: { enabled: true, method: 'squash' } }),
+        details: details({ reviewers: [{ login: 'octocat', state: 'approved' }] }),
+      },
+    },
+    {
+      origin: 'bound',
+      state: {
+        kind: 'pr',
+        summary: summary({ number: 468, title: 'Docs: coding mode guide', headRef: 'docs/coding', unresolvedThreads: 2 }),
+        details: details(),
+      },
+    },
+  ],
+  // More PRs than the card's tabs fit: three tabs, then "+4" carrying the hidden failing PR's ✗
+  'carousel-many': [
+    { origin: 'branch', state: PR_SCENARIOS['carousel-many'] },
+    bound(502, 'Bump dependency X to 2.0', { reviewDecision: 'approved', mergeState: 'clean' }),
+    bound(468, 'Docs: coding mode guide', { state: 'draft', mergeState: 'draft' }),
+    bound(491, 'chore(deps): bump Claude Agent SDK'),
+    bound(493, 'feat(webui): session list filters', { checks: 'failure', mergeState: 'unstable' }),
+    bound(494, 'docs: worktree picker guide', { state: 'draft', mergeState: 'draft' }),
+    bound(495, 'fix(pi): retry on 529', { checks: 'pending', mergeState: 'unknown' }),
+  ],
+  // Long numbers: fewer tabs fit; one hidden PR has review feedback, one is merged
+  'carousel-long-numbers': [
+    { origin: 'branch', state: PR_SCENARIOS['carousel-long-numbers'] },
+    bound(48215, 'Upgrade the session store schema'),
+    bound(48220, 'Experimental: streaming diffs', { state: 'draft', mergeState: 'draft' }),
+    bound(48231, 'Fix flaky upload test', { unresolvedThreads: 2 }),
+    bound(48240, 'Release 4.2', { state: 'merged' }),
+  ],
+}
+
+/** A pinned PR for the many-PR scenarios. */
+function bound(number: number, title: string, overrides: Partial<PrSummary> = {}): MockEntry {
+  return { origin: 'bound', state: { kind: 'pr', summary: summary({ number, title, headRef: `pr/${number}`, ...overrides }), details: details() } }
+}
+
+/**
+ * The playground's stand-in for the `usePrWatch` hook: the active entry's state, a Refresh that shows
+ * `refreshing` for a moment, (for multi-PR scenarios) working tabs, and an auto-merge switch that
+ * answers like GitHub after a moment (refused in 'auto-merge-refused'). Unpin is a no-op here.
+ */
+export function useMockPrWatch(scenario: PrScenario): PrWatch {
+  const entries = React.useMemo<MockEntry[]>(
+    () => PR_MULTI[scenario] ?? [{ origin: 'branch', state: PR_SCENARIOS[scenario] }],
+    [scenario],
+  )
+  const [index, setIndex] = React.useState(0)
   const [refreshing, setRefreshing] = React.useState(false)
+  const [autoFixOn, setAutoFixOn] = React.useState(() => AUTO_FIX_ON.has(scenario))
+  React.useEffect(() => { setAutoFixOn(AUTO_FIX_ON.has(scenario)) }, [scenario])
   const timerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
   React.useEffect(() => () => {
     if (timerRef.current) clearTimeout(timerRef.current)
   }, [])
+  React.useEffect(() => { setIndex(0) }, [scenario])
+  // Auto-merge as the mock "GitHub" last set it, per active PR; null shows the scenario's own state
+  const [autoMergeOn, setAutoMergeOn] = React.useState<boolean | null>(null)
+  React.useEffect(() => { setAutoMergeOn(null) }, [scenario, index])
 
   const refresh = React.useCallback(() => {
     if (timerRef.current) clearTimeout(timerRef.current)
@@ -235,14 +357,45 @@ export function useMockPrWatch(scenario: PrScenario): { state: PrWatchState; ref
     timerRef.current = setTimeout(() => setRefreshing(false), 900)
   }, [])
 
-  const state = React.useMemo<PrWatchState>(() => {
-    if (base.kind !== 'pr') return base
-    return refreshing
-      ? { ...base, refreshing: true, details: undefined }
-      : { ...base, summary: { ...base.summary, fetchedAt: Date.now() - 12_000 } }
-  }, [base, refreshing])
+  const activeIndex = Math.min(index, entries.length - 1)
+  const activeEntry = entries[activeIndex]!
+  const navEntries = React.useMemo<PrNavEntry[]>(() => entries.flatMap((entry, i) => (
+    entry.state.kind === 'pr' ? [{ id: `github.com/acme/app#${entry.state.summary.number}-${i}`, origin: entry.origin, summary: entry.state.summary }] : []
+  )), [entries])
 
-  return { state, refresh, onCardOpenChange: NOOP }
+  const state = React.useMemo<PrWatchState>(() => {
+    if (activeEntry.state.kind !== 'pr') return activeEntry.state
+    const { autoMerge: scenarioAutoMerge, ...rest } = activeEntry.state.summary
+    const autoMerge = autoMergeOn === null ? scenarioAutoMerge : autoMergeOn ? { enabled: true, method: 'merge' as const } : undefined
+    const summary = { ...rest, ...(autoMerge ? { autoMerge } : {}) }
+    return refreshing
+      ? { ...activeEntry.state, summary, refreshing: true, details: undefined }
+      : { ...activeEntry.state, summary: { ...summary, fetchedAt: Date.now() - 12_000 } }
+  }, [activeEntry, refreshing, autoMergeOn])
+
+  const setAutoMerge = React.useCallback(async (_ref: string, enabled: boolean): Promise<PrAutoMergeChange> => {
+    await new Promise(resolve => setTimeout(resolve, 400))
+    if (scenario === 'auto-merge-refused') return { ok: false, error: AUTO_MERGE_REFUSAL }
+    setAutoMergeOn(enabled)
+    return { ok: true }
+  }, [scenario])
+
+  return {
+    state,
+    nav: {
+      index: activeIndex,
+      count: entries.length,
+      entries: navEntries,
+      onSelect: (next: number) => setIndex(Math.max(0, Math.min(next, entries.length - 1))),
+    },
+    activeOrigin: activeEntry.origin,
+    refresh,
+    onCardOpenChange: NOOP,
+    unbind: NOOP,
+    setAutoMerge,
+    autoFix: autoFixOn ? { enabled: true, lastRunAt: now - 4 * MINUTE } : { enabled: false },
+    setAutoFix: setAutoFixOn,
+  }
 }
 
 const NOOP = () => {}

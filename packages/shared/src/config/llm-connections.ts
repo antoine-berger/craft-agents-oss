@@ -1041,6 +1041,7 @@ const CLAUDE_BEDROCK_ROUTING_ENV_KEY_SET = new Set<string>(
 const MANAGED_ANTHROPIC_AUTH_ENV_KEYS = [
   'ANTHROPIC_API_KEY',
   'CLAUDE_CODE_OAUTH_TOKEN',
+  'CLAUDE_CODE_OAUTH_SCOPES',
   'ANTHROPIC_BASE_URL',
   ...CLAUDE_BEDROCK_ROUTING_ENV_KEYS,
   'AWS_REGION',
@@ -1122,7 +1123,7 @@ export async function resolveAuthEnvVars(
   connection: LlmConnection,
   connectionSlug: string,
   credentialManager: CredentialManager,
-  getValidOAuthToken: (slug: string) => Promise<{ accessToken?: string | null }>,
+  getValidOAuthToken: (slug: string) => Promise<{ accessToken?: string | null; scopes?: string[] }>,
 ): Promise<ResolvedAuthEnvVars> {
   const envVars: Record<string, string> = {};
 
@@ -1155,6 +1156,9 @@ export async function resolveAuthEnvVars(
       const tokenResult = await getValidOAuthToken(connectionSlug);
       if (tokenResult.accessToken) {
         envVars.CLAUDE_CODE_OAUTH_TOKEN = tokenResult.accessToken;
+        // The SDK otherwise treats an injected token as inference-only and skips
+        // claude.ai connectors. Forward only this account's recorded grants.
+        envVars.CLAUDE_CODE_OAUTH_SCOPES = tokenResult.scopes?.join(' ') || 'user:inference';
       } else {
         return { envVars, success: false, warning: `Failed to get OAuth token for: ${connectionSlug}` };
       }
@@ -1163,6 +1167,7 @@ export async function resolveAuthEnvVars(
       const llmOAuth = await credentialManager.getLlmOAuth(connectionSlug);
       if (llmOAuth?.accessToken) {
         envVars.CLAUDE_CODE_OAUTH_TOKEN = llmOAuth.accessToken;
+        envVars.CLAUDE_CODE_OAUTH_SCOPES = llmOAuth.scopes?.join(' ') || 'user:inference';
       } else {
         return { envVars, success: false, warning: `No OAuth token found for: ${connectionSlug}` };
       }

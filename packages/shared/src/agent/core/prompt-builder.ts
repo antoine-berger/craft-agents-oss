@@ -15,7 +15,7 @@
 import { isLocalMcpEnabled } from '../../workspaces/storage.ts';
 import { formatPreferencesForPrompt } from '../../config/preferences.ts';
 import { formatSessionState } from '../mode-manager.ts';
-import { getDateTimeContext, getWorkingDirectoryContext } from '../../prompts/system.ts';
+import { CLAUDE_ACCOUNT_CONNECTORS_GUIDANCE, getDateTimeContext, getWorkingDirectoryContext } from '../../prompts/system.ts';
 import {
   formatStableGitDeveloperContext,
   formatVolatileGitDeveloperContext,
@@ -84,7 +84,7 @@ export class PromptBuilder {
   ): string[] {
     return [
       ...this.buildVolatileContextParts(options, sourceStateBlock),
-      ...this.buildStableContextParts(),
+      ...this.buildStableContextParts(options.claudeAccountConnectors === true),
     ];
   }
 
@@ -156,12 +156,17 @@ export class PromptBuilder {
    * Pure and idempotent: holds no one-shot state, so it is safe to call any
    * number of times per turn.
    */
-  buildStableContextParts(): string[] {
+  buildStableContextParts(claudeAccountConnectors: boolean = false): string[] {
     const parts: string[] = [];
 
     // Workspace capabilities
     if (this.config.agentProfile !== 'coding') {
-      parts.push(this.formatWorkspaceCapabilities());
+      parts.push(this.formatWorkspaceCapabilities(claudeAccountConnectors));
+    }
+
+    // Claude sends stable context on each user turn too, so resumed SDK snapshots receive the policy.
+    if (claudeAccountConnectors) {
+      parts.push(`<claude_account_connectors>\n${CLAUDE_ACCOUNT_CONNECTORS_GUIDANCE}\nOnly supply _displayName and _intent when the tool's schema declares those fields.\n</claude_account_connectors>`);
     }
 
     // Working directory context
@@ -182,7 +187,10 @@ export class PromptBuilder {
    * Format workspace capabilities for prompt injection.
    * Informs the agent about what features are available in this workspace.
    */
-  formatWorkspaceCapabilities(): string {
+  formatWorkspaceCapabilities(claudeAccountConnectors: boolean = false): string {
+    if (claudeAccountConnectors) {
+      return '<workspace_capabilities>\nMCP connectors: managed on claude.ai and supplied by the selected Claude account.\nCraft-managed sources: API and local sources only.\n</workspace_capabilities>';
+    }
     const capabilities: string[] = [];
 
     // Check local MCP server capability

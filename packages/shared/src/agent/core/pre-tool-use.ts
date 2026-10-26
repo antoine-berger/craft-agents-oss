@@ -48,7 +48,7 @@ import {
 } from '../mode-manager.ts';
 import { evaluateApiEndpointPolicy, evaluateMcpToolPolicy } from '../source-policy.ts';
 import { permissionsConfigCache, type PermissionsContext } from '../permissions-config.ts';
-import type { PrerequisiteCheckResult } from './prerequisite-manager.ts';
+import type { PrerequisiteCheckOptions, PrerequisiteCheckResult } from './prerequisite-manager.ts';
 import { getBashRememberKey, getFileWriteRememberKey, getNetworkCommandHosts, type PermissionRemember } from './permission-remember.ts';
 import { rewriteBashWithRtk } from './rtk-rewrite.ts';
 
@@ -632,6 +632,8 @@ export interface PreToolUseInput {
   activeSourceSlugs: string[];
   /** All available sources (for source-exists check) */
   allSourceSlugs: string[];
+  /** Trusted MCP provenance from the backend hook, never derived from tool names or arguments. */
+  mcpServer?: { name: string; source: string };
   /** Whether the agent supports source activation (has onSourceActivationRequest callback) */
   hasSourceActivation: boolean;
   /** PermissionManager for session-scoped whitelists */
@@ -662,7 +664,7 @@ export interface PermissionManagerLike {
  * Minimal interface for PrerequisiteManager.
  */
 export interface PrerequisiteManagerLike {
-  checkPrerequisites(toolName: string): PrerequisiteCheckResult;
+  checkPrerequisites(toolName: string, options?: PrerequisiteCheckOptions): PrerequisiteCheckResult;
   /** Bash's check: files the command prints (cat, head, sed -n …) count as read. */
   checkBashPrerequisites(command: string): PrerequisiteCheckResult;
 }
@@ -763,7 +765,10 @@ export function runPreToolUseChecks(ctx: PreToolUseInput): PreToolUseCheckResult
   if (toolName.startsWith('mcp__')) {
     const parts = toolName.split('__');
     const serverName = parts[1];
-    if (parts.length >= 3 && serverName && !BUILT_IN_MCP_SERVERS.has(serverName)) {
+    // Claude Code owns discovery/auth for claude.ai connectors. They are not Craft sources.
+    // Trust only SDK provenance: a local server can imitate the claude_ai_* name prefix.
+    const isClaudeAiConnector = ctx.mcpServer?.source === 'claudeai';
+    if (parts.length >= 3 && serverName && !BUILT_IN_MCP_SERVERS.has(serverName) && !isClaudeAiConnector) {
       const isActive = activeSourceSlugs.includes(serverName);
       if (!isActive) {
         const sourceExists = allSourceSlugs.includes(serverName);
@@ -785,7 +790,7 @@ export function runPreToolUseChecks(ctx: PreToolUseInput): PreToolUseCheckResult
     // Pi's `bash` tool arrives here as "Bash" too (PI_TOOL_NAME_MAP).
     const prereqResult = toolName === 'Bash'
       ? prerequisiteManager.checkBashPrerequisites(typeof input.command === 'string' ? input.command : '')
-      : prerequisiteManager.checkPrerequisites(toolName);
+      : prerequisiteManager.checkPrerequisites(toolName, { mcpServerSource: ctx.mcpServer?.source });
     if (!prereqResult.allowed) {
       return { type: 'block', reason: prereqResult.blockReason!, source: 'prerequisite' };
     }

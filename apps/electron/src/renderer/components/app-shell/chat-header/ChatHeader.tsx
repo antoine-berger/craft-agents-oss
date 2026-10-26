@@ -33,7 +33,8 @@ import { ChatHeaderLabels } from './ChatHeaderLabels'
 import { ChatShareMenu } from './ChatShareMenu'
 import { CHAT_HEADER_CODING_MAX_LABELS } from './label-strip-layout'
 import { ChatHeaderPrChip } from './pr-watch/ChatHeaderPrChip'
-import { isPrWatchVisible, type PrWatchState } from './pr-watch/pr-watch-state'
+import { isPrWatchVisible, type PrEntry, type PrMergeMethod, type PrWatchState } from './pr-watch/pr-watch-state'
+import type { PrAutoFixView, PrAutoMergeChange, PrWatchNav } from '@/hooks/usePrWatch'
 
 export interface ChatHeaderProps {
   sessionId: string
@@ -46,9 +47,20 @@ export interface ChatHeaderProps {
   sharedUrl?: string | null
   workingDirectory?: string
   sessionFolderPath?: string
-  /** The branch's pull request; shown only for Coding-mode sessions, on the desktop layout */
+  /** The active pull request; shown only for Coding-mode sessions, on the desktop layout */
   prWatch?: PrWatchState
+  /** The session's PRs (branch PR + pinned PRs); with more than one the chip shows "+N" and the card its tabs */
+  prWatchNav?: PrWatchNav
+  /** Where the active PR came from — only `bound` PRs get an Unpin action */
+  prWatchActiveOrigin?: PrEntry['origin']
   onRefreshPrWatch?: () => void
+  /** Remove the active (bound) PR from the session */
+  onUnbindPr?: (ref: string) => void
+  /** Toggle GitHub auto-merge on the active PR; resolves with GitHub's answer */
+  onSetPrAutoMerge?: (ref: string, enabled: boolean, method?: PrMergeMethod) => Promise<PrAutoMergeChange>
+  /** Auto-fix (the card's Fix toggle) for the active PR */
+  prWatchAutoFix?: PrAutoFixView
+  onSetPrAutoFix?: (enabled: boolean) => void
   /** The PR card opened or closed (details load while it is open) */
   onPrCardOpenChange?: (open: boolean) => void
 }
@@ -74,7 +86,13 @@ function sameHeaderProps(prev: ChatHeaderProps, next: ChatHeaderProps): boolean 
     && prev.workingDirectory === next.workingDirectory
     && prev.sessionFolderPath === next.sessionFolderPath
     && prev.prWatch === next.prWatch
+    && prev.prWatchNav === next.prWatchNav
+    && prev.prWatchActiveOrigin === next.prWatchActiveOrigin
     && prev.onRefreshPrWatch === next.onRefreshPrWatch
+    && prev.onUnbindPr === next.onUnbindPr
+    && prev.onSetPrAutoMerge === next.onSetPrAutoMerge
+    && prev.prWatchAutoFix === next.prWatchAutoFix
+    && prev.onSetPrAutoFix === next.onSetPrAutoFix
     && prev.onPrCardOpenChange === next.onPrCardOpenChange
     && sameFields(prev.item, next.item)
 }
@@ -88,7 +106,13 @@ export const ChatHeader = React.memo(function ChatHeader({
   workingDirectory,
   sessionFolderPath,
   prWatch,
+  prWatchNav,
+  prWatchActiveOrigin,
   onRefreshPrWatch,
+  onUnbindPr,
+  onSetPrAutoMerge,
+  prWatchAutoFix,
+  onSetPrAutoFix,
   onPrCardOpenChange,
 }: ChatHeaderProps) {
   const { t } = useTranslation()
@@ -238,7 +262,19 @@ export const ChatHeader = React.memo(function ChatHeader({
         </span>
       )}
       {showPrChip && prWatch && (
-        <ChatHeaderPrChip sessionId={sessionId} state={prWatch} onRefresh={onRefreshPrWatch} onCardOpenChange={onPrCardOpenChange} onReserveElChange={setPrReserveEl} />
+        <ChatHeaderPrChip
+          sessionId={sessionId}
+          state={prWatch}
+          nav={prWatchNav}
+          activeOrigin={prWatchActiveOrigin}
+          onRefresh={onRefreshPrWatch}
+          onUnbind={onUnbindPr}
+          onSetAutoMerge={onSetPrAutoMerge}
+          autoFix={prWatchAutoFix}
+          onSetAutoFix={onSetPrAutoFix}
+          onCardOpenChange={onPrCardOpenChange}
+          onReserveElChange={setPrReserveEl}
+        />
       )}
       {item && !compact && (
         <ChatHeaderLabels

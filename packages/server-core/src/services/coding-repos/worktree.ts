@@ -41,17 +41,32 @@ export function worktreePath(gitDir: string, branch: string, exists: (path: stri
   return candidate
 }
 
-/** What to branch from: the remote's default branch, refreshed when the network allows. */
-async function resolveBase(dir: string): Promise<string> {
-  const remoteHead = await runGit(dir, ['symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD'])
-  const candidates = remoteHead ? [remoteHead] : ['origin/main', 'origin/master']
+/** An exact branch ref to start from, refreshed when the network allows. Never resolves a tag. */
+export async function resolveWorktreeBase(dir: string, requestedBase?: string): Promise<string> {
+  if (requestedBase?.trim()) {
+    const requested = requestedBase.trim()
+    if (requested.startsWith('-') || !(await runGit(dir, ['check-ref-format', '--branch', requested]))) {
+      throw new WorktreeError(`"${requested}" is not a valid base branch`, 'invalid-branch')
+    }
+    const remoteBranch = requested.replace(/^origin\//, '')
+    await runGitResult(dir, ['fetch', '--quiet', '--', 'origin', remoteBranch], FETCH_TIMEOUT_MS)
+    const candidates = requested.startsWith('origin/')
+      ? [`refs/remotes/${requested}`]
+      : [`refs/remotes/origin/${requested}`, `refs/heads/${requested}`]
+    for (const ref of candidates) {
+      if (await runGit(dir, ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`])) return ref
+    }
+    throw new WorktreeError(`Base branch "${requested}" does not exist`, 'invalid-branch')
+  }
+  const remoteHead = await runGit(dir, ['symbolic-ref', '--quiet', 'refs/remotes/origin/HEAD'])
+  const candidates = remoteHead ? [remoteHead] : ['refs/remotes/origin/main', 'refs/remotes/origin/master']
   for (const ref of candidates) {
-    const branch = ref.replace(/^origin\//, '')
+    const branch = ref.replace(/^refs\/remotes\/origin\//, '')
     // Best effort: offline or no access still leaves the last fetched state usable
-    await runGitResult(dir, ['fetch', '--quiet', 'origin', branch], FETCH_TIMEOUT_MS)
+    await runGitResult(dir, ['fetch', '--quiet', '--', 'origin', branch], FETCH_TIMEOUT_MS)
     if (await runGit(dir, ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`])) return ref
   }
-  return (await runGit(dir, ['symbolic-ref', '--quiet', '--short', 'HEAD'])) ?? 'HEAD'
+  return (await runGit(dir, ['symbolic-ref', '--quiet', 'HEAD'])) ?? 'HEAD'
 }
 
 function ghClone(nameWithOwner: string, target: string): Promise<{ ok: boolean; message: string }> {
@@ -100,9 +115,9 @@ export async function createWorktree(request: CreateWorktreeRequest, { cloneRoot
   if (!gitDir) throw new WorktreeError('Not a git repository', 'not-a-repo')
 
   const dir = repoCommandDir(gitDir)
-  const base = await resolveBase(dir)
+  const base = await resolveWorktreeBase(dir)
   const path = worktreePath(gitDir, branch)
   const added = await runGitResult(dir, ['worktree', 'add', '-b', branch, path, base], FETCH_TIMEOUT_MS)
   if (!added.ok) throw new WorktreeError(gitReason(added.stderr) || 'git worktree add failed', 'git-failed')
-  return { path, branch, base, cloned }
+  return { path, branch, base: base.replace(/^refs\/(remotes|heads)\//, ''), cloned }
 }

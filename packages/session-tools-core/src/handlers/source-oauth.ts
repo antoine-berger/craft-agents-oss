@@ -18,7 +18,7 @@ import type {
   MicrosoftService,
 } from '../types.ts';
 import { successResponse, errorResponse } from '../response.ts';
-import { generateRequestId } from '../source-helpers.ts';
+import { generateRequestId, getSourceManagementError } from '../source-helpers.ts';
 import { basename } from 'node:path';
 
 /** The LoadedSource shape the credential manager needs for a source config. */
@@ -76,6 +76,9 @@ export async function handleSourceOAuthTrigger(
   if (!source) {
     return errorResponse(`Source '${sourceSlug}' not found.`);
   }
+
+  const managementError = getSourceManagementError(ctx, source);
+  if (managementError) return managementError;
 
   // Validate source uses OAuth — supports MCP OAuth and generic API OAuth (with or without oauth config block)
   const isMcpOAuth = source.type === 'mcp' && source.mcp?.authType === 'oauth';
@@ -137,6 +140,9 @@ export async function handleGoogleOAuthTrigger(
   if (!source) {
     return errorResponse(`Source '${sourceSlug}' not found.`);
   }
+
+  const managementError = getSourceManagementError(ctx, source);
+  if (managementError) return managementError;
 
   // Verify this is a Google source
   if (source.provider !== 'google') {
@@ -231,6 +237,9 @@ export async function handleSlackOAuthTrigger(
     return errorResponse(`Source '${sourceSlug}' not found.`);
   }
 
+  const managementError = getSourceManagementError(ctx, source);
+  if (managementError) return managementError;
+
   // Verify this is a Slack source
   if (source.provider !== 'slack') {
     const hint = !source.provider
@@ -307,6 +316,9 @@ export async function handleMicrosoftOAuthTrigger(
   if (!source) {
     return errorResponse(`Source '${sourceSlug}' not found.`);
   }
+
+  const managementError = getSourceManagementError(ctx, source);
+  if (managementError) return managementError;
 
   // Verify this is a Microsoft source
   if (source.provider !== 'microsoft') {

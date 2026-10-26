@@ -168,7 +168,13 @@ function ChatPanelCodingDemo({
             workingDirectory={WORKING_DIRECTORY}
             sessionFolderPath={SESSION_FOLDER}
             prWatch={pr.state}
+            prWatchNav={pr.nav}
+            prWatchActiveOrigin={pr.activeOrigin}
             onRefreshPrWatch={pr.refresh}
+            onUnbindPr={pr.unbind}
+            onSetPrAutoMerge={pr.setAutoMerge}
+            prWatchAutoFix={pr.autoFix}
+            onSetPrAutoFix={pr.setAutoFix}
             onPrCardOpenChange={pr.onCardOpenChange}
           />
           <div className="flex min-h-0 flex-1 flex-col">

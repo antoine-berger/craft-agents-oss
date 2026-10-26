@@ -25,6 +25,9 @@ import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 import { PROJECT_COLOR_PALETTE } from '@/utils/project-colors'
 import { InlineColorPickerRow } from '@/components/ui/inline-color-picker-row'
+import { SettingsToggle } from '@/components/settings/SettingsToggle'
+import { ServerDirectoryBrowser } from '@/components/ServerDirectoryBrowser'
+import { useDirectoryPicker } from '@/hooks/useDirectoryPicker'
 import type { LoadedProject, ProjectAsset } from '@craft-agent/shared/projects/types'
 
 interface ProjectInfoPageProps {
@@ -48,9 +51,13 @@ export default function ProjectInfoPage({ projectSlug }: ProjectInfoPageProps) {
   const [editName, setEditName] = useState('')
   const [editDescription, setEditDescription] = useState('')
   const [editWorkingDir, setEditWorkingDir] = useState('')
+  const [editWorktreeEnabled, setEditWorktreeEnabled] = useState(false)
+  const [editWorktreeBaseBranch, setEditWorktreeBaseBranch] = useState('')
+  const [editWorktreeCleanup, setEditWorktreeCleanup] = useState(false)
   const [editDetails, setEditDetails] = useState('')
   const [editColor, setEditColor] = useState<string>('')
   const [saving, setSaving] = useState(false)
+  const workingDirectoryPicker = useDirectoryPicker(setEditWorkingDir)
 
   // Load project (and re-load on broadcast)
   const loadProject = useCallback(async () => {
@@ -69,6 +76,9 @@ export default function ProjectInfoPage({ projectSlug }: ProjectInfoPageProps) {
       setEditName(loaded.config.name)
       setEditDescription(loaded.config.description ?? '')
       setEditWorkingDir(loaded.config.workingDirectory ?? '')
+      setEditWorktreeEnabled(loaded.config.worktreeSettings?.enabled === true)
+      setEditWorktreeBaseBranch(loaded.config.worktreeSettings?.baseBranch ?? '')
+      setEditWorktreeCleanup(loaded.config.worktreeSettings?.cleanupOnArchive === true)
       setEditDetails(loaded.config.details ?? '')
       setEditColor(loaded.config.color ?? '')
     } catch (err) {
@@ -128,20 +138,11 @@ export default function ProjectInfoPage({ projectSlug }: ProjectInfoPageProps) {
       }
     } catch (err) {
       console.error('[ProjectInfoPage] Failed to create session:', err)
-      toast.error(t('projectInfo.newSessionFailed'))
+      toast.error(t('projectInfo.newSessionFailed'), {
+        description: err instanceof Error ? err.message : undefined,
+      })
     }
   }, [workspaceId, project, onCreateSession, t])
-
-  const handlePickWorkingDirectory = useCallback(async () => {
-    try {
-      const picked = await window.electronAPI.openFolderDialog?.()
-      if (typeof picked === 'string' && picked.trim()) {
-        setEditWorkingDir(picked)
-      }
-    } catch (err) {
-      console.error('[ProjectInfoPage] Folder picker failed:', err)
-    }
-  }, [])
 
   const handleSaveSettings = useCallback(async () => {
     if (!workspaceId || !project) return
@@ -150,18 +151,26 @@ export default function ProjectInfoPage({ projectSlug }: ProjectInfoPageProps) {
       await window.electronAPI.updateProject(workspaceId, project.config.slug, {
         name: editName.trim() || project.config.name,
         description: editDescription.trim() || undefined,
-        workingDirectory: editWorkingDir.trim() || undefined,
+        // An empty string survives the RPC's JSON encoding, so clearing the folder is persisted.
+        workingDirectory: editWorkingDir.trim(),
+        worktreeSettings: {
+          enabled: editWorktreeEnabled,
+          baseBranch: editWorktreeBaseBranch.trim() || undefined,
+          cleanupOnArchive: editWorktreeCleanup,
+        },
         details: editDetails.trim() || undefined,
         color: editColor.trim() || undefined,
       })
       toast.success(t('projectInfo.saved'))
     } catch (err) {
       console.error('[ProjectInfoPage] Save failed:', err)
-      toast.error(t('projectInfo.saveFailed'))
+      toast.error(t('projectInfo.saveFailed'), {
+        description: err instanceof Error ? err.message : undefined,
+      })
     } finally {
       setSaving(false)
     }
-  }, [workspaceId, project, editName, editDescription, editWorkingDir, editDetails, editColor, t])
+  }, [workspaceId, project, editName, editDescription, editWorkingDir, editWorktreeEnabled, editWorktreeBaseBranch, editWorktreeCleanup, editDetails, editColor, t])
 
   const handleDeleteProject = useCallback(async () => {
     if (!workspaceId || !project) return
@@ -347,12 +356,42 @@ export default function ProjectInfoPage({ projectSlug }: ProjectInfoPageProps) {
                       placeholder={t('projectInfo.workingDirectoryPlaceholder')}
                       className="flex-1"
                     />
-                    <Button size="lg" variant="secondary" onClick={handlePickWorkingDirectory}>
+                    <Button size="lg" variant="secondary" onClick={workingDirectoryPicker.pickDirectory}>
                       <FolderOpen className="size-3.5" />
                       {t('projectInfo.workingDirectoryPicker')}
                     </Button>
                   </div>
                 </Field>
+                <SettingsToggle
+                  inCard={false}
+                  label={t('projectInfo.worktree.enabled')}
+                  description={t('projectInfo.worktree.enabledHint')}
+                  checked={editWorktreeEnabled}
+                  onCheckedChange={setEditWorktreeEnabled}
+                />
+                {editWorktreeEnabled && (
+                  <div className="space-y-4">
+                    {!editWorkingDir.trim() && (
+                      <p className="text-label-sm text-destructive" role="alert">
+                        {t('projectInfo.worktree.directoryRequired')}
+                      </p>
+                    )}
+                    <Field label={t('projectInfo.worktree.baseBranch')}>
+                      <Input
+                        value={editWorktreeBaseBranch}
+                        onChange={(e) => setEditWorktreeBaseBranch(e.target.value)}
+                        placeholder={t('projectInfo.worktree.baseBranchPlaceholder')}
+                      />
+                    </Field>
+                    <SettingsToggle
+                      inCard={false}
+                      label={t('projectInfo.worktree.cleanup')}
+                      description={t('projectInfo.worktree.cleanupHint')}
+                      checked={editWorktreeCleanup}
+                      onCheckedChange={setEditWorktreeCleanup}
+                    />
+                  </div>
+                )}
                 <Field
                   label={t('projectInfo.color')}
                   hint={t('projectInfo.colorHint')}
@@ -382,7 +421,7 @@ export default function ProjectInfoPage({ projectSlug }: ProjectInfoPageProps) {
                     <Trash2 className="size-3.5" />
                     {t('projectInfo.deleteProject')}
                   </Button>
-                  <Button variant="primary" onClick={handleSaveSettings} disabled={saving}>
+                  <Button variant="primary" onClick={handleSaveSettings} disabled={saving || (editWorktreeEnabled && !editWorkingDir.trim())}>
                     {saving ? t('common.saving') : t('common.save')}
                   </Button>
                 </div>
@@ -412,6 +451,13 @@ export default function ProjectInfoPage({ projectSlug }: ProjectInfoPageProps) {
           </Info_Section>
         </Info_Page.Content>
       )}
+      <ServerDirectoryBrowser
+        open={workingDirectoryPicker.showServerBrowser}
+        mode={workingDirectoryPicker.serverBrowserMode}
+        onSelect={workingDirectoryPicker.confirmServerBrowser}
+        onCancel={workingDirectoryPicker.cancelServerBrowser}
+        initialPath={editWorkingDir || undefined}
+      />
     </Info_Page>
   )
 }

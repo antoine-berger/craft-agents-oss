@@ -1,9 +1,11 @@
 import * as React from 'react'
+import { useTranslation } from 'react-i18next'
 import { Check, DatabaseZap } from 'lucide-react'
 import { FilterableSelectPopover } from '@craft-agent/ui'
 
 import { cn } from '@/lib/utils'
 import { SourceAvatar } from '@/components/ui/source-avatar'
+import { ClaudeConnectorsNotice } from './ClaudeConnectorsNotice'
 import type { LoadedSource } from '../../../shared/types'
 
 export interface SourceSelectorPopoverProps {
@@ -13,6 +15,7 @@ export interface SourceSelectorPopoverProps {
   sources: LoadedSource[]
   selectedSlugs: string[]
   onToggleSlug: (slug: string) => void
+  claudeAccountConnectors?: boolean
 }
 
 export function SourceSelectorPopover({
@@ -22,7 +25,9 @@ export function SourceSelectorPopover({
   sources,
   selectedSlugs,
   onToggleSlug,
+  claudeAccountConnectors = false,
 }: SourceSelectorPopoverProps) {
+  const { t } = useTranslation()
   return (
     <FilterableSelectPopover
       open={open}
@@ -33,15 +38,12 @@ export function SourceSelectorPopover({
       getLabel={(source) => source.config.name}
       isSelected={(source) => selectedSlugs.includes(source.config.slug)}
       onToggle={(source) => onToggleSlug(source.config.slug)}
-      filterPlaceholder="Search sources..."
-      emptyState={(
-        <>
-          No sources configured.
-          <br />
-          Add sources in Settings.
-        </>
-      )}
-      noResultsState="No matching sources."
+      header={claudeAccountConnectors ? <ClaudeConnectorsNotice /> : undefined}
+      filterPlaceholder={t('common.search')}
+      emptyState={claudeAccountConnectors
+        ? t('chat.claudeConnectors.noOtherSources')
+        : t('sourcesList.noSourcesConfigured')}
+      noResultsState={t('chat.noResults')}
       minWidth={200}
       maxWidth={320}
       renderItem={(source, state, index) => (

@@ -482,6 +482,10 @@ export const REMOTE_ELIGIBLE_CHANNELS = new Set<string>([
   RPC_CHANNELS.prWatch.UNSUBSCRIBE,
   RPC_CHANNELS.prWatch.REFRESH,
   RPC_CHANNELS.prWatch.GET_DETAILS,
+  RPC_CHANNELS.prWatch.BIND,
+  RPC_CHANNELS.prWatch.UNBIND,
+  RPC_CHANNELS.prWatch.SET_AUTO_MERGE,
+  RPC_CHANNELS.prWatch.SET_AUTO_FIX,
   RPC_CHANNELS.prWatch.CHANGED,
 
   // resources — workspace resource export/import

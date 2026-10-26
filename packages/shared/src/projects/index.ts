@@ -6,11 +6,14 @@
 
 export type {
   ProjectConfig,
+  ProjectWorktreeSettings,
   ProjectAsset,
   CreateProjectInput,
   LoadedProject,
   ProjectPromptContext,
 } from './types.ts';
+
+export { normalizeProjectWorktreeSettings } from './worktree-settings.ts';
 
 export {
   // Path utilities

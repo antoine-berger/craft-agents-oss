@@ -271,7 +271,13 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
       if (setup.credential && !isMasked) {
         const authType = pendingConnection.authType
         if (authType === 'oauth') {
-          await manager.setLlmOAuth(setup.slug, { accessToken: setup.credential })
+          // OAuth onboarding already stored the full grant before SETUP. The
+          // renderer sends its access token again; do not erase its refresh token,
+          // expiry or granted scopes. A different token must not inherit them.
+          const stored = await manager.getLlmOAuth(setup.slug)
+          if (stored?.accessToken !== setup.credential) {
+            await manager.setLlmOAuth(setup.slug, { accessToken: setup.credential })
+          }
           deps.platform.logger?.info('Saved OAuth access token to LLM connection')
         } else {
           await manager.setLlmApiKey(setup.slug, setup.credential)

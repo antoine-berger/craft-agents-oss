@@ -7,7 +7,7 @@
 import type { SessionToolContext } from '../context.ts';
 import type { ToolResult, CredentialAuthRequest, CredentialInputMode } from '../types.ts';
 import { successResponse, errorResponse } from '../response.ts';
-import { generateRequestId, detectCredentialMode, getEffectiveHeaderNames } from '../source-helpers.ts';
+import { generateRequestId, detectCredentialMode, getEffectiveHeaderNames, getSourceManagementError } from '../source-helpers.ts';
 
 export interface CredentialPromptArgs {
   sourceSlug: string;
@@ -43,6 +43,8 @@ export async function handleCredentialPrompt(
   if (!source) {
     return errorResponse(`Source '${sourceSlug}' not found.`);
   }
+  const managementError = getSourceManagementError(ctx, source);
+  if (managementError) return managementError;
 
   // Detect effective mode (auto-upgrades to multi-header if source has headerNames)
   const effectiveMode = detectCredentialMode(source, mode, headerNames);

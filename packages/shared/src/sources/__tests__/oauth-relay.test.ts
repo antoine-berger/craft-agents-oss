@@ -129,4 +129,17 @@ describe('SourceCredentialManager.prepareOAuth relay wrapping', () => {
       innerState: result.state,
     });
   });
+
+  it('skips the relay for MCP sources with oauthRelay: false', async () => {
+    const result = await credManager.prepareOAuth(
+      createMcpSource({ mcp: { transport: 'http', url: 'https://example.com/mcp', oauthRelay: false } }),
+      { callbackUrl: 'http://localhost:6477/callback' },
+    );
+
+    expect(result.redirectUri).toBe('http://localhost:6477/callback');
+
+    const authUrl = new URL(result.authUrl);
+    expect(authUrl.searchParams.get('redirect_uri')).toBe('http://localhost:6477/callback');
+    expect(authUrl.searchParams.get('state')).toBe(result.state);
+  });
 });

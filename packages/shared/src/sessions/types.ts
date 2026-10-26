@@ -11,6 +11,7 @@
 
 import type { PermissionMode } from '../agent/mode-manager.ts';
 import type { ThinkingLevel } from '../agent/thinking-levels.ts';
+import type { BoundPr, PrMonitorState } from '../protocol/pr-watch.ts';
 import type { StoredAttachment, MessageRole, ToolStatus, AuthRequestType, AuthStatus, CredentialInputMode, StoredMessage, ContextUsageSnapshot } from '@craft-agent/core/types';
 
 /**
@@ -33,11 +34,15 @@ export const SESSION_PERSISTENT_FIELDS = [
   // Read tracking
   'lastReadMessageId', 'hasUnread',
   // Config
-  'enabledSourceSlugs', 'permissionMode', 'previousPermissionMode', 'workingDirectory',
+  'enabledSourceSlugs', 'permissionMode', 'previousPermissionMode', 'workingDirectory', 'worktree',
   // Model/Connection
   'model', 'llmConnection', 'connectionLocked', 'thinkingLevel',
   // Coding mode (lean coding prompt + tool profile; fixed once the session has messages)
   'codingMode',
+  // Coding mode: PRs pinned to this session (chat-header PR carousel; see protocol/pr-watch BoundPr)
+  'boundPrs',
+  // Coding mode: per-PR monitor state (auto-fix toggle + what it last acted on), keyed by PR id
+  'prMonitors',
   // Sharing
   'sharedUrl', 'sharedId',
   // Plan execution
@@ -110,6 +115,28 @@ export interface SessionTokenUsage {
  */
 export type { StoredMessage } from '@craft-agent/core/types';
 
+/** A Git worktree owned by one session. Persist the plan before creating it. */
+export interface OwnedWorktree {
+  version: 1;
+  ownerId: string;
+  token: string;
+  repoPath: string;
+  gitDir: string;
+  path: string;
+  branch: string;
+  base: string;
+  baseCommit: string;
+  status: 'pending' | 'ready' | 'removed';
+}
+
+/** Project policy captured when a chat is created; existing chats keep their checkout. */
+export interface SessionWorktreeMetadata {
+  repositoryPath: string;
+  baseBranch?: string;
+  cleanupOnArchive?: boolean;
+  owned?: OwnedWorktree;
+}
+
 /**
  * Session configuration (persisted metadata)
  */
@@ -148,6 +175,8 @@ export interface SessionConfig {
   enabledSourceSlugs?: string[];
   /** Working directory for this session (used by agent for bash commands and context) */
   workingDirectory?: string;
+  /** Automatic worktree policy and durable ownership/recovery metadata. */
+  worktree?: SessionWorktreeMetadata;
   /** SDK cwd for session storage - set once at creation, never changes. Ensures SDK can find session transcripts regardless of workingDirectory changes. */
   sdkCwd?: string;
   /** Shared viewer URL (if shared via viewer) */
@@ -164,6 +193,10 @@ export interface SessionConfig {
   thinkingLevel?: ThinkingLevel;
   /** Coding mode: lean coding system prompt and session-tool profile. Fixed once the session has messages. */
   codingMode?: boolean;
+  /** Coding mode: PRs pinned to this session, shown in the chat-header PR carousel (pr_bind / pr_unbind). */
+  boundPrs?: BoundPr[];
+  /** Coding mode: per-PR monitor state (auto-fix), keyed by PR id `host/owner/repo#number`. */
+  prMonitors?: Record<string, PrMonitorState>;
   /**
    * Pending plan execution state - tracks "Accept & Compact" flow.
    * When set, indicates a plan needs to be executed after compaction completes.
@@ -290,6 +323,7 @@ export interface SessionHeader {
   enabledSourceSlugs?: string[];
   /** Working directory for this session (used by agent for bash commands and context) */
   workingDirectory?: string;
+  worktree?: SessionWorktreeMetadata;
   /** SDK cwd for session storage - set once at creation, never changes */
   sdkCwd?: string;
   /** Shared viewer URL (if shared via viewer) */
@@ -306,6 +340,10 @@ export interface SessionHeader {
   thinkingLevel?: ThinkingLevel;
   /** Coding mode: lean coding system prompt and session-tool profile. Fixed once the session has messages. */
   codingMode?: boolean;
+  /** Coding mode: PRs pinned to this session, shown in the chat-header PR carousel (pr_bind / pr_unbind). */
+  boundPrs?: BoundPr[];
+  /** Coding mode: per-PR monitor state (auto-fix), keyed by PR id `host/owner/repo#number`. */
+  prMonitors?: Record<string, PrMonitorState>;
   /**
    * Pending plan execution state - tracks "Accept & Compact" flow.
    * When set, indicates a plan needs to be executed after compaction completes.
@@ -405,6 +443,7 @@ export interface SessionMetadata {
   sharedId?: string;
   /** Working directory for this session */
   workingDirectory?: string;
+  worktree?: SessionWorktreeMetadata;
   /** SDK cwd for session storage - set once at creation, never changes */
   sdkCwd?: string;
   /** Role/type of the last message (for badge display without loading messages) */
@@ -419,6 +458,10 @@ export interface SessionMetadata {
   thinkingLevel?: ThinkingLevel;
   /** Coding mode: lean coding system prompt and session-tool profile. Fixed once the session has messages. */
   codingMode?: boolean;
+  /** Coding mode: PRs pinned to this session, shown in the chat-header PR carousel (pr_bind / pr_unbind). */
+  boundPrs?: BoundPr[];
+  /** Coding mode: per-PR monitor state (auto-fix), keyed by PR id `host/owner/repo#number`. */
+  prMonitors?: Record<string, PrMonitorState>;
   /** ID of last message user has read - for unread detection */
   lastReadMessageId?: string;
   /** ID of the last final (non-intermediate) assistant message - for unread detection */

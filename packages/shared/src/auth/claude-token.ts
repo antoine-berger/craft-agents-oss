@@ -17,6 +17,7 @@ export async function refreshClaudeToken(refreshToken: string): Promise<{
   accessToken: string;
   refreshToken?: string;
   expiresAt?: number;
+  scopes?: string[];
 }> {
   // Use JSON format to match the token exchange endpoint
   const params = {
@@ -59,6 +60,7 @@ export async function refreshClaudeToken(refreshToken: string): Promise<{
     refresh_token?: string;
     expires_in?: number;
     token_type?: string;
+    scope?: string;
   };
 
   // Log what we received from the API for debugging
@@ -69,6 +71,7 @@ export async function refreshClaudeToken(refreshToken: string): Promise<{
     accessToken: data.access_token,
     refreshToken: data.refresh_token || refreshToken,
     expiresAt,
+    scopes: typeof data.scope === 'string' ? data.scope.split(/\s+/).filter(Boolean) : undefined,
   };
 }
 

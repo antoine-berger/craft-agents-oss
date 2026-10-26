@@ -55,6 +55,12 @@ import {
   handleWritePageData,
   handleDeletePage,
 } from './handlers/pages.ts';
+import {
+  handlePrStatus,
+  handlePrBind,
+  handlePrUnbind,
+  handlePrSetAutoMerge,
+} from './handlers/pr-tools.ts';
 import { handleArchiveSession } from './handlers/archive-session.ts';
 import { handleSendAgentMessage } from './handlers/send-agent-message.ts';
 import { handleListMessagingChannels, handleUnbindMessagingChannel } from './handlers/messaging.ts';
@@ -330,6 +336,25 @@ export const WritePageDataSchema = z.object({
 
 export const DeletePageSchema = z.object({
   slug: z.string().describe('Slug of the page to delete'),
+});
+
+// PR tools (Coding mode)
+export const PrStatusSchema = z.object({
+  session_id: z.string().optional().describe("Another session whose pinned PRs to read (cache-only, no live fetch). Omit for the current session's live status."),
+});
+
+export const PrBindSchema = z.object({
+  pr: z.string().describe('PR to pin: a full PR URL (https://github.com/owner/repo/pull/123), owner/repo#123, or a bare number for the current repo.'),
+});
+
+export const PrUnbindSchema = z.object({
+  pr: z.string().describe('PR to unpin from this session: the PR URL, owner/repo#123, or its number.'),
+});
+
+export const PrSetAutoMergeSchema = z.object({
+  pr: z.string().describe('PR to change: a full PR URL, owner/repo#123, or a bare number for the current repo.'),
+  enabled: z.boolean().describe('true enables GitHub auto-merge (GitHub merges once required checks pass and reviews are in); false disables it.'),
+  method: z.enum(['merge', 'squash', 'rebase']).optional().describe('Merge method to use when enabling (default: the repository\'s default for you). Must be one the repository allows.'),
 });
 
 export const ListSessionsSchema = z.object({
@@ -670,6 +695,20 @@ Data model: kv is key → any JSON value; series are named lists of { t: epoch m
 
 A published page is unpublished first (best effort); the result reports publicCopyMayRemain when the remote copy could not be confirmed removed.`,
 
+  pr_status: `Read the pull requests this Coding session is tracking: its branch's PR plus any PRs pinned with pr_bind, deduped. Returns each PR's state, check rollup, review decision, merge state, unresolved threads, local ahead/dirty, and auto-merge state (autoMergeBlocked: why GitHub won't turn it on) — the same data the chat-header PR chip shows.
+
+Use it to check "where's my PR / are checks green / can it merge" without leaving the chat. Pass session_id to read ANOTHER session's pinned PRs (cache-only — it does not fetch GitHub for a session you're not in). Omit it for the current session's live status. Read-only; never pushes or merges.`,
+
+  pr_bind: `Pin a pull request to this session so it shows in the chat-header PR carousel and is tracked alongside the branch's own PR. A session can track several PRs at once. A PR you open with \`gh pr create\` is pinned automatically, so don't pin it again.
+
+Give a full PR URL (https://github.com/owner/repo/pull/123), owner/repo#123, or a bare number for the current repo. The PR is verified (a credential is resolved and the PR fetched) before it is pinned — a bad URL, an inaccessible repo, or a missing PR returns an error and pins nothing. Use it to watch a dependency's PR, restore a dismissed one, or follow a PR the branch watcher didn't auto-discover. Pinning is local to this session; it does not change anything on GitHub.`,
+
+  pr_unbind: `Remove a pinned PR from this session's carousel (undoes pr_bind). Give the PR URL, owner/repo#123, or its number. The branch's own PR is auto-discovered and cannot be unbound this way — it reappears while you're on that branch. Nothing on GitHub changes.`,
+
+  pr_set_auto_merge: `Enable or disable GitHub auto-merge on one of this session's PRs (GitHub merges it automatically once required checks pass and reviews are satisfied). Give a PR URL, owner/repo#123, or a number for the current repo; enabled true/false; optional method (merge/squash/rebase, default: the repository's default — must be one the repo allows). GitHub only takes auto-merge when the repository allows it and the PR still waits on required checks or reviews; pr_status's autoMergeBlocked says when it won't, and why.
+
+This changes state on GitHub and can lead to the PR merging without further action. Ask the user before enabling auto-merge unless they've already told you to for this PR — enabling it is an outward, hard-to-undo action.`,
+
   get_session_info: `Get metadata about the current session or a specific session by ID.
 
 Returns labels, status, name, permission mode, projectId (if the session is bound to a project), workingDirectory, and other details.
@@ -792,6 +831,11 @@ export const SESSION_TOOL_DEFS: SessionToolDef[] = [
   { name: 'update_page', description: TOOL_DESCRIPTIONS.update_page, inputSchema: UpdatePageSchema, executionMode: 'registry', safeMode: 'block', handler: handleUpdatePage },
   { name: 'write_page_data', description: TOOL_DESCRIPTIONS.write_page_data, inputSchema: WritePageDataSchema, executionMode: 'registry', safeMode: 'block', handler: handleWritePageData },
   { name: 'delete_page', description: TOOL_DESCRIPTIONS.delete_page, inputSchema: DeletePageSchema, executionMode: 'registry', safeMode: 'block', handler: handleDeletePage },
+  // PR tools (Coding mode — use the grouped ctx.prWatch callbacks; server-side watcher holds credentials)
+  { name: 'pr_status', description: TOOL_DESCRIPTIONS.pr_status, inputSchema: PrStatusSchema, executionMode: 'registry', safeMode: 'allow', readOnly: true, handler: handlePrStatus },
+  { name: 'pr_bind', description: TOOL_DESCRIPTIONS.pr_bind, inputSchema: PrBindSchema, executionMode: 'registry', safeMode: 'block', handler: handlePrBind },
+  { name: 'pr_unbind', description: TOOL_DESCRIPTIONS.pr_unbind, inputSchema: PrUnbindSchema, executionMode: 'registry', safeMode: 'block', handler: handlePrUnbind },
+  { name: 'pr_set_auto_merge', description: TOOL_DESCRIPTIONS.pr_set_auto_merge, inputSchema: PrSetAutoMergeSchema, executionMode: 'registry', safeMode: 'block', handler: handlePrSetAutoMerge },
   { name: 'get_session_info', description: TOOL_DESCRIPTIONS.get_session_info, inputSchema: GetSessionInfoSchema, executionMode: 'registry', safeMode: 'allow', readOnly: true, handler: handleGetSessionInfo },
   { name: 'list_sessions', description: TOOL_DESCRIPTIONS.list_sessions, inputSchema: ListSessionsSchema, executionMode: 'registry', safeMode: 'allow', readOnly: true, handler: handleListSessions },
   { name: 'list_background_tasks', description: TOOL_DESCRIPTIONS.list_background_tasks, inputSchema: ListBackgroundTasksSchema, executionMode: 'registry', safeMode: 'allow', readOnly: true, handler: handleListBackgroundTasks },
@@ -804,7 +848,8 @@ export const SESSION_TOOL_DEFS: SessionToolDef[] = [
 
 /**
  * Agent profile: the prompt and session-tool set a session runs with.
- * - `default`: the full Craft Agent toolset (desktop workflows, sources, Pages, browser…).
+ * - `default`: the full Craft Agent toolset (desktop workflows, sources, Pages, browser…), without
+ *   the Coding-only tools in {@link CODING_ONLY_TOOLS}.
  * - `coding`: coding mode — a lean prompt and only the tools in {@link CODING_PROFILE_TOOLS}.
  */
 export type AgentProfile = 'default' | 'coding';
@@ -821,6 +866,12 @@ export const CODING_PROFILE_TOOLS: Readonly<Record<string, 'always' | 'sources' 
   SubmitPlan: 'always',
   list_background_tasks: 'always',
   send_developer_feedback: 'always',
+  // PR tools are core to Coding mode; each returns a clean "unavailable" result off a GitHub checkout
+  // (no async git gating — see plan D7), so they are always offered there (and only there: CODING_ONLY_TOOLS).
+  pr_status: 'always',
+  pr_bind: 'always',
+  pr_unbind: 'always',
+  pr_set_auto_merge: 'always',
   project_memory_append: 'project',
   source_test: 'sources',
   source_oauth_trigger: 'sources',
@@ -834,6 +885,12 @@ export const CODING_PROFILE_TOOLS: Readonly<Record<string, 'always' | 'sources' 
   source_get_prompt: 'sources',
 };
 
+/**
+ * Session tools only the `coding` profile offers: the PR tools act on the session's PR carousel,
+ * which only Coding sessions have, so other sessions would just pay for their descriptions.
+ */
+export const CODING_ONLY_TOOLS: ReadonlySet<string> = new Set(['pr_status', 'pr_bind', 'pr_unbind', 'pr_set_auto_merge']);
+
 export interface SessionToolFilterOptions {
   /** Include the experimental send_developer_feedback tool. */
   includeDeveloperFeedback?: boolean;
@@ -845,7 +902,7 @@ export interface SessionToolFilterOptions {
   includeDecide?: boolean;
   /** Include `browser_tool` (the "Built-in browser" setting). Defaults to true. */
   includeBrowser?: boolean;
-  /** Agent profile. `coding` keeps only {@link CODING_PROFILE_TOOLS}; defaults to `default` (no change). */
+  /** Agent profile. `coding` keeps only {@link CODING_PROFILE_TOOLS}; `default` (when unset) drops {@link CODING_ONLY_TOOLS}. */
   profile?: AgentProfile;
   /** Coding profile: the session has at least one enabled source (keeps the `sources` tools). */
   hasEnabledSources?: boolean;
@@ -886,6 +943,9 @@ export function getSessionToolDefs(options?: SessionToolFilterOptions): SessionT
       return false;
     }
     if (coding && !keptInCodingProfile(def.name, options)) {
+      return false;
+    }
+    if (!coding && CODING_ONLY_TOOLS.has(def.name)) {
       return false;
     }
     return true;

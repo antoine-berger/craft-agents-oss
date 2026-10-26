@@ -1212,6 +1212,13 @@ export class PiAgent extends BaseAgent {
         this.resetPrerequisiteState();
       }
 
+      // Coding mode post-tool hook: a Bash `gh pr create` pins the PR it opened (fire-and-forget;
+      // Pi has no hook output to tell the model, the carousel shows it)
+      if (agentEvent.type === 'tool_result' && !agentEvent.isError && agentEvent.toolName === 'Bash') {
+        const command = (agentEvent.input as { command?: unknown } | undefined)?.command;
+        void this.pinCreatedPr(command, typeof agentEvent.result === 'string' ? agentEvent.result : '');
+      }
+
       // Fire PostToolUse / PostToolUseFailure hook events (fire-and-forget)
       if (agentEvent.type === 'tool_result') {
         const hookEvent = agentEvent.isError ? 'PostToolUseFailure' : 'PostToolUse';

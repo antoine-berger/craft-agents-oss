@@ -110,6 +110,8 @@ export interface PromptBuilderConfig {
  * Context block options for building system prompt context
  */
 export interface ContextBlockOptions {
+  /** Claude OAuth: account connectors are managed on claude.ai, outside Craft sources. */
+  claudeAccountConnectors?: boolean;
   /** Current permission mode (optional - included in session state via formatSessionState) */
   permissionMode?: string;
   /** Plans folder path */

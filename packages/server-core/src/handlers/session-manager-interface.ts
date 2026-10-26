@@ -24,6 +24,8 @@ import type {
   ShareResult,
   BackgroundTaskOutput,
   StopBackgroundTaskResult,
+  BoundPr,
+  PrMonitorState,
 } from '@craft-agent/shared/protocol'
 import type { SessionBundle, DispatchMode } from '@craft-agent/shared/sessions'
 import type { EventSink } from '../transport'
@@ -84,6 +86,22 @@ export interface ISessionManager {
   setSessionThinkingLevel(sessionId: string, level: ThinkingLevel): void
   setSessionCodingMode(sessionId: string, enabled: boolean): void
   continueSessionInNewSession(sessionId: string, codingMode: boolean): Promise<{ sessionId: string }>
+  /** Coding mode: PRs pinned to a session (chat-header PR carousel, in addedAt order). */
+  getSessionBoundPrs(sessionId: string): BoundPr[]
+  /** Pin a PR to a session (deduped by host/owner/repo#number); persists and returns the new list. */
+  bindPrToSession(sessionId: string, pr: BoundPr): BoundPr[]
+  /** Remove a pinned PR from a session (and its auto-fix state); persists and returns the new list. */
+  unbindPrFromSession(sessionId: string, pr: { host: string; owner: string; repo: string; number: number }): BoundPr[]
+  /** Coding mode: per-PR monitor state (auto-fix), keyed by PR id. */
+  getSessionPrMonitors(sessionId: string): Record<string, PrMonitorState>
+  /** Turn auto-fix on/off for one PR of a session; persists and returns the monitors. */
+  setSessionPrAutoFix(sessionId: string, prId: string, enabled: boolean): Record<string, PrMonitorState>
+  /** Record an auto-fix run (time + the review signature it acted on). */
+  recordPrAutoFixRun(sessionId: string, prId: string, signature: string[], at: number): void
+  /** A session's metadata without loading its messages (cheap, unlike getSession). */
+  getSessionSnapshot(sessionId: string): Session | null
+  /** Start a hidden, app-labelled turn in an idle session; false (nothing sent) when missing or busy. */
+  wakeIdleSessionWithNotice(sessionId: string, text: string): boolean
   updateWorkingDirectory(sessionId: string, path: string): void
   setSessionSources(sessionId: string, sourceSlugs: string[]): Promise<void>
   setSessionLabels(sessionId: string, labels: string[]): void

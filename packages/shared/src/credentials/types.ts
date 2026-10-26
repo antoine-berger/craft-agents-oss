@@ -97,6 +97,8 @@ export interface StoredCredential {
   refreshToken?: string;
   /** OAuth token expiration (Unix timestamp ms) */
   expiresAt?: number;
+  /** OAuth scopes actually granted by the provider; absent for legacy credentials. */
+  scopes?: string[];
   /** OAuth client ID (needed for token refresh) */
   clientId?: string;
   /** OAuth client secret (needed for Google token refresh - Google requires both ID and secret) */

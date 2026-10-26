@@ -107,7 +107,13 @@ function ChatHeaderDemo({
             workingDirectory={item.workingDirectory}
             sessionFolderPath={DEMO_SESSION_FOLDER}
             prWatch={pr.state}
+            prWatchNav={pr.nav}
+            prWatchActiveOrigin={pr.activeOrigin}
             onRefreshPrWatch={pr.refresh}
+            onUnbindPr={pr.unbind}
+            onSetPrAutoMerge={pr.setAutoMerge}
+            prWatchAutoFix={pr.autoFix}
+            onSetPrAutoFix={pr.setAutoFix}
             onPrCardOpenChange={pr.onCardOpenChange}
           />
           <div className={cn('h-24 border-t border-subtle px-6 py-4 text-label-sm text-tertiary')}>
@@ -147,6 +153,11 @@ export const chatHeaderComponents: ComponentEntry[] = [
       { name: 'Compact', props: { labelCount: 3, compact: true, width: 390 } },
       { name: 'Coding mode + PR', props: { codingMode: true, labelCount: 3, prScenario: 'open-failing' } },
       { name: 'Coding mode, narrow', props: { codingMode: true, labelCount: 6, longTitle: true, width: 560, prScenario: 'long-title' } },
+      { name: 'Coding mode, 3 PRs', props: { codingMode: true, labelCount: 2, prScenario: 'carousel' } },
+      { name: 'Coding mode, 7 PRs', props: { codingMode: true, labelCount: 2, prScenario: 'carousel-many' } },
+      { name: 'Coding mode, 5-digit PRs', props: { codingMode: true, labelCount: 2, prScenario: 'carousel-long-numbers' } },
+      { name: 'Coding mode, auto-merge off for the repo', props: { codingMode: true, labelCount: 2, prScenario: 'auto-merge-blocked' } },
+      { name: 'Coding mode, auto-merge refused', props: { codingMode: true, labelCount: 2, prScenario: 'auto-merge-refused' } },
     ],
   },
 ]
