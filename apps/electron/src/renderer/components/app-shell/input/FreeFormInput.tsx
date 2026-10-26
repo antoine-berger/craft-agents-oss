@@ -74,9 +74,7 @@ import {
 } from './model-picker-helpers'
 import { useModelVisionToggle } from './useModelVisionToggle'
 import { ComposerSourcesChip } from './ComposerSourcesChip'
-import { ComposerCodingChip } from './ComposerCodingChip'
-import { useDirectoryPicker } from '@/hooks/useDirectoryPicker'
-import { ServerDirectoryBrowser } from '@/components/ServerDirectoryBrowser'
+import { ComposerWorktreeChip } from './ComposerWorktreeChip'
 import { ComposerModelMenu } from './ComposerModelMenu'
 import { ComposerModeChip } from './ComposerModeChip'
 import { ContextUsageChip } from './ContextUsageChip'
@@ -199,6 +197,8 @@ export interface FreeFormInputProps {
   // Coding mode (session-level, fixed once the conversation starts)
   /** Coding mode is on: lean coding prompt and session tools */
   codingMode?: boolean
+  requireWorktree?: boolean
+  worktreeConfigured?: boolean
   /** Toggle coding mode (only before the first message) */
   onCodingModeChange?: (enabled: boolean) => void
   /** Continue a started session in a new one with coding mode set to `enabled` */
@@ -292,9 +292,8 @@ export function FreeFormInput({
   currentSessionStatus,
   disableSend = false,
   isEmptySession = false,
-  codingMode = false,
-  onCodingModeChange,
-  onContinueWithCodingMode,
+  requireWorktree = false,
+  worktreeConfigured = false,
   contextStatus,
   followUpItems = [],
   onFollowUpClick,
@@ -308,6 +307,9 @@ export function FreeFormInput({
   onRequestExpand,
 }: FreeFormInputProps) {
   const { t } = useTranslation()
+  const [selectedWorktree, setSelectedWorktree] = React.useState<string>()
+  React.useEffect(() => { setSelectedWorktree(undefined) }, [sessionId])
+  const needsRepository = requireWorktree && isEmptySession && !worktreeConfigured && !selectedWorktree
 
   // Default rotating placeholders for onboarding/empty state (i18n-aware). The keyboard tips are
   // left out in compact (touch) layouts, where they are noise.
@@ -930,23 +932,6 @@ export function FreeFormInput({
   // Inline slash command hook (modes, features, and folders); Guarded only while it is offered
   const availableModes = useAvailablePermissionModes(permissionMode)
 
-  // Coding mode is about a folder's code: turning it on asks for one (the chip's popover offers a new
-  // worktree or an existing folder; "existing" opens this picker)
-  const codingFolderPicker = useDirectoryPicker(React.useCallback((path: string) => {
-    onWorkingDirectoryChange?.(path)
-  }, [onWorkingDirectoryChange]))
-  const { pickDirectory: pickCodingFolder } = codingFolderPicker
-  const hasWorkingFolder = !!workingDirectory && workingDirectory !== sessionFolderPath
-  const handleCodingModeToggle = React.useCallback((enabled: boolean) => {
-    onCodingModeChange?.(enabled)
-  }, [onCodingModeChange])
-  const codingWorkspaceSetup = React.useMemo(() => (onWorkingDirectoryChange ? {
-    workspaceId,
-    sessionId,
-    currentFolder: hasWorkingFolder ? workingDirectory : undefined,
-    onUseExistingFolder: pickCodingFolder,
-    onWorktreeCreated: onWorkingDirectoryChange,
-  } : undefined), [onWorkingDirectoryChange, workspaceId, sessionId, hasWorkingFolder, workingDirectory, pickCodingFolder])
   const inlineSlash = useInlineSlashCommand({
     inputRef: richInputRef,
     modes: availableModes,
@@ -1255,7 +1240,7 @@ export function FreeFormInput({
     if (!hasContent || disabled) return false
 
     // Tutorial may disable sending to guide user through specific steps
-    if (disableSend) return false
+    if (disableSend || needsRepository) return false
 
     // Too much to send in one message: say so and keep the draft (the send would drop the connection)
     const sizeProblem = checkAttachmentSizes(attachments, maxMessageBytesRef.current)
@@ -1299,7 +1284,7 @@ export function FreeFormInput({
     })
 
     return true
-  }, [input, attachments, followUpItems, disabled, disableSend, onInputChange, onAttachmentsChange, onSubmit, skills, sources, optimisticSourceSlugs, onSourcesChange, onWorkingDirectoryChange, homeDir, showAttachmentSizeProblem])
+  }, [input, attachments, followUpItems, disabled, disableSend, needsRepository, onInputChange, onAttachmentsChange, onSubmit, skills, sources, optimisticSourceSlugs, onSourcesChange, onWorkingDirectoryChange, homeDir, showAttachmentSizeProblem])
 
   // Listen for craft:submit-input events (simulate pressing the Send button)
   React.useEffect(() => {
@@ -1802,11 +1787,18 @@ export function FreeFormInput({
               disabled={disabled}
               buttonRef={sourceButtonRef}
               claudeAccountConnectors={claudeAccountConnectors}
+              managedConnectors={configuredSources.filter(source => source.claudeAccount?.connectionSlug === effectiveConnection)}
             />
           )}
 
           {/* Working directory chip */}
-          {onWorkingDirectoryChange && (compactMode ? (
+          {requireWorktree && isEmptySession ? (
+            <ComposerWorktreeChip key={sessionId} workspaceId={workspaceId} sessionId={sessionId}
+              configured={!needsRepository} disabled={disabled} onReady={path => {
+                setSelectedWorktree(path)
+                onWorkingDirectoryChange?.(path)
+              }} />
+          ) : onWorkingDirectoryChange && (compactMode ? (
             <CompactWorkingDirectorySelector
               workingDirectory={workingDirectory}
               onWorkingDirectoryChange={onWorkingDirectoryChange}
@@ -1824,18 +1816,6 @@ export function FreeFormInput({
             />
           ))}
 
-          {/* Coding mode chip — next to the folder: the mode is about the folder's code */}
-          {onCodingModeChange && onContinueWithCodingMode && (
-            <ComposerCodingChip
-              enabled={codingMode}
-              locked={!isEmptySession}
-              compact={compactMode}
-              disabled={disabled}
-              onToggle={handleCodingModeToggle}
-              onContinueInNewSession={onContinueWithCodingMode}
-              workspaceSetup={codingWorkspaceSetup}
-            />
-          )}
           </div>
 
           {/* Spacer — doubles as a tap / hover target while the input is
@@ -1932,19 +1912,12 @@ export function FreeFormInput({
           {/* Send/Stop Button - Always show stop when processing */}
           <SendButton
             isProcessing={isProcessing}
-            disabled={!hasContent || disabled || disableSend}
+            disabled={!hasContent || disabled || disableSend || needsRepository}
             onStop={() => handleStop(false)}
           />
           </div>
         </div>
       </div>
-      {/* Remote servers: folder browser for the coding-mode folder prompt (local uses the native dialog) */}
-      <ServerDirectoryBrowser
-        open={codingFolderPicker.showServerBrowser}
-        mode={codingFolderPicker.serverBrowserMode}
-        onSelect={codingFolderPicker.confirmServerBrowser}
-        onCancel={codingFolderPicker.cancelServerBrowser}
-      />
     </form>
   )
 }

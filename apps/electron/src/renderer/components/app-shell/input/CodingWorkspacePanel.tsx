@@ -39,7 +39,7 @@ export function defaultWorktreeBranch(sessionId?: string): string {
   return `craft/${(sessionId ?? 'session').replace(/[^A-Za-z0-9._-]+/g, '-')}`
 }
 
-function useRepoListing(workspaceId: string | undefined, active: boolean) {
+export function useRepoListing(workspaceId: string | undefined, active: boolean) {
   const [state, setState] = React.useState<{ status: 'idle' | 'loading' | 'ready' | 'error'; listing?: RepoListing; error?: string }>({ status: 'idle' })
   React.useEffect(() => {
     if (!active || !workspaceId || !window.electronAPI?.listCodingRepos) return
@@ -154,7 +154,7 @@ function ChoiceRow({ icon: Icon, title, hint, onClick, autoFocus }: { icon: type
   )
 }
 
-function RepoPicker({ state, onPick }: { state: ReturnType<typeof useRepoListing>; onPick: (repo: Repo) => void }) {
+export function RepoPicker({ state, onPick }: { state: ReturnType<typeof useRepoListing>; onPick: (repo: Repo) => void }) {
   const { t } = useTranslation()
   if (state.status === 'loading' || state.status === 'idle') {
     return (

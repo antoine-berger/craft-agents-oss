@@ -511,6 +511,12 @@ export interface SourceGuide {
  * Fully loaded source with all files
  */
 export interface LoadedSource {
+  /** Read-only connector discovered from this Claude account; never a source on disk. */
+  claudeAccount?: {
+    connectionSlug: string;
+    connectionName: string;
+    tools: Array<{ name: string; description?: string }>;
+  };
   config: FolderSourceConfig;
   guide: SourceGuide | null;
 

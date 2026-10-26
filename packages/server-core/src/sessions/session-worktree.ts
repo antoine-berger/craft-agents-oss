@@ -4,6 +4,7 @@ import type { ProjectConfig } from '@craft-agent/shared/projects'
 import type { CreateSessionOptions } from '@craft-agent/shared/protocol'
 import type { SessionWorktreeMetadata } from '@craft-agent/shared/sessions'
 import { expandPath } from '@craft-agent/shared/utils'
+import { commonGitDir } from '../services/coding-repos/discover'
 
 function isInsideDirectory(directory: string, parent: string): boolean {
   const child = relative(parent, directory)
@@ -57,4 +58,15 @@ export function resolveSessionWorktreePolicy(
     baseBranch: project.worktreeSettings.baseBranch,
     cleanupOnArchive: project.worktreeSettings.cleanupOnArchive === true,
   }
+}
+
+/** Every new independent chat isolates its repository, regardless of agent profile. */
+export async function defaultSessionWorktreePolicy(directory: string | undefined, options?: CreateSessionOptions): Promise<SessionWorktreeMetadata | undefined> {
+  if (options?.worktree === 'none' || options?.workingDirectory === 'none') return
+  const policy = resolveSessionWorktreePolicy({ workingDirectory: directory || '.', worktreeSettings: { enabled: true } }, {
+    ...options, workingDirectory: 'user_default',
+  })
+  if (!policy) return
+  const repositoryPath = directory ? expandPath(directory) : ''
+  return { ...policy, repositoryPath, needsRepository: !repositoryPath || !await commonGitDir(repositoryPath) }
 }

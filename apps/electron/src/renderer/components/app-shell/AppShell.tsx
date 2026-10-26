@@ -751,11 +751,13 @@ function AppShellContent({
   // Load sources from backend on mount
   React.useEffect(() => {
     if (!activeWorkspaceId) return
-    window.electronAPI.getSources(activeWorkspaceId).then((loaded) => {
-      setSources(loaded || [])
-    }).catch(err => {
-      console.error('[Chat] Failed to load sources:', err)
-    })
+    let cancelled = false
+    const refresh = () => window.electronAPI.getSources(activeWorkspaceId).then((loaded) => {
+      if (!cancelled) setSources(loaded || [])
+    }).catch(err => { console.error('[Chat] Failed to load sources:', err) })
+    refresh()
+    window.addEventListener('focus', refresh)
+    return () => { cancelled = true; window.removeEventListener('focus', refresh) }
   }, [activeWorkspaceId])
 
   // Subscribe to live source updates (when sources are added/removed dynamically)
@@ -764,7 +766,7 @@ function AppShellContent({
       if (workspaceId !== activeWorkspaceId) return
       // Clear icon cache so updated source icons are re-fetched on render
       clearSourceIconCaches()
-      setSources(updatedSources || [])
+      setSources(previous => [...previous.filter(source => source.claudeAccount), ...(updatedSources || [])])
     })
     return cleanup
   }, [activeWorkspaceId])

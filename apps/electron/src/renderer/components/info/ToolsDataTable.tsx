@@ -23,6 +23,8 @@ export interface ToolRow {
 }
 
 interface ToolsDataTableProps {
+  /** Native Claude account connectors keep their access policy in claude.ai. */
+  showPermissions?: boolean
   data: ToolRow[]
   /** Show loading spinner */
   loading?: boolean
@@ -75,6 +77,7 @@ function getColumns(t: TFunction): ColumnDef<ToolRow>[] {
 }
 
 export function ToolsDataTable({
+  showPermissions = true,
   data,
   loading,
   error,
@@ -82,7 +85,7 @@ export function ToolsDataTable({
   className,
 }: ToolsDataTableProps) {
   const { t } = useTranslation()
-  const columns = useMemo(() => getColumns(t), [t])
+  const columns = useMemo(() => getColumns(t).filter(column => showPermissions || !('accessorKey' in column) || column.accessorKey !== 'permission'), [t, showPermissions])
 
   return (
     <Info_DataTable

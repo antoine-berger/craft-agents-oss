@@ -16,6 +16,7 @@ export interface SourceSelectorPopoverProps {
   selectedSlugs: string[]
   onToggleSlug: (slug: string) => void
   claudeAccountConnectors?: boolean
+  managedConnectors?: LoadedSource[]
 }
 
 export function SourceSelectorPopover({
@@ -26,6 +27,7 @@ export function SourceSelectorPopover({
   selectedSlugs,
   onToggleSlug,
   claudeAccountConnectors = false,
+  managedConnectors,
 }: SourceSelectorPopoverProps) {
   const { t } = useTranslation()
   return (
@@ -38,7 +40,7 @@ export function SourceSelectorPopover({
       getLabel={(source) => source.config.name}
       isSelected={(source) => selectedSlugs.includes(source.config.slug)}
       onToggle={(source) => onToggleSlug(source.config.slug)}
-      header={claudeAccountConnectors ? <ClaudeConnectorsNotice /> : undefined}
+      header={claudeAccountConnectors ? <ClaudeConnectorsNotice connectors={managedConnectors} /> : undefined}
       filterPlaceholder={t('common.search')}
       emptyState={claudeAccountConnectors
         ? t('chat.claudeConnectors.noOtherSources')

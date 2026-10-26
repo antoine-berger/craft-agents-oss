@@ -103,6 +103,7 @@ export interface ISessionManager {
   /** Start a hidden, app-labelled turn in an idle session; false (nothing sent) when missing or busy. */
   wakeIdleSessionWithNotice(sessionId: string, text: string): boolean
   updateWorkingDirectory(sessionId: string, path: string): void
+  prepareNewSessionWorktree(workspaceId: string, sessionId: string, repositoryPath: string): Promise<import('@craft-agent/shared/protocol').CreateWorktreeResult>
   setSessionSources(sessionId: string, sourceSlugs: string[]): Promise<void>
   setSessionLabels(sessionId: string, labels: string[]): void
   /** Apply the reserved Task labeling (mint / inherit the per-task item label under the Task

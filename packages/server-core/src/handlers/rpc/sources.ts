@@ -5,6 +5,7 @@ import { safeJsonParse } from '@craft-agent/shared/utils/files'
 import { getCredentialManager } from '@craft-agent/shared/credentials'
 import type { RpcServer } from '@craft-agent/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
+import { loadClaudeConnectorSources, isClaudeConnectorSlug } from '../../services/claude-connectors'
 
 export const HANDLED_CHANNELS = [
   RPC_CHANNELS.sources.GET,
@@ -28,7 +29,13 @@ export function registerSourcesHandlers(server: RpcServer, deps: HandlerDeps): v
       log.error(`SOURCES_GET: Workspace not found: ${workspaceId}`)
       return []
     }
-    return loadWorkspaceSources(workspace.rootPath)
+    const sources = await loadWorkspaceSources(workspace.rootPath)
+    try {
+      return [...await loadClaudeConnectorSources(workspace), ...sources]
+    } catch (error) {
+      log.warn('Claude connector discovery failed', error instanceof Error ? error.message : 'Unknown error')
+      return sources
+    }
   })
 
   // Create a new source
@@ -49,6 +56,7 @@ export function registerSourcesHandlers(server: RpcServer, deps: HandlerDeps): v
 
   // Delete a source
   server.handle(RPC_CHANNELS.sources.DELETE, async (_ctx, workspaceId: string, sourceSlug: string) => {
+    if (isClaudeConnectorSlug(sourceSlug)) throw new Error('Claude connectors are managed on claude.ai')
     const workspace = getWorkspaceByNameOrId(workspaceId)
     if (!workspace) throw new Error(`Workspace not found: ${workspaceId}`)
     const { deleteSource } = await import('@craft-agent/shared/sources')
@@ -74,6 +82,7 @@ export function registerSourcesHandlers(server: RpcServer, deps: HandlerDeps): v
 
   // Save credentials for a source (bearer token or API key)
   server.handle(RPC_CHANNELS.sources.SAVE_CREDENTIALS, async (_ctx, workspaceId: string, sourceSlug: string, credential: string) => {
+    if (isClaudeConnectorSlug(sourceSlug)) throw new Error('Claude connectors are managed on claude.ai')
     const workspace = getWorkspaceByNameOrId(workspaceId)
     if (!workspace) throw new Error(`Workspace not found: ${workspaceId}`)
     const { loadSource, getSourceCredentialManager, markSourceAuthenticated } = await import('@craft-agent/shared/sources')

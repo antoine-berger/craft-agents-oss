@@ -126,7 +126,7 @@ import { loadStatusConfig } from '@craft-agent/shared/statuses/storage'
 import { AutomationSystem, createPromptHistoryEntry, appendAutomationHistoryEntry, type AutomationSystemMetadataSnapshot, type PendingPrompt } from '@craft-agent/shared/automations'
 import { buildBackendRuntimeSignature, buildRestartRequiredSignature, filterAttachmentsForModelInput } from './runtime-config'
 import { validateArchiveTarget } from './archive-guards'
-import { resolveSessionWorktreePolicy, isSessionDirectoryInWorktree } from './session-worktree'
+import { resolveSessionWorktreePolicy, defaultSessionWorktreePolicy, isSessionDirectoryInWorktree } from './session-worktree'
 import { planOwnedWorktree, ensureOwnedWorktree, removeOwnedWorktree, ownedWorktreeWorkingDirectory } from '../services/coding-repos/owned-worktree'
 import { addTurnUsage, branchStartTotals, type BranchParent } from './turn-usage'
 
@@ -3368,6 +3368,8 @@ export class SessionManager implements ISessionManager {
       resolvedWorkingDir = parentSession.workingDirectory
     }
 
+    resolvedWorktree ??= await defaultSessionWorktreePolicy(resolvedWorkingDir, options)
+
     // Validate branch request up-front so branch metadata is only set for valid branches.
     // This prevents creating sessions that claim to be branched but don't have copied history.
     // A branch keeps its parent's coding mode: an SDK fork carries the parent's pinned system prompt.
@@ -4065,6 +4067,21 @@ export class SessionManager implements ISessionManager {
     }
   }
 
+  async prepareNewSessionWorktree(workspaceId: string, sessionId: string, repositoryPath: string): Promise<import('@craft-agent/shared/protocol').CreateWorktreeResult> {
+    const managed = this.sessions.get(sessionId)
+    if (!managed || managed.workspace.id !== workspaceId) throw new Error('Session not found in workspace')
+    return this.withWorktreeLock(managed, async () => {
+      if (hasConversationStarted(managed) || managed.isProcessing || managed.hidden || managed.parentSessionId) {
+        throw new Error('Choose the repository before starting the conversation')
+      }
+      if (!managed.worktree?.owned) managed.worktree = { repositoryPath, cleanupOnArchive: false }
+      await this.prepareSessionWorktree(managed)
+      const owned = managed.worktree!.owned!
+      this.notifySessionCreated(workspaceId, sessionId)
+      return { path: ownedWorktreeWorkingDirectory(owned), branch: owned.branch, base: owned.baseCommit, cloned: false }
+    })
+  }
+
   /** The queue logs I/O failures; confirm ownership reached disk before touching Git. */
   private async persistWorktreeState(managed: ManagedSession): Promise<void> {
     this.persistSession(managed)
@@ -4080,6 +4097,7 @@ export class SessionManager implements ISessionManager {
     if (managed.isDeleting) throw new DOMException('Session was deleted', 'AbortError')
     const metadata = managed.worktree
     if (!metadata) return
+    if (metadata.needsRepository) throw new Error(i18n.t('chat.worktree.chooseRepository'))
 
     const ownerId = `${managed.workspace.id}/${managed.id}`
     if (metadata.owned && metadata.owned.ownerId !== ownerId) {
@@ -6419,8 +6437,8 @@ export class SessionManager implements ISessionManager {
         return
       }
 
-      // An explicit folder choice before setup opts this chat out of the project default.
-      managed.worktree = undefined
+      // Changing a new session's repository still isolates it before the first agent starts.
+      managed.worktree = managed.worktree ? { repositoryPath: path, cleanupOnArchive: false } : undefined
       managed.workingDirectory = path
 
       // Invalidate filesystem caches that depend on working directory

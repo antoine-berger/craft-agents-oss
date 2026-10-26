@@ -1792,6 +1792,8 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
               thinkingLevel,
               onThinkingLevelChange,
               codingMode,
+              requireWorktree: !session.hidden && !session.parentSessionId && !session.taskSlug,
+              worktreeConfigured: !!session.worktree && !session.worktree.needsRepository,
               onCodingModeChange,
               onContinueWithCodingMode: handleContinueWithCodingMode,
               enabledModes,

@@ -42,6 +42,8 @@ export interface RepoListing {
 }
 
 export interface CreateWorktreeRequest {
+  /** Bind and persist an isolated worktree owned by this new session. */
+  sessionId?: string
   /** A local repository (its `gitDir`) … */
   gitDir?: string
   /** … or a GitHub repository to clone first */

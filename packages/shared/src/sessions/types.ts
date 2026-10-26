@@ -133,6 +133,8 @@ export interface OwnedWorktree {
 
 /** Project policy captured when a chat is created; existing chats keep their checkout. */
 export interface SessionWorktreeMetadata {
+  /** A new independent session must choose a repository before it can run. */
+  needsRepository?: boolean;
   repositoryPath: string;
   baseBranch?: string;
   cleanupOnArchive?: boolean;

@@ -83,13 +83,7 @@ export function gitReason(stderr: string): string {
   return (reasons.length ? reasons : [stderr.trim()]).map(line => line.replace(/^(fatal|error):\s*/i, '')).join('\n')
 }
 
-export async function createWorktree(request: CreateWorktreeRequest, { cloneRoot }: { cloneRoot: string | null }): Promise<CreateWorktreeResult> {
-  const branch = request.branch.trim()
-  // `check-ref-format --branch` is git's own rule for branch names (no "..", no spaces, no leading "-")
-  if (!branch || branch.startsWith('-') || !(await runGit(homedir(), ['check-ref-format', '--branch', branch]))) {
-    throw new WorktreeError(`"${branch}" is not a valid branch name`, 'invalid-branch')
-  }
-
+export async function resolveWorktreeRepository(request: Pick<CreateWorktreeRequest, 'gitDir' | 'cloneNameWithOwner'>, cloneRoot: string | null): Promise<{ gitDir: string; cloned: boolean }> {
   let gitDir: string | null = null
   let cloned = false
   if (request.cloneNameWithOwner) {
@@ -113,6 +107,15 @@ export async function createWorktree(request: CreateWorktreeRequest, { cloneRoot
     gitDir = await commonGitDir(request.gitDir)
   }
   if (!gitDir) throw new WorktreeError('Not a git repository', 'not-a-repo')
+  return { gitDir, cloned }
+}
+
+export async function createWorktree(request: CreateWorktreeRequest, { cloneRoot }: { cloneRoot: string | null }): Promise<CreateWorktreeResult> {
+  const branch = request.branch.trim()
+  if (!branch || branch.startsWith('-') || !(await runGit(homedir(), ['check-ref-format', '--branch', branch]))) {
+    throw new WorktreeError(`"${branch}" is not a valid branch name`, 'invalid-branch')
+  }
+  const { gitDir, cloned } = await resolveWorktreeRepository(request, cloneRoot)
 
   const dir = repoCommandDir(gitDir)
   const base = await resolveWorktreeBase(dir)

@@ -4,6 +4,9 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Features
 
+- **Claude account connectors in Sources** — Native claude.ai MCP connectors appear with their connection status and tools in the source list and chat selector. Authentication and management stay on claude.ai; no duplicate Craft source or connector credential is created.
+- **A worktree for every new session** — New independent sessions automatically isolate their repository in a session-owned branch and worktree. Choose a repository when the workspace contains several; project repositories are used automatically. The composer no longer requires a Coding mode toggle. Existing conversations retain their folders.
+
 - **Sign in to MCP servers that reject the OAuth relay** — Some MCP servers only accept a local (loopback) redirect address when signing in, and refuse the Craft Agents relay with an error like "only HTTP loopback callbacks". Add `"oauthRelay": false` to the source's `mcp` block to send the sign-in straight back to the app on `localhost` instead. Leave it unset to keep using the relay. See **Sources → MCP servers → Authentication** in the docs.
 
 ## Improvements

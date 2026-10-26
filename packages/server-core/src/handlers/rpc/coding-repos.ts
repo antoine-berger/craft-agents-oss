@@ -10,9 +10,9 @@ import { expandPath } from '@craft-agent/shared/utils'
 import { loadWorkspaceConfig } from '@craft-agent/shared/workspaces'
 import type { RpcServer } from '@craft-agent/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
-import { cloneRootFor, discoverLocalRepos } from '../../services/coding-repos/discover'
+import { cloneRootFor, discoverLocalRepos, repoCommandDir } from '../../services/coding-repos/discover'
 import { listGitHubRepos } from '../../services/coding-repos/github'
-import { createWorktree } from '../../services/coding-repos/worktree'
+import { createWorktree, resolveWorktreeRepository } from '../../services/coding-repos/worktree'
 
 export const HANDLED_CHANNELS = [
   RPC_CHANNELS.git.LIST_REPOS,
@@ -49,7 +49,7 @@ async function listing(workspaceId: string, recentDirs: unknown, refreshGitHub: 
   }
 }
 
-export function registerCodingReposHandlers(server: RpcServer, _deps: HandlerDeps): void {
+export function registerCodingReposHandlers(server: RpcServer, deps: HandlerDeps): void {
   server.handle(RPC_CHANNELS.git.LIST_REPOS, async (_ctx, workspaceId: string, recentDirs: string[], options?: { refreshGitHub?: boolean }): Promise<RepoListing> => {
     return listing(workspaceId, recentDirs, !!options?.refreshGitHub)
   })
@@ -57,6 +57,14 @@ export function registerCodingReposHandlers(server: RpcServer, _deps: HandlerDep
   server.handle(RPC_CHANNELS.git.CREATE_WORKTREE, async (_ctx, workspaceId: string, request: CreateWorktreeRequest, recentDirs: string[]): Promise<CreateWorktreeResult> => {
     // The clone folder is derived here, as in the listing, never taken from the client
     const { cloneRoot } = await listing(workspaceId, recentDirs, false)
+    if (request.sessionId) {
+      const session = await deps.sessionManager.getSession(request.sessionId)
+      if (!session || session.workspaceId !== workspaceId || session.isProcessing || session.messages.length > 0 || session.hidden || session.parentSessionId) {
+        throw new Error('Choose the repository in a new session in this workspace')
+      }
+      const { gitDir, cloned } = await resolveWorktreeRepository(request, cloneRoot)
+      return { ...await deps.sessionManager.prepareNewSessionWorktree(workspaceId, request.sessionId, repoCommandDir(gitDir)), cloned }
+    }
     return createWorktree(request, { cloneRoot })
   })
 }

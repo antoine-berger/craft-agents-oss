@@ -8,7 +8,7 @@ import type { CreateSessionOptions } from '@craft-agent/shared/protocol'
 import { setupI18n } from '@craft-agent/shared/i18n'
 import { getSessionFilePath, loadSession, readSessionHeader, sessionPersistenceQueue } from '@craft-agent/shared/sessions'
 import { createManagedSession, SessionManager } from './SessionManager.ts'
-import { resolveSessionWorktreePolicy } from './session-worktree.ts'
+import { resolveSessionWorktreePolicy, defaultSessionWorktreePolicy } from './session-worktree.ts'
 
 type ManagedSession = ReturnType<typeof createManagedSession>
 type Agent = NonNullable<ManagedSession['agent']>
@@ -22,6 +22,7 @@ type LifecycleHarness = {
   cleanupSessionWorktree(managed: ManagedSession): Promise<void>
   persistSession(managed: ManagedSession): void
   flushSession(sessionId: string): Promise<void>
+  prepareNewSessionWorktree(workspaceId: string, sessionId: string, repositoryPath: string): Promise<{ path: string; branch: string }>
 }
 
 const gitEnv = {
@@ -130,6 +131,29 @@ function sendHarness() {
 }
 
 describe('SessionManager worktree lifecycle', () => {
+  it('creates distinct durable worktrees for two repository selections and resumes the same checkout after reload', async () => {
+    const { manager, createChat, restoreChat } = harness()
+    const a = createChat({ messages: [], worktree: { repositoryPath: root, needsRepository: true } })
+    const b = createChat({ messages: [], worktree: { repositoryPath: root, needsRepository: true } })
+    const first = await manager.prepareNewSessionWorktree(workspace.id, a.id, repository)
+    const second = await manager.prepareNewSessionWorktree(workspace.id, b.id, repository)
+    expect(first.path).not.toBe(second.path)
+    expect(first.branch).not.toBe(second.branch)
+    expect(first.path).not.toBe(repository)
+    expect(readFileSync(join(repository, 'code.txt'), 'utf8')).toBe('main checkout\n')
+    expect(restoreChat(a.id).worktree?.owned?.path).toBe(first.path)
+    expect(await manager.prepareNewSessionWorktree(workspace.id, a.id, repository)).toEqual(first)
+    await expect(manager.prepareNewSessionWorktree('another-workspace', b.id, repository)).rejects.toThrow('Session not found')
+  })
+
+  it('defaults independent repository sessions to worktrees while non-repository folders require selection', async () => {
+    expect(await defaultSessionWorktreePolicy(repository)).toMatchObject({ repositoryPath: repository, needsRepository: false })
+    expect(await defaultSessionWorktreePolicy(root)).toMatchObject({ repositoryPath: root, needsRepository: true })
+    expect(await defaultSessionWorktreePolicy(repository, { workingDirectory: repository })).toMatchObject({ repositoryPath: repository })
+    for (const options of [{ hidden: true }, { parentSessionId: 'parent' }, { systemPromptPreset: 'mini' }, { worktree: 'none' as const }]) {
+      expect(await defaultSessionWorktreePolicy(repository, options)).toBeUndefined()
+    }
+  })
   it('starts the first chat only after its isolated cwd and ownership are durable', async () => {
     const { manager, createChat, backendStarts } = harness()
     const managed = createChat()

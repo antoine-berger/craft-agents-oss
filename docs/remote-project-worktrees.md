@@ -6,16 +6,20 @@ Projects organize initiatives, not unique repositories: “Checkout redesign” 
 
 1. Connect to the server, then open the project's **Settings**.
 2. Set **Working directory** to the repository or a subdirectory such as `packages/api` on that server. **Choose…** browses the server when connected remotely. The repository needs a commit, and the server user needs write access to it and the directory where neighboring worktrees are created.
-3. Enable **New worktree for each chat**. Optionally set **Base branch** to an existing branch such as `main` or `origin/main`; leave it blank for the repository default.
+3. New independent chats automatically use their own branch and worktree. Optionally set **Base branch** to an existing branch such as `main` or `origin/main`; leave it blank for the repository default.
 4. Save, then use **New session in …** from the project.
 
-The worktree is created before the agent starts on the first message. Creating an empty independent chat does not create a checkout. Subsequent messages and resumed chats reuse the same branch and directory. Settings are captured when a new chat is created; existing chats are not migrated.
+The worktree is created before the agent starts on the first message. When a workspace has no single repository, the new chat asks you to choose one and prepares its worktree immediately. No Coding mode switch is required. Subsequent messages and resumed chats reuse the same branch and directory. Existing chats are not migrated.
 
 Delegated chats and subtasks inherit their parent's current folder unless another folder or project is explicitly selected. They share the parent's worktree; creating a child can prepare that checkout if the parent has not started yet. Conversation forks and standalone task sessions retain their existing directory behavior.
 
 When the project uses a repository subdirectory, the agent starts in the corresponding subdirectory of its worktree. That folder is preserved after restart and archive/reopen. If the selected base branch lacks the folder, or the folder resolves outside the checkout, preparation stops with an error. Existing worktree records created without a subdirectory retain their original root directory.
 
-Choosing an explicit folder before the first message opts that chat out of automatic worktrees. After worktree preparation starts, the folder is locked for that chat; start another chat to use a different folder.
+Choosing a repository before the first message keeps automatic isolation enabled. After worktree preparation starts, the folder is locked for that chat; start another chat to use a different repository. Internal utility sessions and explicit programmatic `worktree: 'none'` requests retain their existing behavior.
+
+## Claude account MCP connectors
+
+Sources and the chat's connector menu show the native connectors supplied by each Claude account, including their connection status and tools. These rows are read-only: use **Open claude.ai** to authenticate or manage them. Discovery uses SDK control messages without sending a model prompt or calling a connector's tools. Connector credentials remain with Claude; the display does not create duplicate Craft source files. Craft-managed API and local sources retain their existing controls.
 
 ### Archive and delete
 
