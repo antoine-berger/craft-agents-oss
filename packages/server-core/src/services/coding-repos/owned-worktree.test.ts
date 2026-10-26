@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { OwnedWorktree } from '@craft-agent/shared/sessions'
-import { ensureOwnedWorktree, OwnedWorktreeError, planOwnedWorktree, removeOwnedWorktree } from './owned-worktree'
+import { ensureOwnedWorktree, OwnedWorktreeError, ownedWorktreeWorkingDirectory, planOwnedWorktree, removeOwnedWorktree } from './owned-worktree'
 
 let root: string
 let repo: string
@@ -54,6 +54,80 @@ describe('session-owned worktrees', () => {
     const resumed = await ensureOwnedWorktree(JSON.parse(JSON.stringify(first)) as OwnedWorktree)
     expect(resumed).toEqual(first)
     expect(git(repo, 'worktree', 'list', '--porcelain').match(/^worktree /gm)).toHaveLength(2)
+  })
+
+  const addProjectDirectory = () => {
+    const directory = join(repo, 'packages', 'api')
+    mkdirSync(directory, { recursive: true })
+    writeFileSync(join(directory, 'api.txt'), 'project source\n')
+    git(repo, 'add', '.')
+    git(repo, 'commit', '-m', 'Add project directory')
+    git(repo, 'push', 'origin', 'main')
+    return directory
+  }
+
+  it('maps a project in a linked source checkout and keeps the mapping after that checkout disappears', async () => {
+    addProjectDirectory()
+    const source = join(root, 'linked-source')
+    git(repo, 'worktree', 'add', '-b', 'source', source)
+    const alias = join(root, 'project-alias')
+    symlinkSync(join(source, 'packages', 'api'), alias, 'dir')
+    const pending = await planOwnedWorktree({
+      repositoryPath: alias, ownerId: 'workspace/linked-project', sessionId: 'linked-project', baseBranch: 'main',
+    })
+    expect(pending.projectSubdirectory).toBe(join('packages', 'api'))
+    const ready = await ensureOwnedWorktree(pending)
+    expect(ownedWorktreeWorkingDirectory(ready)).toBe(join(ready.path, 'packages', 'api'))
+    expect(readFileSync(join(ownedWorktreeWorkingDirectory(ready), 'api.txt'), 'utf8')).toBe('project source\n')
+    git(repo, 'worktree', 'remove', source)
+    expect((await removeOwnedWorktree(ready)).removed).toBe(true)
+    const restored = await ensureOwnedWorktree(JSON.parse(JSON.stringify({ ...ready, status: 'removed' })))
+    expect(ownedWorktreeWorkingDirectory(restored)).toBe(join(ready.path, 'packages', 'api'))
+    expect(existsSync(ownedWorktreeWorkingDirectory(restored))).toBe(true)
+  })
+
+  it('rejects a project folder missing in the selected base before reserving a checkout', async () => {
+    git(repo, 'branch', 'older-base')
+    const directory = addProjectDirectory()
+    await expect(planOwnedWorktree({
+      repositoryPath: directory, ownerId: 'workspace/missing-project', sessionId: 'missing-project', baseBranch: 'older-base',
+    })).rejects.toThrow('is not a directory in base branch')
+    expect(existsSync(join(repo, '.git', 'craft-session-worktrees'))).toBe(false)
+    expect(git(repo, 'branch', '--list', 'craft/session-*')).toBe('')
+    expect(git(repo, 'worktree', 'list', '--porcelain').match(/^worktree /gm)).toHaveLength(1)
+  })
+
+  for (const replacement of ['missing', 'file', 'outside-symlink'] as const) {
+    it(`refuses to resume when the project subdirectory becomes ${replacement}`, async () => {
+      const sourceDirectory = addProjectDirectory()
+      const ready = await ensureOwnedWorktree(await planOwnedWorktree({
+        repositoryPath: sourceDirectory, ownerId: 'workspace/project', sessionId: 'project', baseBranch: 'main',
+      }))
+      const directory = ownedWorktreeWorkingDirectory(ready)
+      rmSync(directory, { recursive: true })
+      if (replacement === 'file') writeFileSync(directory, 'not a folder')
+      if (replacement === 'outside-symlink') symlinkSync(sourceDirectory, directory, 'dir')
+
+      await expect(ensureOwnedWorktree(JSON.parse(JSON.stringify(ready)))).rejects.toThrow('project')
+      expect(readFileSync(join(sourceDirectory, 'api.txt'), 'utf8')).toBe('project source\n')
+      expect(git(repo, 'status', '--porcelain')).toBe('')
+      expect((await removeOwnedWorktree(ready)).removed).toBe(false)
+      expect(existsSync(ready.path)).toBe(true)
+    })
+  }
+
+  it('rejects escaping or altered project directory records without changing the reserved checkout', async () => {
+    const directory = addProjectDirectory()
+    const ready = await ensureOwnedWorktree(await planOwnedWorktree({
+      repositoryPath: directory, ownerId: 'workspace/project', sessionId: 'project', baseBranch: 'main',
+    }))
+    for (const projectSubdirectory of ['../outside', 'packages/../../outside', join(root, 'outside'), '.', '']) {
+      await expect(ensureOwnedWorktree({ ...ready, projectSubdirectory })).rejects.toBeInstanceOf(OwnedWorktreeError)
+    }
+    await expect(ensureOwnedWorktree({ ...ready, projectSubdirectory: 'packages' })).rejects.toThrow('reservation')
+    await expect(ensureOwnedWorktree({ ...ready, projectSubdirectory: undefined })).rejects.toThrow('reservation')
+    expect(readFileSync(join(ownedWorktreeWorkingDirectory(ready), 'api.txt'), 'utf8')).toBe('project source\n')
+    expect((await removeOwnedWorktree(ready)).removed).toBe(true)
   })
 
   it('keeps the original base commit even when the branch advances after planning', async () => {

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, mock, spyOn } from 'bun:test'
 import * as backend from '@craft-agent/shared/agent/backend'
 import * as config from '@craft-agent/shared/config'
+import type { LlmConnection } from '@craft-agent/shared/config'
 import { SessionManager, createManagedSession, setSessionPlatform } from './SessionManager.ts'
 
 // Run in isolation: setSessionPlatform is process-global and has no reset API.
@@ -24,12 +25,12 @@ afterEach(() => {
   for (const spy of spies.splice(0)) spy.mockRestore()
 })
 
-function setup() {
+function setup(connection?: LlmConnection) {
   const manager = new SessionManager()
   const managed = createManagedSession({
     id: 'title-test',
-    llmConnection: 'chatgpt-plus-test',
-    model: 'pi/gpt-5.4',
+    llmConnection: connection?.slug ?? 'chatgpt-plus-test',
+    model: connection?.defaultModel ?? 'pi/gpt-5.4',
   }, {
     id: 'ws-test',
     slug: 'ws-test',
@@ -43,14 +44,14 @@ function setup() {
   ;(manager as any).sessions.set(managed.id, managed)
 
   const agent = {
-    postInit: mock(async () => undefined),
+    postInit: mock(async (): Promise<backend.PostInitResult> => ({ authInjected: true })),
     regenerateTitle: mock(async () => 'ChatGPT Title Fix'),
     generateTitle: mock(async () => 'ChatGPT Title Fix'),
     destroy: mock(() => {}),
   }
   const createAgent = spyOn(backend, 'createBackendFromConnection').mockReturnValue(agent as unknown as backend.AgentBackend)
   spies.push(createAgent)
-  spies.push(spyOn(config, 'getLlmConnection').mockReturnValue({
+  spies.push(spyOn(config, 'getLlmConnection').mockReturnValue(connection ?? {
     slug: 'chatgpt-plus-test',
     name: 'ChatGPT Plus',
     providerType: 'pi',
@@ -95,5 +96,84 @@ describe('temporary title agents', () => {
     expect(agent.generateTitle).toHaveBeenCalledWith('Fix ChatGPT title regeneration', { language: 'English' })
     expect(agent.destroy).toHaveBeenCalledTimes(1)
     expect(managed.name).toBe('ChatGPT Title Fix')
+  })
+
+  const claudeAccount: LlmConnection = {
+    slug: 'claude-account-a', name: 'Claude Account A', providerType: 'anthropic', authType: 'oauth',
+    defaultModel: 'claude-sonnet-4-6', createdAt: 0,
+  }
+
+  it.each(['initial', 'refresh'] as const)('does not run a %s title with a missing Claude account', async (kind) => {
+    const { manager, managed, agent } = setup(claudeAccount)
+    agent.postInit.mockResolvedValue({ authInjected: false, authWarning: 'Reconnect Claude Account A' })
+
+    if (kind === 'initial') {
+      await (manager as any).generateTitle(managed, 'Fix account isolation')
+    } else {
+      expect(await manager.refreshTitle(managed.id)).toMatchObject({ success: false })
+    }
+
+    expect(agent.postInit).toHaveBeenCalledTimes(1)
+    expect(agent.generateTitle).not.toHaveBeenCalled()
+    expect(agent.regenerateTitle).not.toHaveBeenCalled()
+    expect(agent.destroy).toHaveBeenCalledTimes(1)
+    expect(managed.name).toBeUndefined()
+  })
+
+  it.each(['initial', 'refresh'] as const)('cleans up the temporary %s backend if authentication throws', async (kind) => {
+    const { manager, managed, agent } = setup(claudeAccount)
+    agent.postInit.mockRejectedValue(new Error('Credential store unavailable'))
+
+    if (kind === 'initial') {
+      await (manager as any).generateTitle(managed, 'Fix account isolation')
+    } else {
+      expect(await manager.refreshTitle(managed.id)).toMatchObject({ success: false })
+    }
+
+    expect(agent.generateTitle).not.toHaveBeenCalled()
+    expect(agent.regenerateTitle).not.toHaveBeenCalled()
+    expect(agent.destroy).toHaveBeenCalledTimes(1)
+  })
+
+  it.each(['initial', 'refresh'] as const)('waits for actual live account readiness before a %s title', async (kind) => {
+    const { manager, managed, agent, createAgent } = setup(claudeAccount)
+    const readiness = Promise.withResolvers<boolean>()
+    managed.agent = agent as unknown as NonNullable<typeof managed.agent>
+    managed.agentReady = readiness.promise
+
+    const title = kind === 'initial'
+      ? (manager as any).generateTitle(managed, 'Fix account isolation')
+      : manager.refreshTitle(managed.id)
+    await new Promise<void>(resolve => setImmediate(resolve))
+    expect(agent.generateTitle).not.toHaveBeenCalled()
+    expect(agent.regenerateTitle).not.toHaveBeenCalled()
+    expect(createAgent).not.toHaveBeenCalled()
+
+    readiness.resolve(true)
+    await title
+    expect(kind === 'initial' ? agent.generateTitle : agent.regenerateTitle).toHaveBeenCalledTimes(1)
+    expect(agent.postInit).not.toHaveBeenCalled()
+    expect(agent.destroy).not.toHaveBeenCalled()
+  })
+
+  it.each(['initial', 'refresh'] as const)('skips a %s title when live authentication fails', async (kind) => {
+    const { manager, managed, agent, createAgent } = setup(claudeAccount)
+    const readiness = Promise.withResolvers<boolean>()
+    managed.agent = agent as unknown as NonNullable<typeof managed.agent>
+    managed.agentReady = readiness.promise
+
+    const title = kind === 'initial'
+      ? (manager as any).generateTitle(managed, 'Fix account isolation')
+      : manager.refreshTitle(managed.id)
+    await new Promise<void>(resolve => setImmediate(resolve))
+    // The failed backend may still be present while its asynchronous disposal is running.
+    readiness.resolve(false)
+    await title
+
+    expect(agent.generateTitle).not.toHaveBeenCalled()
+    expect(agent.regenerateTitle).not.toHaveBeenCalled()
+    expect(createAgent).not.toHaveBeenCalled()
+    expect(agent.destroy).not.toHaveBeenCalled()
+    expect(managed.name).toBeUndefined()
   })
 })

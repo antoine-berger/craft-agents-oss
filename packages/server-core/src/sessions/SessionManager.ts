@@ -127,7 +127,7 @@ import { AutomationSystem, createPromptHistoryEntry, appendAutomationHistoryEntr
 import { buildBackendRuntimeSignature, buildRestartRequiredSignature, filterAttachmentsForModelInput } from './runtime-config'
 import { validateArchiveTarget } from './archive-guards'
 import { resolveSessionWorktreePolicy, isSessionDirectoryInWorktree } from './session-worktree'
-import { planOwnedWorktree, ensureOwnedWorktree, removeOwnedWorktree } from '../services/coding-repos/owned-worktree'
+import { planOwnedWorktree, ensureOwnedWorktree, removeOwnedWorktree, ownedWorktreeWorkingDirectory } from '../services/coding-repos/owned-worktree'
 import { addTurnUsage, branchStartTotals, type BranchParent } from './turn-usage'
 
 // Import from server-core domain utilities
@@ -946,9 +946,9 @@ interface ManagedSession {
   tokenRefreshManager: TokenRefreshManager
   // Metadata for sessions created by automations
   triggeredBy?: { automationName?: string; automationId?: string; event?: string; timestamp?: number; depth?: number }
-  // Promise that resolves when the agent instance is ready (for title gen to await)
-  agentReady?: Promise<void>
-  agentReadyResolve?: () => void
+  // True only after initialization succeeds; false releases background callers on failure/disposal.
+  agentReady?: Promise<boolean>
+  agentReadyResolve?: (ready: boolean) => void
   // Per-session env overrides for SDK subprocess (e.g., ANTHROPIC_BASE_URL).
   // Stored on managed session so it persists across agent recreations (auth-retry, etc.)
   envOverrides?: Record<string, string>
@@ -3316,9 +3316,14 @@ export class SessionManager implements ISessionManager {
     // Subtasks inherit the parent's project when the caller didn't bind one explicitly —
     // a child of a project-bound task belongs to that project (board quick-add passes none),
     // so project-scoped filtering sees the whole task family.
-    const inheritedProjectId = options?.parentSessionId
-      ? this.sessions.get(options.parentSessionId)?.projectId
+    const parentSession = options?.parentSessionId
+      ? this.sessions.get(options.parentSessionId)
       : undefined
+    if (options?.parentSessionId && (!parentSession || parentSession.workspace.rootPath !== workspaceRootPath)) {
+      throw new Error(`Parent session ${options.parentSessionId} not found in workspace ${workspaceId}`)
+    }
+    if (parentSession?.isDeleting) throw new DOMException('Parent session was deleted', 'AbortError')
+    const inheritedProjectId = parentSession?.projectId
     const requestedProjectId = options?.projectId ?? inheritedProjectId
     let resolvedProjectId: string | undefined
     let resolvedWorktree: SessionWorktreeMetadata | undefined
@@ -3341,6 +3346,26 @@ export class SessionManager implements ISessionManager {
           resolvedWorkingDir = project.config.workingDirectory
         }
       }
+    }
+
+    // A delegated session shares its parent's effective directory, including an isolated
+    // worktree or an explicit absence of cwd. An explicit path/default or a different
+    // project still selects its own directory. Never give a child ownership of the
+    // parent's worktree: cleanup keeps it alive through the child's directory reference.
+    if (parentSession && options?.workingDirectory === undefined && requestedProjectId === parentSession.projectId) {
+      if (parentSession.worktree) {
+        // Quick-add can create a child before the parent's first turn. Prepare the
+        // parent's checkout without starting a backend, and hold its lock until the
+        // child is registered so archive cleanup cannot remove the inherited directory.
+        return this.withWorktreeLock(parentSession, async () => {
+          await this.prepareSessionWorktree(parentSession)
+          return this.createSession(workspaceId, {
+            ...options,
+            workingDirectory: parentSession.workingDirectory ?? 'none',
+          }, internal)
+        })
+      }
+      resolvedWorkingDir = parentSession.workingDirectory
     }
 
     // Validate branch request up-front so branch metadata is only set for valid branches.
@@ -3764,17 +3789,9 @@ export class SessionManager implements ISessionManager {
     return this.sessions.get(sessionId)?.workingDirectory
   }
 
-  private async initializeManagedAgentAuth(managed: ManagedSession, connection: LlmConnection | null): Promise<void> {
-    if (!managed.agent) throw new Error('Cannot initialize authentication without an agent')
-
-    let result: PostInitResult
-    try {
-      result = await managed.agent.postInit()
-    } catch (error) {
-      managed.agentReadyResolve?.()
-      await this.disposeManagedAgentRuntime(managed, 'failed authentication initialization')
-      throw error
-    }
+  /** Every model call, including temporary title/summary agents, needs its selected account pinned. */
+  private async initializeBackendAuth(agent: AgentBackend, connection: LlmConnection | null, managed: ManagedSession): Promise<void> {
+    const result: PostInitResult = await agent.postInit()
 
     if (result.authWarning) {
       sessionLog.warn(`Auth warning for session ${managed.id}: ${result.authWarning}`)
@@ -3787,15 +3804,36 @@ export class SessionManager implements ISessionManager {
     // A Claude account without its own token must not spawn a lazy subprocess
     // that could inherit another account's global environment or CLI login.
     if (connection && isClaudeAccountConnection(connection) && !result.authInjected) {
-      managed.agentReadyResolve?.()
-      await this.disposeManagedAgentRuntime(managed, 'missing Claude account authentication')
       throw new Error(result.authWarning || `Reconnect Claude account: ${connection.name}`)
     }
+  }
+
+  private async initializeManagedAgentAuth(managed: ManagedSession, connection: LlmConnection | null): Promise<void> {
+    if (!managed.agent) throw new Error('Cannot initialize authentication without an agent')
+    try {
+      await this.initializeBackendAuth(managed.agent, connection, managed)
+    } catch (error) {
+      await this.disposeManagedAgentRuntime(managed, 'failed authentication initialization')
+      throw error
+    }
+  }
+
+  /** An assigned backend can still be waiting for OAuth refresh. Never use it until it is ready. */
+  private async getReadyManagedAgent(managed: ManagedSession): Promise<AgentInstance | null> {
+    const readiness = managed.agentReady
+    if (readiness && !await readiness) throw new Error('Session agent initialization did not complete')
+    // Disposal/recreation while awaiting invalidates the captured runtime.
+    if (readiness !== managed.agentReady) return null
+    return managed.agent
   }
 
   private async disposeManagedAgentRuntime(managed: ManagedSession, reason: string): Promise<boolean> {
     const sessionId = managed.id
     let disposed = true
+    // Settle before asynchronous cleanup, but do not tell waiting title calls that auth succeeded.
+    managed.agentReadyResolve?.(false)
+    managed.agentReadyResolve = undefined
+    managed.agentReady = Promise.resolve(false)
     this.recoverPendingSteers(managed)
 
     if (managed.agent) {
@@ -4048,7 +4086,7 @@ export class SessionManager implements ISessionManager {
       throw new Error('This worktree belongs to a different session')
     }
     // First-turn user messages are already saved, but no SDK may have started yet.
-    if ((managed.agent || managed.sdkSessionId) && (!metadata.owned || managed.sdkCwd !== metadata.owned.path)) {
+    if ((managed.agent || managed.sdkSessionId) && (!metadata.owned || managed.sdkCwd !== ownedWorktreeWorkingDirectory(metadata.owned))) {
       throw new Error(i18n.t('worktree.session.initialized'))
     }
 
@@ -4066,16 +4104,17 @@ export class SessionManager implements ISessionManager {
 
     const ready = await ensureOwnedWorktree(metadata.owned)
     metadata.owned = ready
-    const directoryChanged = managed.workingDirectory !== ready.path
-    managed.workingDirectory = ready.path
-    managed.sdkCwd = ready.path
+    const workingDirectory = ownedWorktreeWorkingDirectory(ready)
+    const directoryChanged = managed.workingDirectory !== workingDirectory
+    managed.workingDirectory = workingDirectory
+    managed.sdkCwd = workingDirectory
     await this.persistWorktreeState(managed)
     if (managed.isDeleting) throw new DOMException('Session was deleted', 'AbortError')
 
     if (directoryChanged) {
-      invalidateContextFileCache(ready.path)
+      invalidateContextFileCache(workingDirectory)
       invalidateSkillsCache()
-      this.sendEvent({ type: 'working_directory_changed', sessionId: managed.id, workingDirectory: ready.path }, managed.workspace.id)
+      this.sendEvent({ type: 'working_directory_changed', sessionId: managed.id, workingDirectory }, managed.workspace.id)
     }
   }
 
@@ -4127,6 +4166,18 @@ export class SessionManager implements ISessionManager {
 
   private async getOrCreateAgent(managed: ManagedSession): Promise<AgentInstance> {
     if (managed.isDeleting) throw new DOMException('Session was deleted', 'AbortError')
+    const prepareAgent = async () => {
+      try {
+        return await this.getOrCreatePreparedAgent(managed)
+      } catch (error) {
+        // Source setup or backend construction can fail before postInit. Release title waiters
+        // and clean up before a queued worktree operation can access this incomplete runtime.
+        if (managed.agentReadyResolve) {
+          await this.disposeManagedAgentRuntime(managed, 'failed agent preparation')
+        }
+        throw error
+      }
+    }
     if (managed.worktree) {
       return this.withWorktreeLock(managed, async () => {
         try {
@@ -4135,10 +4186,10 @@ export class SessionManager implements ISessionManager {
           if (error instanceof Error && error.name === 'AbortError') throw error
           throw new Error(i18n.t('worktree.session.prepareFailed', { reason: error instanceof Error ? error.message : String(error) }))
         }
-        return this.getOrCreatePreparedAgent(managed)
+        return prepareAgent()
       })
     }
-    return this.getOrCreatePreparedAgent(managed)
+    return prepareAgent()
   }
 
   private async getOrCreatePreparedAgent(managed: ManagedSession): Promise<AgentInstance> {
@@ -4198,7 +4249,7 @@ export class SessionManager implements ISessionManager {
       toolMetadataStore.setSessionDir(sessionDirForMetadata)
 
       // Set up agentReady promise so title generation can await agent creation
-      managed.agentReady = new Promise<void>(r => { managed.agentReadyResolve = r })
+      managed.agentReady = new Promise<boolean>(r => { managed.agentReadyResolve = r })
 
       // ============================================================
       // Common setup: sources, MCP pool, session config
@@ -4784,9 +4835,6 @@ export class SessionManager implements ISessionManager {
         })
       }
 
-      // Signal that the agent instance is ready (unblocks title generation)
-      managed.agentReadyResolve?.()
-
       // Set up permission handler to forward requests to renderer
       // Guarded-mode risk check (decision model, toggle `guardedMode`), used only while the
       // session is in Guarded mode. Only sessions with someone to answer a prompt are checked:
@@ -5116,7 +5164,7 @@ export class SessionManager implements ISessionManager {
           for (const a of request.attachments) {
             try {
               const extraDirs = getWorkspaceAllowedDirs(managed.workspace.id)
-              if (request.workingDirectory) extraDirs.push(request.workingDirectory)
+              if (session.workingDirectory) extraDirs.push(session.workingDirectory)
               const safePath = await validateFilePath(a.path, extraDirs)
               const attachment = readFileAttachment(safePath)
               if (attachment) {
@@ -5575,6 +5623,9 @@ export class SessionManager implements ISessionManager {
       managed.backendRuntimeSignature = runtimeSignature
       managed.backendRestartSignature = restartSignature
       end()
+      // Only a fully initialized runtime may serve background title calls.
+      managed.agentReadyResolve?.(true)
+      managed.agentReadyResolve = undefined
     }
     return managed.agent
   }
@@ -6257,11 +6308,12 @@ export class SessionManager implements ISessionManager {
     })
 
     // Use existing agent or create temporary one
-    let agent: AgentInstance | null = managed.agent
+    let agent: AgentInstance | null = null
     let isTemporary = false
 
-    if (!agent && managed.llmConnection) {
-      try {
+    try {
+      agent = await this.getReadyManagedAgent(managed)
+      if (!agent && managed.llmConnection) {
         const connection = getLlmConnection(managed.llmConnection)
         const resolvedMiniModel = connection ? (getMiniModel(connection) ?? connection.defaultModel) : undefined
 
@@ -6279,13 +6331,14 @@ export class SessionManager implements ISessionManager {
           },
           isHeadless: true,
         }, buildBackendHostRuntimeContext()) as AgentInstance
-        await agent.postInit()
         isTemporary = true
+        await this.initializeBackendAuth(agent, connection, managed)
         sessionLog.info(`refreshTitle: Created temporary agent for session ${sessionId}`)
-      } catch (error) {
-        sessionLog.error(`refreshTitle: Failed to create temporary agent:`, error)
-        return { success: false, error: 'Failed to create agent for title generation' }
       }
+    } catch (error) {
+      if (isTemporary && agent) agent.destroy()
+      sessionLog.error(`refreshTitle: Failed to prepare agent:`, error)
+      return { success: false, error: 'Failed to create agent for title generation' }
     }
 
     if (!agent) {
@@ -8817,22 +8870,23 @@ export class SessionManager implements ISessionManager {
     sessionLog.info(`[generateTitle] Starting for session ${managed.id}`)
 
     // Use existing agent or create temporary one
-    let agent: AgentInstance | null = managed.agent
+    let agent: AgentInstance | null = null
     let isTemporary = false
 
-    // Wait briefly for agent to be created (it's created concurrently)
-    if (!agent) {
+    // Wait briefly for initialization to start (it is scheduled concurrently).
+    // Once it starts, await its actual result instead of racing a slow OAuth refresh.
+    if (!managed.agent && !managed.agentReady) {
       let attempts = 0
-      while (!managed.agent && attempts < 10) {
+      while (!managed.agent && !managed.agentReady && attempts < 10) {
         await new Promise(resolve => setTimeout(resolve, 100))
         attempts++
       }
-      agent = managed.agent
     }
 
-    // If still no agent, create a temporary one using the session's connection
-    if (!agent && managed.llmConnection) {
-      try {
+    try {
+      agent = await this.getReadyManagedAgent(managed)
+      // A cold session can use a temporary backend, with the same authentication guard.
+      if (!agent && managed.llmConnection) {
         const connection = getLlmConnection(managed.llmConnection)
 
         agent = createBackendFromConnection(managed.llmConnection, {
@@ -8848,13 +8902,14 @@ export class SessionManager implements ISessionManager {
           },
           isHeadless: true,
         }, buildBackendHostRuntimeContext()) as AgentInstance
-        await agent.postInit()
         isTemporary = true
+        await this.initializeBackendAuth(agent, connection, managed)
         sessionLog.info(`[generateTitle] Created temporary agent for session ${managed.id}`)
-      } catch (error) {
-        sessionLog.error(`[generateTitle] Failed to create temporary agent:`, error)
-        return
       }
+    } catch (error) {
+      if (isTemporary && agent) agent.destroy()
+      sessionLog.error(`[generateTitle] Failed to prepare agent:`, error)
+      return
     }
 
     if (!agent) {
@@ -10135,7 +10190,11 @@ export class SessionManager implements ISessionManager {
     })
 
     try {
+      await this.initializeBackendAuth(agent, backendContext.connection, managed)
       return await generateConversationSummary(messages, agent.runMiniCompletion.bind(agent))
+    } catch (error) {
+      sessionLog.warn(`Failed to generate handoff summary for ${managed.id}:`, error)
+      return null
     } finally {
       agent.destroy()
     }

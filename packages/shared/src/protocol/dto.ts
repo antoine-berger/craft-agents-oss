@@ -142,7 +142,8 @@ export interface CreateSessionOptions {
   thinkingLevel?: ThinkingLevel
   /**
    * Working directory for the session:
-   * - 'user_default' or undefined: Use workspace's configured default working directory
+   * - undefined: Inherit a same-project parent's directory, else the project/workspace default
+   * - 'user_default': Use the project/workspace default without inheriting the parent's directory
    * - 'none': No working directory (session folder only)
    * - Absolute path string: Use this specific path
    */

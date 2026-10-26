@@ -123,6 +123,8 @@ export interface OwnedWorktree {
   repoPath: string;
   gitDir: string;
   path: string;
+  /** Project folder relative to the source checkout root; absent in legacy/root-only plans. */
+  projectSubdirectory?: string;
   branch: string;
   base: string;
   baseCommit: string;

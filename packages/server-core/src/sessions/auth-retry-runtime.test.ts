@@ -6,6 +6,11 @@ type ManagedSession = ReturnType<typeof createManagedSession>
 type RetryHarness = {
   attemptAuthRetry(sessionId: string, managed: ManagedSession, workspaceId: string): boolean
   initializeManagedAgentAuth(managed: ManagedSession, connection: LlmConnection | null): Promise<void>
+  getReadyManagedAgent(managed: ManagedSession): Promise<ManagedSession['agent']>
+  getOrCreateAgent(managed: ManagedSession): Promise<NonNullable<ManagedSession['agent']>>
+  getOrCreatePreparedAgent(managed: ManagedSession): Promise<NonNullable<ManagedSession['agent']>>
+  prepareSessionWorktree(managed: ManagedSession): Promise<void>
+  worktreeLocks: Map<string, Promise<void>>
   sendEvent: ReturnType<typeof mock>
   sendMessage: ReturnType<typeof mock>
   setProcessing: ReturnType<typeof mock>
@@ -53,6 +58,7 @@ describe('Claude account authentication before backend startup', () => {
     expect(disposed).toHaveBeenCalledTimes(1)
     expect(disconnected).toHaveBeenCalledTimes(1)
     expect(ready).toHaveBeenCalledTimes(1)
+    expect(ready).toHaveBeenCalledWith(false)
     expect(managed.agent).toBeNull()
     expect(managed.mcpPool).toBeUndefined()
     expect(manager.sendMessage).not.toHaveBeenCalled()
@@ -80,6 +86,80 @@ describe('Claude account authentication before backend startup', () => {
     await expect(manager.initializeManagedAgentAuth(managed, connection)).rejects.toThrow('Credential store unavailable')
     expect(disposed).toHaveBeenCalledTimes(1)
     expect(managed.agent).toBeNull()
+  })
+
+  it('rejects background use while failed authentication is still being disposed', async () => {
+    const { manager, managed } = harness()
+    const cleanup = Promise.withResolvers<void>()
+    const readiness = Promise.withResolvers<boolean>()
+    managed.agentReady = readiness.promise
+    managed.agentReadyResolve = readiness.resolve
+    managed.agent = {
+      postInit: async () => ({ authInjected: false }),
+      disposeForRestart: () => cleanup.promise,
+      takePendingSteers: () => [],
+    } as unknown as NonNullable<ManagedSession['agent']>
+
+    const background = manager.getReadyManagedAgent(managed)
+    const initialization = manager.initializeManagedAgentAuth(managed, connection)
+    await expect(background).rejects.toThrow('initialization did not complete')
+    expect(managed.agent).not.toBeNull()
+    cleanup.resolve()
+    await expect(initialization).rejects.toThrow('Reconnect Claude account')
+    expect(managed.agent).toBeNull()
+  })
+
+  it('settles readiness and cleans partial resources when setup fails before authentication', async () => {
+    const { manager, managed } = harness()
+    const readiness = Promise.withResolvers<boolean>()
+    const dispose = mock(async () => {})
+    manager.getOrCreatePreparedAgent = async () => {
+      managed.agentReady = readiness.promise
+      managed.agentReadyResolve = readiness.resolve
+      managed.agent = {
+        disposeForRestart: dispose, takePendingSteers: () => [],
+      } as unknown as NonNullable<ManagedSession['agent']>
+      throw new Error('Source setup failed')
+    }
+
+    await expect(manager.getOrCreateAgent(managed)).rejects.toThrow('Source setup failed')
+    await expect(readiness.promise).resolves.toBe(false)
+    expect(dispose).toHaveBeenCalledTimes(1)
+    expect(managed.agent).toBeNull()
+    expect(managed.agentReady).toBeUndefined()
+  })
+
+  it('holds the worktree lock until failed setup cleanup finishes before a queued retry', async () => {
+    const { manager, managed } = harness()
+    manager.worktreeLocks = new Map()
+    manager.prepareSessionWorktree = async () => {}
+    managed.worktree = { repositoryPath: '/unused-repository' }
+    const cleanup = Promise.withResolvers<void>()
+    const readiness = Promise.withResolvers<boolean>()
+    const nextAgent = {} as NonNullable<ManagedSession['agent']>
+    let attempts = 0
+    manager.getOrCreatePreparedAgent = async () => {
+      attempts++
+      if (attempts > 1) return nextAgent
+      managed.agentReady = readiness.promise
+      managed.agentReadyResolve = readiness.resolve
+      managed.agent = {
+        disposeForRestart: () => cleanup.promise, takePendingSteers: () => [],
+      } as unknown as NonNullable<ManagedSession['agent']>
+      throw new Error('Initialization failed')
+    }
+
+    const first = manager.getOrCreateAgent(managed).catch(error => error)
+    await nextImmediate()
+    const second = manager.getOrCreateAgent(managed)
+    await nextImmediate()
+    expect(attempts).toBe(1)
+    cleanup.resolve()
+
+    expect(await first).toBeInstanceOf(Error)
+    expect(await second).toBe(nextAgent)
+    expect(attempts).toBe(2)
+    expect(manager.worktreeLocks.size).toBe(0)
   })
 })
 
