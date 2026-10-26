@@ -33,6 +33,8 @@ import type { EventSink } from '@craft-agent/server-core/transport'
 const PLATFORM = platform()
 const IS_MAC = PLATFORM === 'darwin'
 const IS_WINDOWS = PLATFORM === 'win32'
+// Standalone fork: updater RPC remains compatible, but no upstream checks or installs.
+const OFFICIAL_UPDATES_DISABLED: boolean = true
 
 // Get the update cache directory path (for file watcher fallback on macOS)
 // electron-updater uses these paths:
@@ -358,9 +360,7 @@ function checkForExistingDownload(): { exists: boolean; version?: string } {
  */
 export async function checkForUpdates(options: CheckOptions = {}): Promise<UpdateInfo> {
   // Fork builds must never query or install official Craft releases.
-  // Keep the RPC API stable for existing settings/menus.
-  void options
-  return getUpdateInfo()
+  if (OFFICIAL_UPDATES_DISABLED) return getUpdateInfo()
 
   const { autoDownload = true } = options
 
@@ -417,7 +417,7 @@ export async function checkForUpdates(options: CheckOptions = {}): Promise<Updat
  * Then relaunches the app automatically.
  */
 export async function installUpdate(): Promise<void> {
-  throw new Error('Automatic updates are disabled for this fork')
+  if (OFFICIAL_UPDATES_DISABLED) throw new Error('Automatic updates are disabled for this fork')
   if (updateInfo.downloadState !== 'ready') {
     throw new Error('No update ready to install')
   }
@@ -497,7 +497,7 @@ export interface UpdateOnLaunchResult {
  * - Auto-downloads if update available
  */
 export async function checkForUpdatesOnLaunch(): Promise<UpdateOnLaunchResult> {
-  return { action: 'skipped', reason: 'fork-updates-disabled' }
+  if (OFFICIAL_UPDATES_DISABLED) return { action: 'skipped', reason: 'fork-updates-disabled' }
   autoUpdateLog.info('Checking for updates on launch...')
 
   const info = await checkForUpdates({ autoDownload: true })
