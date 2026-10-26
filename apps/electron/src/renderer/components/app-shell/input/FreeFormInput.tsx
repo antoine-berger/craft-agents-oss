@@ -43,6 +43,7 @@ import { ANTHROPIC_MODELS, getModelDisplayName, getModelContextWindow } from '@c
 import {
   resolveEffectiveConnectionSlug,
   isCompatProvider,
+  isClaudeAccountConnection,
   modelSupportsImages,
 } from '@config/llm-connections'
 import { useOptionalAppShellContext } from '@/context/AppShellContext'
@@ -276,7 +277,7 @@ export function FreeFormInput({
   onHeightChange,
   maxHeight,
   onFocusChange,
-  sources = [],
+  sources: configuredSources = [],
   enabledSourceSlugs = [],
   onSourcesChange,
   skills = [],
@@ -415,6 +416,13 @@ export function FreeFormInput({
     return llmConnections.find(c => c.slug === effectiveConnection) ?? null
   }, [llmConnections, effectiveConnection])
 
+  const claudeAccountConnectors = !!effectiveConnectionDetails && isClaudeAccountConnection(effectiveConnectionDetails)
+  // Keep the source picker and @mentions limited to Craft API/local sources for Claude accounts.
+  const sources = React.useMemo(
+    () => claudeAccountConnectors ? configuredSources.filter(source => source.config.type !== 'mcp') : configuredSources,
+    [configuredSources, claudeAccountConnectors],
+  )
+
 
   // Access sessionStatuses and onSessionStatusChange from context for the # menu state picker
   const sessionStatuses = appShellCtx?.sessionStatuses ?? []
@@ -533,6 +541,10 @@ export function FreeFormInput({
 
   // Optimistic state for source selection - updates UI immediately before IPC round-trip completes
   const [optimisticSourceSlugs, setOptimisticSourceSlugs] = React.useState(enabledSourceSlugs)
+  const visibleSelectedSourceSlugs = React.useMemo(
+    () => optimisticSourceSlugs.filter(slug => sources.some(source => source.config.slug === slug)),
+    [optimisticSourceSlugs, sources],
+  )
 
   // Sync from prop when server state changes (reconciles after IPC or on external updates)
   // Use content comparison (not reference) to avoid infinite loops with empty arrays
@@ -1782,13 +1794,14 @@ export function FreeFormInput({
             <ComposerSourcesChip
               compact={compactMode}
               sources={sources}
-              selectedSlugs={optimisticSourceSlugs}
+              selectedSlugs={visibleSelectedSourceSlugs}
               onToggleSlug={handleToggleSourceSlug}
               open={sourceDropdownOpen}
               setOpen={setSourceDropdownOpen}
               isEmptySession={isEmptySession}
               disabled={disabled}
               buttonRef={sourceButtonRef}
+              claudeAccountConnectors={claudeAccountConnectors}
             />
           )}
 

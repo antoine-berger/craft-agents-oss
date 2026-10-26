@@ -53,6 +53,8 @@ export interface MigrationInfo {
 /** Result of token validation/refresh operations */
 export interface TokenResult {
   accessToken: string | null;
+  /** Scopes granted to this token, not the scopes requested by a later OAuth flow. */
+  scopes?: string[];
   migrationRequired?: MigrationInfo;
 }
 
@@ -101,6 +103,7 @@ interface ClaudeOAuthCredentials {
   accessToken: string;
   refreshToken?: string;
   expiresAt?: number;
+  scopes?: string[];
   source?: 'native' | 'cli';
 }
 
@@ -140,10 +143,14 @@ export async function performTokenRefresh(
   manager: ReturnType<typeof getCredentialManager>,
   refreshToken: string,
   originalSource: 'native' | 'cli' | undefined,
-  connectionSlug: string
+  connectionSlug: string,
+  originalScopes?: string[]
 ): Promise<TokenResult> {
   try {
     const refreshed = await refreshClaudeToken(refreshToken);
+    // OAuth refresh may omit scope when the grant is unchanged. Preserve only
+    // scopes already known for this account; never infer a new permission.
+    const scopes = refreshed.scopes ?? originalScopes;
 
     // Format expiry time for logging
     const expiresAtDate = refreshed.expiresAt ? new Date(refreshed.expiresAt).toISOString() : 'never';
@@ -154,6 +161,7 @@ export async function performTokenRefresh(
       accessToken: refreshed.accessToken,
       refreshToken: refreshed.refreshToken,
       expiresAt: refreshed.expiresAt,
+      scopes,
     });
 
     // Keep the legacy default slot in sync without letting another connection
@@ -163,11 +171,12 @@ export async function performTokenRefresh(
         accessToken: refreshed.accessToken,
         refreshToken: refreshed.refreshToken,
         expiresAt: refreshed.expiresAt,
+        scopes,
         source: 'native',
       });
     }
 
-    return { accessToken: refreshed.accessToken };
+    return { accessToken: refreshed.accessToken, ...(scopes !== undefined ? { scopes } : {}) };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     debug('[auth] Failed to refresh Claude OAuth token:', errorMessage);
@@ -267,14 +276,14 @@ async function readAndRefreshClaudeOAuthToken(connectionSlug: string): Promise<T
 
     // Try to refresh if we have a refresh token
     if (creds.refreshToken) {
-      return performTokenRefresh(manager, creds.refreshToken, creds.source, connectionSlug);
+      return performTokenRefresh(manager, creds.refreshToken, creds.source, connectionSlug, creds.scopes);
     } else {
       debug('[auth] No refresh token available, cannot refresh expired token');
       return { accessToken: null };
     }
   }
 
-  return { accessToken: creds.accessToken };
+  return { accessToken: creds.accessToken, ...(creds.scopes !== undefined ? { scopes: creds.scopes } : {}) };
 }
 
 /**

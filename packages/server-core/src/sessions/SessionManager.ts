@@ -21,7 +21,8 @@ import {
   type PostInitResult,
 } from '@craft-agent/shared/agent/backend'
 import { getLlmConnection, getLlmConnections, getDefaultLlmConnection, getDefaultThinkingLevel, resetManagedAnthropicAuthEnvVars, resolveMidStreamBehavior, getPersistedUiLanguage, resolveTitleLanguageName } from '@craft-agent/shared/config'
-import type { MidStreamBehavior } from '@craft-agent/shared/config'
+import type { LlmConnection, MidStreamBehavior } from '@craft-agent/shared/config'
+import { isClaudeAccountConnection } from '@craft-agent/shared/config/llm-connections'
 import { PrivilegedExecutionBroker } from '@craft-agent/server-core/services'
 import { isValidWorkingDirectory } from '../utils/path-validation'
 import { InitGate } from '@craft-agent/server-core/domain'
@@ -1817,7 +1818,7 @@ export class SessionManager implements ISessionManager {
           const workspaceRoot = managed.workspace.rootPath
           const candidates = collectSuggestionCandidates({
             skills: loadAllSkills(workspaceRoot, managed.workingDirectory),
-            sources: loadAllSources(workspaceRoot),
+            sources: this.filterSessionSources(managed, loadAllSources(workspaceRoot)),
             activeSourceSlugs: managed.enabledSourceSlugs ?? [],
           })
           const { hint, trace } = await pickSuggestion(message, candidates, { sessionId: managed.id, log })
@@ -2385,6 +2386,21 @@ export class SessionManager implements ISessionManager {
     this.eventSink(RPC_CHANNELS.permissions.DEFAULTS_CHANGED, { to: 'all' }, null)
   }
 
+  private usesClaudeAccountConnectors(managed: ManagedSession): boolean {
+    const workspaceConfig = loadWorkspaceConfig(managed.workspace.rootPath)
+    const connection = resolveSessionConnection(managed.llmConnection, workspaceConfig?.defaults?.defaultLlmConnection)
+    return connection !== null && isClaudeAccountConnection(connection)
+  }
+
+  private filterSessionSources(managed: ManagedSession, sources: LoadedSource[]): LoadedSource[] {
+    // Claude account MCPs are discovered/authenticated by the SDK through claude.ai.
+    // Keep API/local sources (including their internal MCP transport), but never
+    // start, proxy or refresh credentials for a duplicate Craft-owned MCP source.
+    return this.usesClaudeAccountConnectors(managed)
+      ? sources.filter(source => source.config.type !== 'mcp')
+      : sources
+  }
+
   /**
    * Reload sources for a session with an active agent.
    * Called by ConfigWatcher when source files change on disk.
@@ -2397,7 +2413,7 @@ export class SessionManager implements ISessionManager {
     sessionLog.info(`Reloading sources for session ${managed.id}`)
 
     // Reload all sources from disk
-    const allSources = loadAllSources(workspaceRootPath)
+    const allSources = this.filterSessionSources(managed, loadAllSources(workspaceRootPath))
     managed.agent.setAllSources(allSources)
 
     // Rebuild MCP and API servers for session's enabled sources
@@ -3748,6 +3764,35 @@ export class SessionManager implements ISessionManager {
     return this.sessions.get(sessionId)?.workingDirectory
   }
 
+  private async initializeManagedAgentAuth(managed: ManagedSession, connection: LlmConnection | null): Promise<void> {
+    if (!managed.agent) throw new Error('Cannot initialize authentication without an agent')
+
+    let result: PostInitResult
+    try {
+      result = await managed.agent.postInit()
+    } catch (error) {
+      managed.agentReadyResolve?.()
+      await this.disposeManagedAgentRuntime(managed, 'failed authentication initialization')
+      throw error
+    }
+
+    if (result.authWarning) {
+      sessionLog.warn(`Auth warning for session ${managed.id}: ${result.authWarning}`)
+      this.sendEvent({
+        type: 'info', sessionId: managed.id, message: result.authWarning,
+        level: result.authWarningLevel || 'error',
+      }, managed.workspace.id)
+    }
+
+    // A Claude account without its own token must not spawn a lazy subprocess
+    // that could inherit another account's global environment or CLI login.
+    if (connection && isClaudeAccountConnection(connection) && !result.authInjected) {
+      managed.agentReadyResolve?.()
+      await this.disposeManagedAgentRuntime(managed, 'missing Claude account authentication')
+      throw new Error(result.authWarning || `Reconnect Claude account: ${connection.name}`)
+    }
+  }
+
   private async disposeManagedAgentRuntime(managed: ManagedSession, reason: string): Promise<boolean> {
     const sessionId = managed.id
     let disposed = true
@@ -4161,7 +4206,7 @@ export class SessionManager implements ISessionManager {
 
       const sessionPath = getSessionStoragePath(managed.workspace.rootPath, managed.id)
       const enabledSlugs = managed.enabledSourceSlugs || []
-      const allSources = loadAllSources(managed.workspace.rootPath)
+      const allSources = this.filterSessionSources(managed, loadAllSources(managed.workspace.rootPath))
       const enabledSources = allSources.filter(s =>
         enabledSlugs.includes(s.config.slug) && isSourceUsable(s)
       )
@@ -4417,16 +4462,7 @@ export class SessionManager implements ISessionManager {
       }
 
       // Run post-init (auth injection) — each backend handles its own
-      const postInitResult = await managed.agent.postInit()
-      if (postInitResult.authWarning) {
-        sessionLog.warn(`Auth warning for session ${managed.id}: ${postInitResult.authWarning}`)
-        this.sendEvent({
-          type: 'info',
-          sessionId: managed.id,
-          message: postInitResult.authWarning,
-          level: postInitResult.authWarningLevel || 'error',
-        }, managed.workspace.id)
-      }
+      await this.initializeManagedAgentAuth(managed, connection)
 
       // Wire up large response handling in the MCP pool (all backends)
       if (managed.mcpPool && managed.agent) {
@@ -5446,7 +5482,7 @@ export class SessionManager implements ISessionManager {
         }
 
         // Load the source to check if it exists and is ready
-        const sources = getSourcesBySlugs(workspaceRootPath, [sourceSlug])
+        const sources = this.filterSessionSources(managed, getSourcesBySlugs(workspaceRootPath, [sourceSlug]))
         if (sources.length === 0) {
           sessionLog.warn(`Source ${sourceSlug} not found in workspace`)
           return false
@@ -5472,7 +5508,7 @@ export class SessionManager implements ISessionManager {
         }
 
         // Build server configs for all enabled sources
-        const allEnabledSources = getSourcesBySlugs(workspaceRootPath, managed.enabledSourceSlugs || [])
+        const allEnabledSources = this.filterSessionSources(managed, getSourcesBySlugs(workspaceRootPath, managed.enabledSourceSlugs || []))
         // Pass session path so large API responses can be saved to session folder
         const sessionPath = getSessionStoragePath(workspaceRootPath, managed.id)
         const { mcpServers, apiServers, errors } = await buildServersFromSources(allEnabledSources, sessionPath, managed.tokenRefreshManager, managed.agent?.getSummarizeCallback())
@@ -5960,6 +5996,10 @@ export class SessionManager implements ISessionManager {
     }
 
     const workspaceRootPath = managed.workspace.rootPath
+    if (this.usesClaudeAccountConnectors(managed)) {
+      sourceSlugs = this.filterSessionSources(managed, getSourcesBySlugs(workspaceRootPath, sourceSlugs))
+        .map(source => source.config.slug)
+    }
     sessionLog.info(`Setting sources for session ${sessionId}:`, sourceSlugs)
 
     // Clean up credential cache for sources being disabled (security)
@@ -5980,7 +6020,7 @@ export class SessionManager implements ISessionManager {
 
     // If agent exists, build and apply servers immediately
     if (managed.agent) {
-      const sources = getSourcesBySlugs(workspaceRootPath, sourceSlugs)
+      const sources = this.filterSessionSources(managed, getSourcesBySlugs(workspaceRootPath, sourceSlugs))
       // Pass session path so large API responses can be saved to session folder
       const sessionPath = getSessionStoragePath(workspaceRootPath, sessionId)
       const { mcpServers, apiServers, errors } = await buildServersFromSources(sources, sessionPath, managed.tokenRefreshManager, managed.agent.getSummarizeCallback())
@@ -5989,7 +6029,7 @@ export class SessionManager implements ISessionManager {
       }
 
       // Set all sources for context (agent sees full list with descriptions, including built-ins)
-      const allSources = loadAllSources(workspaceRootPath)
+      const allSources = this.filterSessionSources(managed, loadAllSources(workspaceRootPath))
       managed.agent.setAllSources(allSources)
 
       // Set active source servers (tools are only available from these)
@@ -7004,7 +7044,7 @@ export class SessionManager implements ISessionManager {
           const toEnable: string[] = []
           const skipped: string[] = []
           const candidateSlugs = Array.from(requiredSources)
-          const loadedSources = getSourcesBySlugs(workspaceRoot, candidateSlugs)
+          const loadedSources = this.filterSessionSources(managed, getSourcesBySlugs(workspaceRoot, candidateSlugs))
           const usableSources = new Set(
             loadedSources
               .filter(isSourceUsable)
@@ -7056,7 +7096,7 @@ export class SessionManager implements ISessionManager {
       // and emits AUTH_REQUIRED, causing a brief "needs_auth" UI flicker before the
       // post-build refresh restores state (#710).
       const sources: LoadedSource[] = hasSources
-        ? getSourcesBySlugs(workspaceRootPath, enabledSlugs)
+        ? this.filterSessionSources(managed, getSourcesBySlugs(workspaceRootPath, enabledSlugs))
         : []
 
       if (hasSources && managed.tokenRefreshManager) {
@@ -7076,7 +7116,7 @@ export class SessionManager implements ISessionManager {
       sendSpan.mark('agent.ready')
 
       // Always set all sources for context (even if none are enabled), including built-ins
-      const allSources = loadAllSources(workspaceRootPath)
+      const allSources = this.filterSessionSources(managed, loadAllSources(workspaceRootPath))
       agent.setAllSources(allSources)
       sendSpan.mark('sources.loaded')
 
@@ -9010,7 +9050,7 @@ export class SessionManager implements ISessionManager {
         const workspaceRootPath = managed.workspace.rootPath
         let toolDisplayMeta: ToolDisplayMeta | undefined
         if (formattedToolInput && Object.keys(formattedToolInput).length > 0) {
-          const allSources = loadAllSources(workspaceRootPath)
+          const allSources = this.filterSessionSources(managed, loadAllSources(workspaceRootPath))
           toolDisplayMeta = await resolveToolDisplayMeta(event.toolName, formattedToolInput, workspaceRootPath, allSources)
         }
 

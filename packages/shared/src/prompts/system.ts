@@ -378,7 +378,7 @@ ${workspaceContext}
 - Make the requested change directly
 - Before changing labels/statuses/sources/skills/automations/permissions, read the matching local doc in ~/.craft-agent/docs/
 - Validate with config_validate after editing
-- MCP tool calls require _displayName and _intent metadata
+- Add _displayName and _intent metadata only when the tool's schema declares those fields
 - Respect any session_state permission/path constraints supplied with the user message
 - Confirm completion briefly
 - Don't add unrequested features or changes
@@ -416,6 +416,7 @@ export function getSystemPrompt(
   includeCoAuthoredBy?: boolean,
   projectContext?: ProjectPromptContext,
   agentProfile?: AgentProfile,
+  claudeAccountConnectors: boolean = false,
 ): string {
   // Use mini agent prompt for quick edits (pass workspace root for config paths)
   if (preset === 'mini') {
@@ -441,8 +442,8 @@ export function getSystemPrompt(
   // to enable prompt caching. The system prompt stays static and cacheable.
   // Safe Mode context is also in user messages for the same reason.
   const basePrompt = agentProfile === 'coding'
-    ? getCodingAssistantPrompt(workspaceRootPath, backendName, resolvedIncludeCoAuthoredBy)
-    : getCraftAssistantPrompt(workspaceRootPath, backendName, resolvedIncludeCoAuthoredBy);
+    ? getCodingAssistantPrompt(workspaceRootPath, backendName, resolvedIncludeCoAuthoredBy, claudeAccountConnectors)
+    : getCraftAssistantPrompt(workspaceRootPath, backendName, resolvedIncludeCoAuthoredBy, claudeAccountConnectors);
   const fullPrompt = `${basePrompt}${preferences}${projectBlock}${debugContext}${projectContextFiles}`;
 
   debug('[getSystemPrompt] full prompt length:', fullPrompt.length);
@@ -651,7 +652,11 @@ Mode switching is normal. Apply the latest \`<session_state>\` immediately; \`mo
 **Path rule:** In Explore mode, do not write to \`.copilot-config/\`, \`session-state/\`, the session root, or arbitrary workspace paths. Use only the exact folders from \`<session_state>\`.`;
 }
 
-function getCraftAssistantPrompt(workspaceRootPath?: string, backendName: string = 'Claude Code', includeCoAuthoredBy: boolean = true): string {
+/** Also suitable for per-turn context when resuming a session with an older SDK prompt snapshot. */
+export const CLAUDE_ACCOUNT_CONNECTORS_GUIDANCE = `Claude account MCP connectors are supplied directly by the SDK and managed only on claude.ai. Use their declared tools without creating Craft source files, reading a Craft source guide, or requesting Craft source authentication. If a connector needs setup or authentication, direct the user to claude.ai.
+The \`<sources>\` block lists only Craft-managed API and local sources; it does not list Claude account connectors. An empty block does not mean native connectors are unavailable. Never infer or invent their availability: use the tools actually supplied by the SDK.`;
+
+function getCraftAssistantPrompt(workspaceRootPath?: string, backendName: string = 'Claude Code', includeCoAuthoredBy: boolean = true, claudeAccountConnectors: boolean = false): string {
   // Default to ${APP_ROOT}/workspaces/{id} if no path provided
   const workspacePath = workspaceRootPath || `${APP_ROOT}/workspaces/{id}`;
 
@@ -688,7 +693,7 @@ Lifecycle: use \`close\` when done, \`release\` when handing the page to the use
 You are Craft Agent - an AI assistant that helps users connect and work across their data sources through a desktop interface.
 
 **Core capabilities:**
-- **Connect external sources** - MCP servers, REST APIs, local filesystems. Users can integrate Linear, GitHub, Craft, custom APIs, and more.
+- **Connect external sources** - ${claudeAccountConnectors ? 'Claude account connectors, Craft REST API sources, and local filesystems.' : 'MCP servers, REST APIs, local filesystems. Users can integrate Linear, GitHub, Craft, custom APIs, and more.'}
 - **Automate workflows** - Combine data from multiple sources to create unique, powerful workflows.
 - **Code** - You are powered by ${backendName}, so you can write and execute code (Python, Bash) to manipulate data, call APIs, and automate tasks.
 
@@ -696,7 +701,7 @@ You are Craft Agent - an AI assistant that helps users connect and work across t
 
 ## External Sources
 
-Sources are external data connections. Each source has:
+${claudeAccountConnectors ? `${CLAUDE_ACCOUNT_CONNECTORS_GUIDANCE}\n\nCraft-managed API and local sources` : 'Sources'} are external data connections. Each ${claudeAccountConnectors ? 'Craft-managed ' : ''}source has:
 - \`config.json\` - Connection settings and authentication
 - \`guide.md\` - Usage guidelines (read before first use!)
 
@@ -705,9 +710,9 @@ Sources are external data connections. Each source has:
 2. If it needs auth, trigger the appropriate auth tool
 3. Call its tools directly — do not search the workspace for how to use it
 
-MCP servers can also publish resources (e.g. guides) and prompts (playbooks); \`<sources>\` notes them. Use \`source_list_resources\` / \`source_read_resource\` / \`source_list_prompts\` / \`source_get_prompt\`, and read guide resources a source points at before using its tools.
+${claudeAccountConnectors ? '' : 'MCP servers can also publish resources (e.g. guides) and prompts (playbooks); `<sources>` notes them. Use `source_list_resources` / `source_read_resource` / `source_list_prompts` / `source_get_prompt`, and read guide resources a source points at before using its tools.'}
 
-**Creating a new source** (does not exist yet):
+**Creating a new ${claudeAccountConnectors ? 'Craft API or local ' : ''}source** (does not exist yet):
 1. Read \`${DOC_REFS.sources}\` for the setup workflow
 2. Verify current endpoints via web search, and use browser tools when docs are dynamic or login-protected
 3. Before full setup, confirm whether in-app browser is a better fit for one-off or UI-only tasks
@@ -992,10 +997,10 @@ ${RTK_NOTE}
 ` : ''}
 ## Tool Metadata
 
-All MCP tools require two metadata fields (schema-enforced):
+Supply metadata only when the tool's schema declares it; never add undeclared fields to native connector calls:
 
-- **\`_displayName\`** (required): Short name for the action (2-4 words), e.g., "List Folders", "Search Documents"
-- **\`_intent\`** (required): Brief description of what you're trying to accomplish (1-2 sentences)
+- **\`_displayName\`** (when declared): Short name for the action (2-4 words), e.g., "List Folders", "Search Documents"
+- **\`_intent\`** (when declared): Brief description of what you're trying to accomplish (1-2 sentences)
 
 These help with UI feedback and result summarization.${FEATURE_FLAGS.developerFeedback ? `
 
@@ -1010,7 +1015,7 @@ ${DEVELOPER_FEEDBACK_SECTION}` : ''}`;
  * table), whose tools the coding profile does not register either. The `claude_code` preset
  * already covers general coding behavior, so this stays short.
  */
-function getCodingAssistantPrompt(workspaceRootPath?: string, backendName: string = 'Claude Code', includeCoAuthoredBy: boolean = true): string {
+function getCodingAssistantPrompt(workspaceRootPath?: string, backendName: string = 'Claude Code', includeCoAuthoredBy: boolean = true, claudeAccountConnectors: boolean = false): string {
   const workspacePath = workspaceRootPath || `${APP_ROOT}/workspaces/{id}`;
   const rtkActive = getRtkEnabled() && getRtkPath() !== null;
   const mode = (id: keyof typeof PERMISSION_MODE_CONFIG) => PERMISSION_MODE_CONFIG[id].displayName;
@@ -1042,7 +1047,9 @@ The current mode is in \`<session_state>\`; apply the latest one immediately (\`
 ## Skills and Sources
 
 - When the user mentions \`[skill:slug]\`, read its \`SKILL.md\` first (\`~/.agents/skills/{slug}/\`, \`${workspacePath}/skills/{slug}/\` or \`{projectRoot}/.agents/skills/{slug}/\`) and follow it.
-- Sources the user enables appear in \`<sources>\`; read \`${workspacePath}/sources/{slug}/guide.md\` before first using a source's tools. MCP tools require \`_displayName\` (2-4 words) and \`_intent\` (1-2 sentences) fields.
+- Craft-managed sources the user enables appear in \`<sources>\`; read \`${workspacePath}/sources/{slug}/guide.md\` before first using a Craft source's tools.
+- Supply \`_displayName\` (2-4 words) and \`_intent\` (1-2 sentences) only when the tool's schema declares those fields.
+${claudeAccountConnectors ? `\n${CLAUDE_ACCOUNT_CONNECTORS_GUIDANCE}\n` : ''}
 ${includeCoAuthoredBy ? `
 ${GIT_CONVENTIONS_SECTION}` : ''}${rtkActive ? `
 ${RTK_NOTE}

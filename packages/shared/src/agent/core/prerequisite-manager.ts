@@ -31,6 +31,13 @@ export interface PrerequisiteRule {
   blockMessage: string;
   /** If true, always block until file is read (no graceful fallback). */
   strict?: boolean;
+  /** A workspace MCP source guide applies only to Craft-managed MCP sources. */
+  isMcpSourceGuide?: boolean;
+}
+
+export interface PrerequisiteCheckOptions {
+  /** Trusted SDK provenance; never derive this from tool arguments or server names. */
+  mcpServerSource?: string;
 }
 
 export interface PrerequisiteCheckResult {
@@ -66,6 +73,7 @@ const BROWSER_TOOLS_DOC_PATH = resolve(join(CONFIG_DIR, 'docs', 'browser-tools.m
 const RULES: PrerequisiteRule[] = [
   // MCP source tools: mcp__{slug}__* format
   {
+    isMcpSourceGuide: true,
     toolMatcher: (toolName: string) => {
       if (!toolName.startsWith('mcp__')) return false;
       const parts = toolName.split('__');
@@ -333,12 +341,15 @@ export class PrerequisiteManager {
    * Iterates rules, checks if required files have been read.
    * After MAX_REJECTIONS blocks for the same path, allows through gracefully.
    */
-  checkPrerequisites(toolName: string): PrerequisiteCheckResult {
+  checkPrerequisites(toolName: string, options?: PrerequisiteCheckOptions): PrerequisiteCheckResult {
     // Check dynamic skill prerequisites first
     const skillResult = this.checkSkillPrerequisites(toolName);
     if (!skillResult.allowed) return skillResult;
 
     for (const rule of RULES) {
+      // Native account connectors do not belong to a same-named Craft source.
+      // Keep dynamic skill prerequisites and every other rule in effect.
+      if (rule.isMcpSourceGuide && options?.mcpServerSource === 'claudeai') continue;
       if (!rule.toolMatcher(toolName)) continue;
 
       const requiredPath = rule.resolveRequiredPath(toolName, this.workspaceRootPath);

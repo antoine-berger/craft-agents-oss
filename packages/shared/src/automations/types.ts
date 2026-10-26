@@ -363,6 +363,8 @@ export type AutomationsValidationResult = {
  * SDK automation input type - union of all possible SDK event inputs
  */
 export interface SdkAutomationInput {
+  /** MCP provenance supplied by the SDK hook; tool arguments and server names cannot establish it. */
+  mcp_server?: { name: string; source: string };
   hook_event_name: string;
   // Tool events
   tool_name?: string;

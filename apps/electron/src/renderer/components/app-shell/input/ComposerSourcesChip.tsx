@@ -20,6 +20,7 @@ interface ComposerSourcesChipProps {
   isEmptySession: boolean
   disabled: boolean
   buttonRef: React.RefObject<HTMLButtonElement>
+  claudeAccountConnectors?: boolean
 }
 
 /** Up to three source marks on raised tiles with a hairline, then a "+N" tile. */
@@ -63,6 +64,7 @@ export function ComposerSourcesChip({
   isEmptySession,
   disabled,
   buttonRef,
+  claudeAccountConnectors = false,
 }: ComposerSourcesChipProps) {
   const { t } = useTranslation()
   const enabledSources = sources.filter(s => selectedSlugs.includes(s.config.slug))
@@ -79,7 +81,7 @@ export function ComposerSourcesChip({
           icon={icon}
           label={
             selectedSlugs.length === 0
-              ? t("chat.sourcesTooltip")
+              ? claudeAccountConnectors ? t('chat.claudeConnectors.label') : t("chat.sourcesTooltip")
               : enabledSources.length === 1
                 ? enabledSources[0].config.name
                 : t("chat.sourcesCount", { count: enabledSources.length })
@@ -98,6 +100,7 @@ export function ComposerSourcesChip({
           sources={sources}
           selectedSlugs={selectedSlugs}
           onToggleSlug={onToggleSlug}
+          claudeAccountConnectors={claudeAccountConnectors}
         />
       </div>
     )
@@ -110,7 +113,7 @@ export function ComposerSourcesChip({
         icon={icon}
         label={
           selectedSlugs.length === 0
-            ? t("chat.chooseSources")
+            ? claudeAccountConnectors ? t('chat.claudeConnectors.label') : t("chat.chooseSources")
             : enabledSources.length === 1
               ? enabledSources[0].config.name
               : enabledSources.length === 2
@@ -134,6 +137,7 @@ export function ComposerSourcesChip({
         sources={sources}
         selectedSlugs={selectedSlugs}
         onToggleSlug={onToggleSlug}
+        claudeAccountConnectors={claudeAccountConnectors}
       />
     </div>
   )

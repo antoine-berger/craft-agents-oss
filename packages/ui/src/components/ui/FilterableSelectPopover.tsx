@@ -21,6 +21,8 @@ export interface FilterableSelectPopoverProps<T> {
   filterPlaceholder?: string
   emptyState?: React.ReactNode
   noResultsState?: React.ReactNode
+  /** Optional context displayed above the list, including when it is empty. */
+  header?: React.ReactNode
   closeOnSelect?: boolean
   minWidth?: number
   maxWidth?: number
@@ -46,6 +48,7 @@ export function FilterableSelectPopover<T>({
   filterPlaceholder,
   emptyState,
   noResultsState,
+  header,
   closeOnSelect = false,
   minWidth = 200,
   maxWidth = 320,
@@ -168,6 +171,7 @@ export function FilterableSelectPopover<T>({
           transform: 'translateY(-100%)',
         }}
       >
+        {header}
         {!hasItems ? (
           <div className="p-3 text-xs text-muted-foreground select-none">
             {emptyState ?? 'No items configured.'}

@@ -19,6 +19,7 @@ import { getValidClaudeOAuthToken } from '../auth/state.ts';
 import { largePdfNote, shouldInlinePdf } from './pdf-inline.ts';
 import {
   clearClaudeBedrockRoutingEnvVars,
+  isClaudeAccountConnection,
   resolveAuthEnvVars,
 } from '../config/llm-connections.ts';
 import type { McpClientPool } from '../mcp/mcp-pool.ts';
@@ -944,6 +945,7 @@ export class ClaudeAgent extends BaseAgent {
     // previous connection or parent process environment.
     delete process.env.ANTHROPIC_API_KEY;
     delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
+    delete process.env.CLAUDE_CODE_OAUTH_SCOPES;
     delete process.env.ANTHROPIC_BASE_URL;
     clearClaudeBedrockRoutingEnvVars();
 
@@ -959,6 +961,19 @@ export class ClaudeAgent extends BaseAgent {
     for (const [key, value] of Object.entries(result.envVars)) {
       process.env[key] = value;
     }
+
+    // A later session can replace process.env before this lazy SDK subprocess
+    // starts. Pin auth to this connection, including explicit empty alternatives,
+    // so its tools and claude.ai connectors cannot follow another account.
+    this.config.envOverrides = {
+      ...this.config.envOverrides,
+      ANTHROPIC_API_KEY: '',
+      ANTHROPIC_AUTH_TOKEN: '',
+      ANTHROPIC_BASE_URL: '',
+      CLAUDE_CODE_OAUTH_TOKEN: '',
+      CLAUDE_CODE_OAUTH_SCOPES: 'user:inference',
+      ...result.envVars,
+    };
 
     // Pass mini model to SDK subprocess so built-in tools like WebFetch
     // use the correct summarization model (instead of hardcoded Haiku).
@@ -981,6 +996,12 @@ export class ClaudeAgent extends BaseAgent {
   private usesFirstPartyClaude(): boolean {
     const connection = this.config.connectionSlug ? getLlmConnection(this.config.connectionSlug) : null;
     return connection?.providerType === 'anthropic' && (connection.authType === 'oauth' || connection.authType === 'api_key');
+  }
+
+  /** Native connectors belong to the account selected for this session. */
+  private usesClaudeAccountConnectors(): boolean {
+    const connection = this.config.connectionSlug ? getLlmConnection(this.config.connectionSlug) : null;
+    return !!connection && isClaudeAccountConnection(connection);
   }
 
   /**
@@ -1118,6 +1139,7 @@ export class ClaudeAgent extends BaseAgent {
           profile: this._agentProfile,
           hasEnabledSources: this.sourceManager.getIntendedSlugs().size > 0,
           hasProject: !!this.config.session?.projectId,
+          mcpManagement: this.usesClaudeAccountConnectors() ? 'claudeai' : undefined,
         }),
         // Per-source proxy servers from centralized MCP pool (MCP + API sources)
         // Each source gets its own SDK server keyed by slug (e.g., 'linear', 'github', 'gmail')
@@ -1267,6 +1289,7 @@ export class ClaudeAgent extends BaseAgent {
                 this.pinnedIncludeCoAuthoredBy ?? undefined,
                 this.pinnedProjectContext ?? undefined,
                 this._agentProfile,
+                this.usesClaudeAccountConnectors(),
               ),
             },
         // Use sdkCwd for SDK session storage - this is set once at session creation and never changes.
@@ -1387,6 +1410,7 @@ export class ClaudeAgent extends BaseAgent {
                 workingDirectory: this.config.session?.workingDirectory,
                 activeSourceSlugs: Array.from(this.sourceManager.getActiveSlugs()),
                 allSourceSlugs: this.sourceManager.getAllSources().map(s => s.config.slug),
+                mcpServer: input.mcp_server,
                 hasSourceActivation: !!this.onSourceActivationRequest,
                 permissionManager: this.permissionManager,
                 prerequisiteManager: this.prerequisiteManager,
@@ -2524,7 +2548,10 @@ This is a branched conversation. All prior messages in this conversation are par
       `modeVersion=${textPromptDiagnostics.modeVersion} changedBy=${textPromptDiagnostics.lastChangedBy} changedAt=${textPromptDiagnostics.lastChangedAt}`
     )
     const contextParts = this.promptBuilder.buildContextParts(
-      { plansFolderPath: getSessionPlansPath(this.workspaceRootPath, this.modeSessionId) },
+      {
+        plansFolderPath: getSessionPlansPath(this.workspaceRootPath, this.modeSessionId),
+        claudeAccountConnectors: this.usesClaudeAccountConnectors(),
+      },
       this.sourceManager.formatSourceState({ activeOnly: this._agentProfile === 'coding' })
     );
 
@@ -2570,7 +2597,10 @@ This is a branched conversation. All prior messages in this conversation are par
       `modeVersion=${sdkPromptDiagnostics.modeVersion} changedBy=${sdkPromptDiagnostics.lastChangedBy} changedAt=${sdkPromptDiagnostics.lastChangedAt}`
     )
     const contextParts = this.promptBuilder.buildContextParts(
-      { plansFolderPath: getSessionPlansPath(this.workspaceRootPath, this.modeSessionId) },
+      {
+        plansFolderPath: getSessionPlansPath(this.workspaceRootPath, this.modeSessionId),
+        claudeAccountConnectors: this.usesClaudeAccountConnectors(),
+      },
       this.sourceManager.formatSourceState({ activeOnly: this._agentProfile === 'coding' })
     );
 

@@ -268,7 +268,8 @@ export async function exchangeClaudeCode(
       accessToken: data.access_token,
       refreshToken: data.refresh_token,
       expiresAt: data.expires_in ? Date.now() + data.expires_in * 1000 : undefined,
-      scopes: data.scope ? data.scope.split(' ') : ['user:inference', 'user:profile'],
+      // Requested scopes are not proof that the provider granted them.
+      scopes: typeof data.scope === 'string' ? data.scope.split(/\s+/).filter(Boolean) : undefined,
       ...parseClaudeOAuthIdentity(data),
     }
   } catch (error) {

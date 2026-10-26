@@ -245,6 +245,7 @@ export class CredentialManager {
     accessToken: string;
     refreshToken?: string;
     expiresAt?: number;
+    scopes?: string[];
     /** Where the token came from: 'native' (our OAuth), 'cli' (Claude CLI import), or undefined (unknown) */
     source?: 'native' | 'cli';
   } | null> {
@@ -255,6 +256,7 @@ export class CredentialManager {
       accessToken: cred.value,
       refreshToken: cred.refreshToken,
       expiresAt: cred.expiresAt,
+      scopes: cred.scopes,
       source: cred.source as 'native' | 'cli' | undefined,
     };
   }
@@ -264,6 +266,7 @@ export class CredentialManager {
     accessToken: string;
     refreshToken?: string;
     expiresAt?: number;
+    scopes?: string[];
     /** Where the token came from: 'native' (our OAuth), 'cli' (Claude CLI import) */
     source?: 'native' | 'cli';
   }): Promise<void> {
@@ -271,6 +274,7 @@ export class CredentialManager {
       value: credentials.accessToken,
       refreshToken: credentials.refreshToken,
       expiresAt: credentials.expiresAt,
+      scopes: credentials.scopes,
       source: credentials.source,
     });
   }
@@ -380,6 +384,7 @@ export class CredentialManager {
     accessToken: string;
     refreshToken?: string;
     expiresAt?: number;
+    scopes?: string[];
     /** OIDC id_token (used by OpenAI/Codex) */
     idToken?: string;
   } | null> {
@@ -389,6 +394,7 @@ export class CredentialManager {
       accessToken: cred.value,
       refreshToken: cred.refreshToken,
       expiresAt: cred.expiresAt,
+      scopes: cred.scopes,
       idToken: cred.idToken,
     };
   }
@@ -402,6 +408,7 @@ export class CredentialManager {
     accessToken: string;
     refreshToken?: string;
     expiresAt?: number;
+    scopes?: string[];
     /** OIDC id_token (used by OpenAI/Codex) */
     idToken?: string;
   }): Promise<void> {
@@ -409,6 +416,7 @@ export class CredentialManager {
       value: credentials.accessToken,
       refreshToken: credentials.refreshToken,
       expiresAt: credentials.expiresAt,
+      scopes: credentials.scopes,
       idToken: credentials.idToken,
     });
   }

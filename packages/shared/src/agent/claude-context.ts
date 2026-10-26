@@ -74,6 +74,7 @@ export interface ClaudeContextOptions {
   sessionId: string;
   workspacePath: string;
   workspaceId: string;
+  mcpManagement?: SessionToolContext['mcpManagement'];
   onPlanSubmitted: (planPath: string) => void;
   onAuthRequest: (request: unknown) => void;
 }
@@ -215,6 +216,7 @@ export function createClaudeContext(options: ClaudeContextOptions): SessionToolC
   const context: SessionToolContext = {
     sessionId,
     workspacePath,
+    mcpManagement: options.mcpManagement,
     get sourcesPath() { return join(workspacePath, 'sources'); },
     get skillsPath() { return join(workspacePath, 'skills'); },
     plansFolderPath: getSessionPlansPath(workspacePath, sessionId),

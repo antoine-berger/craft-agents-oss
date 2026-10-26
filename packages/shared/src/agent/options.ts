@@ -194,6 +194,14 @@ export function buildClaudeSubprocessEnv(
         CRAFT_DEBUG: (process.argv.includes('--debug') || process.env.CRAFT_DEBUG === '1') ? '1' : '0',
     };
 
+    // Token-only callers (for example connection probes) cannot inherit the
+    // default account's connector grants from process.env. Normal chats pass
+    // both the selected account's token and its granted scopes explicitly.
+    if (envOverrides && Object.hasOwn(envOverrides, 'CLAUDE_CODE_OAUTH_TOKEN')
+        && !Object.hasOwn(envOverrides, 'CLAUDE_CODE_OAUTH_SCOPES')) {
+        env.CLAUDE_CODE_OAUTH_SCOPES = 'user:inference';
+    }
+
     // SDK 0.3.268 (Claude Code 2.1.268) stopped offering the task-tracking tools
     // (TodoWrite and the Task* family) by default on Opus ≤4.7, Sonnet ≤4.6 and
     // Haiku 4.5. Craft renders TodoWrite in the transcript regardless of model, so

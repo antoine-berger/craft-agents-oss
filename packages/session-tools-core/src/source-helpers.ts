@@ -8,7 +8,26 @@
 
 import { existsSync, readFileSync, readdirSync, statSync, openSync, readSync, closeSync } from 'node:fs';
 import { join } from 'node:path';
-import type { SourceConfig } from './types.ts';
+import type { SessionToolContext } from './context.ts';
+import type { SourceConfig, ToolResult } from './types.ts';
+import { errorResponse } from './response.ts';
+
+/**
+ * Enforce the session's MCP ownership before source tools test, authenticate, or
+ * mutate a workspace source. API/local sources retain their Craft workflows.
+ */
+export function getSourceManagementError(
+  ctx: Pick<SessionToolContext, 'mcpManagement'>,
+  source: SourceConfig,
+): ToolResult | null {
+  if (ctx.mcpManagement !== 'claudeai' || source.type !== 'mcp') return null;
+
+  return errorResponse(
+    `MCP connectors for this Claude account are managed in claude.ai. ` +
+    `Add, configure, or authenticate the connector at https://claude.ai/customize/connectors. ` +
+    `Craft MCP source '${source.slug}' is not used by this connection.`,
+  );
+}
 
 /** Strip UTF-8 BOM that breaks JSON.parse */
 function stripBom(text: string): string {

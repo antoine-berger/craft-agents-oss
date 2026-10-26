@@ -1,4 +1,13 @@
-import { describe, it, expect, mock, beforeEach } from 'bun:test'
+import { describe, it, expect, mock, beforeEach, beforeAll, afterAll, spyOn } from 'bun:test'
+import * as configStorage from '../../config/storage.ts'
+
+// Prompt tests must not depend on a user's installed config-defaults.json or browser preference.
+let restoreBrowserSetting = () => {}
+beforeAll(() => {
+  const browserSetting = spyOn(configStorage, 'getBrowserToolEnabled').mockReturnValue(true)
+  restoreBrowserSetting = () => { browserSetting.mockRestore() }
+})
+afterAll(() => { restoreBrowserSetting() })
 
 // Stub the preferences module so we can toggle `getCoAuthorPreference` per test
 // without touching disk. `formatPreferencesForPrompt` is stubbed to '' because
@@ -62,10 +71,10 @@ describe('system prompt guidance', () => {
     expect(section).toContain('| **Execute** | Full autonomous execution. No prompts. |')
   })
 
-  it('includes required MCP metadata guidance in the mini-agent prompt', () => {
+  it('scopes mini-agent metadata guidance to the declared tool schema', () => {
     const prompt = getMiniAgentSystemPrompt('/tmp/workspace')
 
-    expect(prompt).toContain('MCP tool calls require _displayName and _intent metadata')
+    expect(prompt).toContain('only when the tool\'s schema declares those fields')
     expect(prompt).toContain('read the matching local doc in ~/.craft-agent/docs/')
   })
 
@@ -369,5 +378,30 @@ describe('coding agent profile', () => {
     expect(prompt).toContain(preferences)
     // The tool that edits preferences is not registered in coding mode, so the prompt must not offer it
     expect(prompt).not.toContain('update_user_preferences')
+  })
+})
+
+describe('Claude account connector guidance', () => {
+  for (const profile of ['default', 'coding'] as const) {
+    it(`keeps native connectors outside Craft source setup in the ${profile} profile`, () => {
+      const prompt = getSystemPrompt(
+        undefined, undefined, '/tmp/workspace', '/tmp/workspace', undefined, undefined,
+        undefined, undefined, profile, true,
+      )
+      expect(prompt).toContain('managed only on claude.ai')
+      expect(prompt).toContain('without creating Craft source files, reading a Craft source guide, or requesting Craft source authentication')
+      expect(prompt).toContain('lists only Craft-managed API and local sources')
+      expect(prompt).toContain('use the tools actually supplied by the SDK')
+      expect(prompt).not.toContain('All MCP tools require')
+      expect(prompt).not.toContain('MCP tools require `_displayName`')
+      expect(prompt).toContain('schema declares')
+    })
+  }
+
+  it('does not apply the account-only source policy to other connections', () => {
+    const prompt = getSystemPrompt(undefined, undefined, '/tmp/workspace', '/tmp/workspace')
+    expect(prompt).not.toContain('managed only on claude.ai')
+    expect(prompt).toContain('MCP servers, REST APIs, local filesystems')
+    expect(prompt).toContain('source_list_resources')
   })
 })

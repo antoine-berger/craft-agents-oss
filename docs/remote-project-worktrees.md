@@ -61,7 +61,11 @@ The build creates `dist/server/` and a versioned `dist/craft-server-<version>-li
 
 ## Claude connections
 
+For Claude OAuth accounts, MCP connectors are managed only on **claude.ai** and supplied directly by the SDK. Do not recreate or authenticate them as Craft sources. The chat's source picker links to claude.ai and lists only additional API/local sources; it does not enumerate native connectors or claim they are connected. Existing Craft MCP configurations remain available to other connection types. Craft's internal session tools remain enabled.
+
 Reconnect each Claude OAuth account once to obtain the added `user:mcp_servers` scope; refreshing an old token does not add it. Accounts missing their own saved credentials must reconnect instead of borrowing another account's token. Actual authenticated MCP access has not been validated end to end with user credentials here.
+
+Craft preserves the scopes actually granted during OAuth and pins the account's token and scopes to each agent process. Native connector calls use their SDK provenance and tool schemas; they do not trigger Craft source activation or authentication. Session permission checks still apply. A session whose account cannot authenticate stops before starting the model backend.
 
 ## Validation
 
@@ -75,12 +79,24 @@ bun test packages/shared/src/projects/__tests__ \
   packages/server-core/src/sessions/auth-retry-runtime.test.ts \
   packages/shared/src/auth/__tests__/claude-oauth-scope.test.ts
 
-# Run mock-based account tests in their own process.
+# Run account/config integration tests in their own processes.
 bun test ./packages/shared/src/auth/__tests__/state-multi-connection.isolated.ts
+bun test ./packages/shared/src/agent/__tests__/claude-auth-pinning.isolated.ts
+bun test ./packages/server-core/src/handlers/rpc/onboarding-scopes.isolated.ts
+bun test ./packages/server-core/src/sessions/claude-ai-source-policy.isolated.ts
+bun test ./packages/shared/src/agent/__tests__/session-tools-mcp-management.isolated.ts
+bun test ./packages/shared/src/agent/core/__tests__/pre-tool-use-checks.isolated.ts
 
-bun run typecheck:shared
-bun run typecheck:electron
-bun run webui:build
+bun test packages/shared/src/agent/core/__tests__/claude-ai-mcp-provenance.test.ts \
+  packages/shared/src/config/__tests__/llm-connections-auth-env.test.ts \
+  packages/shared/src/agent/__tests__/claude-subprocess-env.test.ts \
+  packages/session-tools-core/src/handlers/source-management-policy.test.ts
+bun test packages/shared/src/prompts/__tests__/system.test.ts \
+  packages/shared/src/agent/core/__tests__/prompt-builder.test.ts \
+  packages/shared/src/agent/__tests__/prompt-builder-context-split.test.ts
+
+bun run typecheck:all
+NODE_OPTIONS=--max-old-space-size=4096 bun run webui:build
 bun run lint:i18n:sorted
 bun run lint:i18n:parity
 bun run lint:i18n:coverage

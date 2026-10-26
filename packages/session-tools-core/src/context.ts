@@ -171,6 +171,9 @@ export interface SessionToolContext {
   /** Working directory (project root) for the session, if set */
   workingDirectory?: string;
 
+  /** Claude account MCP connectors are managed by claude.ai, not workspace sources. */
+  mcpManagement?: 'claudeai';
+
   // ============================================================
   // Callbacks (transport-agnostic)
   // ============================================================

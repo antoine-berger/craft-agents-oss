@@ -2741,6 +2741,7 @@ export async function migrateLegacyCredentials(): Promise<void> {
         accessToken: legacyClaudeOAuth.accessToken,
         refreshToken: legacyClaudeOAuth.refreshToken,
         expiresAt: legacyClaudeOAuth.expiresAt,
+        scopes: legacyClaudeOAuth.scopes,
       });
       debug('[storage] Migrated legacy Claude OAuth to llm_oauth::claude-max');
 

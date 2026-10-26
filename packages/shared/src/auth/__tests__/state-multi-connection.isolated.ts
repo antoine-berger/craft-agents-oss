@@ -9,6 +9,7 @@ interface Credentials {
   accessToken: string;
   refreshToken?: string;
   expiresAt?: number;
+  scopes?: string[];
   source?: 'native' | 'cli';
 }
 
@@ -177,9 +178,13 @@ describe('Claude OAuth refresh isolation', () => {
     connections = [connection('a')];
     legacyCredentials = {
       accessToken: 'legacy-access', refreshToken: 'a-refresh', expiresAt: 1, source: 'cli',
+      scopes: ['user:inference', 'user:mcp_servers'],
     };
-    expect(await getValidClaudeOAuthToken('a')).toEqual({ accessToken: 'a-new-access' });
+    expect(await getValidClaudeOAuthToken('a')).toEqual({
+      accessToken: 'a-new-access', scopes: ['user:inference', 'user:mcp_servers'],
+    });
     expect(credentials.get('a')?.refreshToken).toBe('a-new-refresh');
+    expect(credentials.get('a')?.scopes).toEqual(['user:inference', 'user:mcp_servers']);
     expect(legacyCredentials?.source).toBe('native');
   });
 
@@ -218,6 +223,65 @@ describe('Claude OAuth refresh isolation', () => {
   });
 });
 
+describe('Claude OAuth granted scopes', () => {
+  it('returns only the selected account scopes despite a different global grant', async () => {
+    credentials.get('a')!.scopes = ['user:inference'];
+    credentials.get('b')!.scopes = ['user:inference', 'user:mcp_servers'];
+    legacyCredentials = { ...credentials.get('b')!, source: 'native' };
+
+    expect(await getValidClaudeOAuthToken('a')).toEqual({
+      accessToken: 'a-access', scopes: ['user:inference'],
+    });
+    expect(await getValidClaudeOAuthToken('b')).toEqual({
+      accessToken: 'b-access', scopes: ['user:inference', 'user:mcp_servers'],
+    });
+  });
+
+  it('keeps legacy unknown scopes unknown on read and refresh without borrowing the global grant', async () => {
+    legacyCredentials!.scopes = ['user:inference', 'user:mcp_servers'];
+
+    expect(await getValidClaudeOAuthToken('a')).toEqual({ accessToken: 'a-access' });
+    expire('a');
+    expect(await getValidClaudeOAuthToken('a')).toEqual({ accessToken: 'a-new-access' });
+    expect(credentials.get('a')?.scopes).toBeUndefined();
+    expect(legacyCredentials?.scopes).toBeUndefined();
+  });
+
+  it('preserves the same account grant when refresh omits scope', async () => {
+    const scopes = ['user:inference', 'user:mcp_servers'];
+    credentials.get('a')!.scopes = scopes;
+    expire('a');
+
+    expect(await getValidClaudeOAuthToken('a')).toEqual({ accessToken: 'a-new-access', scopes });
+    expect(credentials.get('a')?.scopes).toEqual(scopes);
+    expect(legacyCredentials?.scopes).toEqual(scopes);
+  });
+
+  it('replaces previous permissions with a narrower grant returned by refresh', async () => {
+    credentials.get('a')!.scopes = ['user:inference', 'user:mcp_servers'];
+    expire('a');
+    respondToRefresh = async () => Response.json({
+      access_token: 'a-new-access', expires_in: 3600, scope: 'user:inference',
+    });
+
+    expect(await getValidClaudeOAuthToken('a')).toEqual({
+      accessToken: 'a-new-access', scopes: ['user:inference'],
+    });
+    expect(credentials.get('a')?.scopes).toEqual(['user:inference']);
+    expect(legacyCredentials?.scopes).toEqual(['user:inference']);
+  });
+
+  it('does not restore an old grant when refresh explicitly returns no permissions', async () => {
+    credentials.get('b')!.scopes = ['user:inference', 'user:mcp_servers'];
+    expire('b');
+    respondToRefresh = async () => Response.json({ access_token: 'b-new-access', scope: '' });
+
+    expect(await getValidClaudeOAuthToken('b')).toEqual({ accessToken: 'b-new-access', scopes: [] });
+    expect(credentials.get('b')?.scopes).toEqual([]);
+    expect(legacyWrites).toEqual([]);
+  });
+});
+
 describe('Claude OAuth concurrent requests', () => {
   it('locks before reading credentials so concurrent callers cannot refresh stale copies', async () => {
     expire('a');
@@ -235,6 +299,8 @@ describe('Claude OAuth concurrent requests', () => {
   });
 
   it('refreshes different accounts independently and returns the correct token to each caller', async () => {
+    credentials.get('a')!.scopes = ['user:inference'];
+    credentials.get('b')!.scopes = ['user:inference', 'user:mcp_servers'];
     expire('a');
     expire('b');
     const aStarted = deferred<void>();
@@ -255,12 +321,15 @@ describe('Claude OAuth concurrent requests', () => {
     await Promise.all([aStarted.promise, bStarted.promise]);
 
     bResponse.resolve(refreshedResponse('b'));
-    expect(await b).toEqual({ accessToken: 'b-new-access' });
+    expect(await b).toEqual({
+      accessToken: 'b-new-access', scopes: ['user:inference', 'user:mcp_servers'],
+    });
     expect(aFinished).toBe(false);
     aResponse.resolve(refreshedResponse('a'));
-    expect(await a).toEqual({ accessToken: 'a-new-access' });
+    expect(await a).toEqual({ accessToken: 'a-new-access', scopes: ['user:inference'] });
     expect(refreshRequests.sort()).toEqual(['a-refresh', 'b-refresh']);
     expect(legacyCredentials?.accessToken).toBe('a-new-access');
+    expect(legacyCredentials?.scopes).toEqual(['user:inference']);
   });
 
   it('returns legacy migration information to every caller waiting on a failed refresh', async () => {

@@ -4,6 +4,7 @@ import { Check, DatabaseZap, Search } from 'lucide-react'
 
 import { cn } from '@/lib/utils'
 import { SourceAvatar } from '@/components/ui/source-avatar'
+import { ClaudeConnectorsNotice } from './ClaudeConnectorsNotice'
 import {
   Drawer,
   DrawerContent,
@@ -18,6 +19,7 @@ export interface CompactSourceSelectorProps {
   sources: LoadedSource[]
   selectedSlugs: string[]
   onToggleSlug: (slug: string) => void
+  claudeAccountConnectors?: boolean
 }
 
 /**
@@ -34,6 +36,7 @@ export function CompactSourceSelector({
   sources,
   selectedSlugs,
   onToggleSlug,
+  claudeAccountConnectors = false,
 }: CompactSourceSelectorProps) {
   const { t } = useTranslation()
   const [filter, setFilter] = React.useState('')
@@ -56,6 +59,8 @@ export function CompactSourceSelector({
           <DrawerTitle>{t('chat.sourcesTooltip')}</DrawerTitle>
         </DrawerHeader>
 
+        {claudeAccountConnectors && <ClaudeConnectorsNotice />}
+
         {sources.length > 0 && (
           <div className="px-4 pb-2">
             <div className="relative">
@@ -74,7 +79,7 @@ export function CompactSourceSelector({
         <div className="px-2 pb-4 flex flex-col gap-0.5 max-h-[55vh] overflow-y-auto">
           {sources.length === 0 ? (
             <div className="px-4 py-8 text-center text-sm text-foreground/50">
-              {t('sourcesList.noSourcesConfigured')}
+              {claudeAccountConnectors ? t('chat.claudeConnectors.noOtherSources') : t('sourcesList.noSourcesConfigured')}
             </div>
           ) : filteredSources.length === 0 ? (
             <div className="px-4 py-8 text-center text-sm text-foreground/50">

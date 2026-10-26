@@ -59,6 +59,28 @@ describe('PromptBuilder agent profile', () => {
     expect(stable).not.toContain('<workspace_capabilities>');
     expect(stable).toContain('<working_directory>');
   });
+
+  it('clarifies native connectors on every Claude-account turn, including Coding sessions', () => {
+    for (const agentProfile of ['default', 'coding'] as const) {
+      const builder = new PromptBuilder({ workspace, session, agentProfile });
+      for (let turn = 0; turn < 2; turn++) {
+        const context = builder.buildContextParts({ claudeAccountConnectors: true }, '<sources>Active: none</sources>').join('\n');
+        expect(context).toContain('<claude_account_connectors>');
+        expect(context).toContain('managed only on claude.ai');
+        expect(context).toContain('does not mean native connectors are unavailable');
+        expect(context).toContain('when the tool\'s schema declares');
+        expect(context).not.toContain('local-mcp:');
+        expect(context).toContain('API and local sources');
+      }
+    }
+  });
+
+  it('keeps ordinary connection capabilities and omits native guidance without the account flag', () => {
+    const builder = new PromptBuilder({ workspace, session });
+    const context = builder.buildContextParts({}).join('\n');
+    expect(context).toContain('local-mcp:');
+    expect(context).not.toContain('<claude_account_connectors>');
+  });
 });
 
 function createGitFixture(): { root: string; packageDir: string } {

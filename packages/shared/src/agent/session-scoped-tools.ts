@@ -31,6 +31,7 @@ import {
   type ToolResult,
   type AuthRequest,
   type SessionToolFilterOptions,
+  type SessionToolContext,
 } from '@craft-agent/session-tools-core';
 import { createLLMTool, type LLMQueryRequest, type LLMQueryResult } from './llm-tool.ts';
 import { createSpawnSessionTool, type SpawnSessionFn } from './spawn-session-tool.ts';
@@ -164,7 +165,8 @@ function convertResult(result: ToolResult): { content: Array<{ type: 'text'; tex
 // ============================================================
 
 /** Profile inputs for the session tool set (see `getSessionToolDefs` in session-tools-core). */
-export type SessionToolProfileOptions = Pick<SessionToolFilterOptions, 'profile' | 'hasEnabledSources' | 'hasProject'>;
+export type SessionToolProfileOptions = Pick<SessionToolFilterOptions, 'profile' | 'hasEnabledSources' | 'hasProject'>
+  & Pick<SessionToolContext, 'mcpManagement'>;
 
 // Cache tools by session to avoid recreating them on every query.
 // We cache the tools array (expensive to build) but NOT the MCP server wrapper,
@@ -225,11 +227,14 @@ export function getSessionScopedTools(
   workspaceId?: string,
   profileOptions?: SessionToolProfileOptions,
 ): ReturnType<typeof createSdkMcpServer> {
-  // A coding session's tool set depends on its profile inputs, so they are part of its key.
-  // The default key is unchanged: the default tool set does not depend on them.
-  const cacheKey = profileOptions?.profile === 'coding'
+  // Profile inputs and MCP ownership determine the tools and their context.
+  // Include ownership so switching providers cannot reuse another connection's policy.
+  const profileKey = profileOptions?.profile === 'coding'
     ? `${sessionId}::${workspaceRootPath}::coding:${profileOptions.hasEnabledSources ? 1 : 0}:${profileOptions.hasProject ? 1 : 0}`
     : `${sessionId}::${workspaceRootPath}`;
+  const cacheKey = profileOptions?.mcpManagement
+    ? `${profileKey}::mcp:${profileOptions.mcpManagement}`
+    : profileKey;
 
   // Return cached tools if available, but always create a fresh MCP server wrapper
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -240,6 +245,7 @@ export function getSessionScopedTools(
       sessionId,
       workspacePath: workspaceRootPath,
       workspaceId: workspaceId || basename(workspaceRootPath) || '',
+      mcpManagement: profileOptions?.mcpManagement,
       onPlanSubmitted: (planPath: string) => {
         setLastPlanFilePath(sessionId, planPath);
         const callbacks = getSessionScopedToolCallbacks(sessionId);
