@@ -5,11 +5,15 @@ Projects organize initiatives, not unique repositories: “Checkout redesign” 
 ## Set up an initiative
 
 1. Connect to the server, then open the project's **Settings**.
-2. Set **Working directory** to the repository on that server. **Choose…** browses the server when connected remotely. The repository needs a commit, and the server user needs write access to it and the directory where neighboring worktrees are created.
+2. Set **Working directory** to the repository or a subdirectory such as `packages/api` on that server. **Choose…** browses the server when connected remotely. The repository needs a commit, and the server user needs write access to it and the directory where neighboring worktrees are created.
 3. Enable **New worktree for each chat**. Optionally set **Base branch** to an existing branch such as `main` or `origin/main`; leave it blank for the repository default.
 4. Save, then use **New session in …** from the project.
 
-The worktree is created before the agent starts on the first message. Empty chats do not create checkouts. Subsequent messages and resumed chats reuse the same branch and directory. Settings are captured when a new chat is created; existing chats are not migrated. Child sessions, conversation forks and task sessions retain their existing directory behavior.
+The worktree is created before the agent starts on the first message. Creating an empty independent chat does not create a checkout. Subsequent messages and resumed chats reuse the same branch and directory. Settings are captured when a new chat is created; existing chats are not migrated.
+
+Delegated chats and subtasks inherit their parent's current folder unless another folder or project is explicitly selected. They share the parent's worktree; creating a child can prepare that checkout if the parent has not started yet. Conversation forks and standalone task sessions retain their existing directory behavior.
+
+When the project uses a repository subdirectory, the agent starts in the corresponding subdirectory of its worktree. That folder is preserved after restart and archive/reopen. If the selected base branch lacks the folder, or the folder resolves outside the checkout, preparation stops with an error. Existing worktree records created without a subdirectory retain their original root directory.
 
 Choosing an explicit folder before the first message opts that chat out of automatic worktrees. After worktree preparation starts, the folder is locked for that chat; start another chat to use a different folder.
 
@@ -65,7 +69,7 @@ For Claude OAuth accounts, MCP connectors are managed only on **claude.ai** and 
 
 Reconnect each Claude OAuth account once to obtain the added `user:mcp_servers` scope; refreshing an old token does not add it. Accounts missing their own saved credentials must reconnect instead of borrowing another account's token. Actual authenticated MCP access has not been validated end to end with user credentials here.
 
-Craft preserves the scopes actually granted during OAuth and pins the account's token and scopes to each agent process. Native connector calls use their SDK provenance and tool schemas; they do not trigger Craft source activation or authentication. Session permission checks still apply. A session whose account cannot authenticate stops before starting the model backend.
+Craft preserves the scopes actually granted during OAuth and pins the account's token and scopes to each agent process. Native connector calls use their SDK provenance and tool schemas; they do not trigger Craft source activation or authentication. Session permission checks still apply. A session whose account cannot authenticate stops before starting the model backend. Automatic titles, title refreshes and handoff summaries also wait for the selected account's authentication; failed authentication skips the background completion instead of using another account.
 
 ## Validation
 
@@ -79,7 +83,10 @@ bun test packages/shared/src/projects/__tests__ \
   packages/server-core/src/sessions/auth-retry-runtime.test.ts \
   packages/shared/src/auth/__tests__/claude-oauth-scope.test.ts
 
-# Run account/config integration tests in their own processes.
+# Run tests that alter process-wide configuration in their own processes.
+bun test ./packages/server-core/src/sessions/child-session-working-directory.isolated.ts
+bun test ./packages/server-core/src/sessions/title-generation.isolated.ts
+bun test ./packages/server-core/src/sessions/background-auth.isolated.ts
 bun test ./packages/shared/src/auth/__tests__/state-multi-connection.isolated.ts
 bun test ./packages/shared/src/agent/__tests__/claude-auth-pinning.isolated.ts
 bun test ./packages/server-core/src/handlers/rpc/onboarding-scopes.isolated.ts

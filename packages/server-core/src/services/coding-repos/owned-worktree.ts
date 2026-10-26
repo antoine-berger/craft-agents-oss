@@ -6,9 +6,10 @@
  */
 
 import { createHash, randomUUID } from 'node:crypto'
-import { lstat, mkdir, readFile, realpath, rename, writeFile } from 'node:fs/promises'
-import { basename, join, resolve } from 'node:path'
+import { lstat, mkdir, readFile, realpath, rename, stat, writeFile } from 'node:fs/promises'
+import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import type { OwnedWorktree } from '@craft-agent/shared/sessions'
+import { expandPath } from '@craft-agent/shared/utils'
 import { runGit, runGitResult } from '../git'
 import { commonGitDir, repoCommandDir, worktreeParentFor } from './discover'
 import { branchSlug, gitReason, resolveWorktreeBase } from './worktree'
@@ -17,7 +18,7 @@ const GIT_WRITE_TIMEOUT_MS = 60_000
 const MARKER_DIRECTORY = 'craft-session-worktrees'
 
 export class OwnedWorktreeError extends Error {
-  constructor(message: string, readonly code: 'invalid-plan' | 'not-a-repo' | 'no-commit' | 'collision' | 'not-owned' | 'git-failed') {
+  constructor(message: string, readonly code: 'invalid-plan' | 'invalid-directory' | 'not-a-repo' | 'no-commit' | 'collision' | 'not-owned' | 'git-failed') {
     super(message)
     this.name = 'OwnedWorktreeError'
   }
@@ -70,6 +71,56 @@ function expectedPath(gitDir: string, branch: string): string {
   return join(worktreeParentFor(gitDir), folder)
 }
 
+function isInsideDirectory(directory: string, parent: string): boolean {
+  const child = relative(parent, directory)
+  return child === '' || (child !== '..' && !child.startsWith(`..${sep}`) && !isAbsolute(child))
+}
+
+/** Ownership is always rooted at plan.path; the agent may start in a project subdirectory. */
+export function ownedWorktreeWorkingDirectory(plan: OwnedWorktree): string {
+  const subdirectory = plan.projectSubdirectory
+  if (subdirectory === undefined) return plan.path
+  if (typeof subdirectory !== 'string' || !subdirectory || subdirectory.includes('\0') || isAbsolute(subdirectory)) {
+    throw new OwnedWorktreeError('Invalid project subdirectory in the worktree ownership record', 'invalid-plan')
+  }
+  const directory = resolve(plan.path, subdirectory)
+  if (!isInsideDirectory(directory, plan.path) || relative(plan.path, directory) !== subdirectory) {
+    throw new OwnedWorktreeError('The project subdirectory must stay inside the session worktree', 'invalid-plan')
+  }
+  return directory
+}
+
+/** Use the selected checkout's root, which can differ from the repository's main checkout. */
+async function projectSubdirectory(repositoryPath: string, repoPath: string): Promise<string | undefined> {
+  const directory = await realpath(repositoryPath)
+  const topLevel = await runGit(directory, ['rev-parse', '--show-toplevel'])
+  if (!topLevel) {
+    if (directory === repoPath && await runGit(directory, ['rev-parse', '--is-bare-repository']) === 'true') return
+    throw new OwnedWorktreeError('The project folder is not inside a Git checkout', 'not-a-repo')
+  }
+  const root = await realpath(topLevel)
+  if (!isInsideDirectory(directory, root)) {
+    throw new OwnedWorktreeError('The project folder is outside its Git checkout', 'invalid-directory')
+  }
+  return relative(root, directory) || undefined
+}
+
+/** Never fall back to the checkout root or follow a project directory outside its isolation. */
+async function validateWorkingDirectory(plan: OwnedWorktree): Promise<void> {
+  const directory = ownedWorktreeWorkingDirectory(plan)
+  try {
+    const actual = await realpath(directory)
+    if (!isInsideDirectory(actual, plan.path) || !(await stat(actual)).isDirectory()) {
+      throw new OwnedWorktreeError('The project folder is not a directory inside the session worktree', 'invalid-directory')
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT' || (error as NodeJS.ErrnoException).code === 'ENOTDIR') {
+      throw new OwnedWorktreeError(`The project subdirectory "${plan.projectSubdirectory ?? '.'}" is missing from the session worktree`, 'invalid-directory')
+    }
+    throw error
+  }
+}
+
 async function exists(path: string): Promise<boolean> {
   try {
     await lstat(path)
@@ -107,6 +158,7 @@ async function validatePlan(plan: OwnedWorktree): Promise<void> {
   if (plan.version !== 1 || !plan.ownerId || !plan.token || !/^[a-f\d]{40,64}$/.test(plan.baseCommit)) {
     throw new OwnedWorktreeError('Invalid session worktree ownership record', 'invalid-plan')
   }
+  ownedWorktreeWorkingDirectory(plan)
   const gitDir = await commonGitDir(plan.repoPath)
   if (!gitDir || gitDir !== plan.gitDir || resolve(plan.repoPath) !== repoCommandDir(gitDir)) {
     throw new OwnedWorktreeError('The session repository no longer matches its worktree record', 'not-a-repo')
@@ -125,7 +177,7 @@ async function validatePlan(plan: OwnedWorktree): Promise<void> {
 }
 
 function sameReservation(left: OwnedWorktree, right: OwnedWorktree): boolean {
-  return ['version', 'ownerId', 'token', 'repoPath', 'gitDir', 'path', 'branch', 'base', 'baseCommit']
+  return ['version', 'ownerId', 'token', 'repoPath', 'gitDir', 'path', 'projectSubdirectory', 'branch', 'base', 'baseCommit']
     .every(key => left[key as keyof OwnedWorktree] === right[key as keyof OwnedWorktree])
 }
 
@@ -146,12 +198,17 @@ async function readReservation(plan: OwnedWorktree): Promise<OwnedWorktree | nul
 /** Read-only planning (apart from a best-effort fetch). Persist this result before creating Git state. */
 export async function planOwnedWorktree(input: PlanOwnedWorktreeInput): Promise<OwnedWorktree> {
   if (!input.ownerId || !input.sessionId) throw new OwnedWorktreeError('A worktree requires a session owner', 'invalid-plan')
-  const gitDir = await commonGitDir(input.repositoryPath)
+  const repositoryPath = expandPath(input.repositoryPath)
+  const gitDir = await commonGitDir(repositoryPath)
   if (!gitDir) throw new OwnedWorktreeError('The project folder is not a Git repository', 'not-a-repo')
   const repoPath = repoCommandDir(gitDir)
+  const subdirectory = await projectSubdirectory(repositoryPath, repoPath)
   const base = await resolveWorktreeBase(repoPath, input.baseBranch)
   const baseCommit = await runGit(repoPath, ['rev-parse', '--verify', '--quiet', `${base}^{commit}`])
   if (!baseCommit) throw new OwnedWorktreeError('The repository must have an initial commit', 'no-commit')
+  if (subdirectory && await runGit(repoPath, ['cat-file', '-t', `${baseCommit}:${subdirectory.split(sep).join('/')}`]) !== 'tree') {
+    throw new OwnedWorktreeError(`The project subdirectory "${subdirectory}" is not a directory in base branch "${input.baseBranch ?? base}"`, 'invalid-directory')
+  }
   const sessionName = branchSlug(input.sessionId).slice(0, 48)
   const branch = `craft/session-${sessionName}-${ownerKey(input.ownerId).slice(0, 16)}`
   const plan: OwnedWorktree = {
@@ -161,6 +218,7 @@ export async function planOwnedWorktree(input: PlanOwnedWorktreeInput): Promise<
     repoPath,
     gitDir,
     path: expectedPath(gitDir, branch),
+    ...(subdirectory ? { projectSubdirectory: subdirectory } : {}),
     branch,
     base,
     baseCommit,
@@ -233,6 +291,7 @@ export async function ensureOwnedWorktree(plan: OwnedWorktree): Promise<OwnedWor
     const reservation = await reserve(plan)
     if (await existingOwnedWorktree(plan)) {
       await verifyInterruptedCheckout(plan, reservation)
+      await validateWorkingDirectory(plan)
       return markReservation(plan, 'ready')
     }
     const commit = await branchCommit(plan)
@@ -256,6 +315,7 @@ export async function ensureOwnedWorktree(plan: OwnedWorktree): Promise<OwnedWor
       await verifyInterruptedCheckout(plan, (await readReservation(plan))!)
     }
     if (!await existingOwnedWorktree(plan)) throw new OwnedWorktreeError('Git did not create the session worktree', 'git-failed')
+    await validateWorkingDirectory(plan)
     return markReservation(plan, 'ready')
   })
 }

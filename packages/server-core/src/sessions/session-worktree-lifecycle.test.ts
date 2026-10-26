@@ -179,6 +179,55 @@ describe('SessionManager worktree lifecycle', () => {
     expect(worktreeCount()).toBe(2)
   })
 
+  it('keeps a monorepo project cwd through startup, restart and archive restoration', async () => {
+    const projectDirectory = join(repository, 'packages', 'api')
+    mkdirSync(projectDirectory, { recursive: true })
+    writeFileSync(join(projectDirectory, 'api.txt'), 'API project\n')
+    git(repository, 'add', '.')
+    git(repository, 'commit', '-m', 'Add API project')
+    const first = harness()
+    const original = first.createChat({
+      workingDirectory: projectDirectory,
+      sdkCwd: projectDirectory,
+      worktree: { repositoryPath: projectDirectory, baseBranch: 'main', cleanupOnArchive: true },
+    })
+    await first.manager.getOrCreateAgent(original)
+    const owned = original.worktree!.owned!
+    const expectedCwd = join(owned.path, 'packages', 'api')
+
+    expect(first.backendStarts[0]?.cwd).toBe(expectedCwd)
+    expect(first.backendStarts[0]?.sdkCwd).toBe(expectedCwd)
+    expect(first.backendStarts[0]?.persisted?.workingDirectory).toBe(expectedCwd)
+    expect(first.backendStarts[0]?.persisted?.sdkCwd).toBe(expectedCwd)
+    expect(first.manager.sendEvent).toHaveBeenCalledWith({
+      type: 'working_directory_changed', sessionId: original.id, workingDirectory: expectedCwd,
+    }, workspace.id)
+    original.sdkSessionId = 'sdk-project-subdirectory'
+    first.manager.persistSession(original)
+    await first.manager.flushSession(original.id)
+
+    // Reopening must use the saved relative cwd, even if the source project folder disappears.
+    rmSync(projectDirectory, { recursive: true })
+    const second = harness()
+    const restored = second.restoreChat(original.id)
+    await second.manager.getOrCreateAgent(restored)
+    expect(second.backendStarts[0]?.sdkCwd).toBe(expectedCwd)
+    restored.isArchived = true
+    await second.manager.cleanupSessionWorktree(restored)
+    expect(existsSync(owned.path)).toBe(false)
+
+    const third = harness()
+    const reopened = third.restoreChat(original.id)
+    reopened.isArchived = false
+    await third.manager.getOrCreateAgent(reopened)
+    expect(third.backendStarts[0]?.cwd).toBe(expectedCwd)
+    expect(third.backendStarts[0]?.sdkCwd).toBe(expectedCwd)
+    expect(reopened.sdkSessionId).toBe('sdk-project-subdirectory')
+    expect(reopened.worktree?.owned?.path).toBe(owned.path)
+    expect(readFileSync(join(expectedCwd, 'api.txt'), 'utf8')).toBe('API project\n')
+    expect(worktreeCount()).toBe(2)
+  })
+
   it('isolates two simultaneous chats in the same repo without changing their selected accounts', async () => {
     const { manager, createChat } = harness()
     const first = createChat({ llmConnection: 'claude-account-a' })
