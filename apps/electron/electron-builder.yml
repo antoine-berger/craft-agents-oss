@@ -70,10 +70,8 @@ files:
 extraMetadata:
   main: dist/main.cjs
 
-# Auto-update: electron-updater fetches from this URL for update manifests (.yml files)
-publish:
-  provider: generic
-  url: https://thecraftagents.com/electron/latest
+# Fork updates are intentionally disabled: never publish or fetch official updates.
+publish: []
 
 # Disable ASAR to avoid decompression overhead and click delays
 asar: false
