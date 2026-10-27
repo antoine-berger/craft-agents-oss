@@ -223,6 +223,8 @@ export const CHANNEL_MAP = {
 
   // Sources
   getSources: invoke(RPC_CHANNELS.sources.GET),
+  getCliProxyStatus: invoke(RPC_CHANNELS.cliProxy.STATUS),
+  cliProxyCommand: invoke(RPC_CHANNELS.cliProxy.COMMAND),
   createSource: invoke(RPC_CHANNELS.sources.CREATE),
   deleteSource: invoke(RPC_CHANNELS.sources.DELETE),
   startSourceOAuth: invoke(RPC_CHANNELS.sources.START_OAUTH),

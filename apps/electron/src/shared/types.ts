@@ -453,6 +453,11 @@ export interface ElectronAPI {
 
   // ChatGPT OAuth (for Codex chatgptAuthTokens mode)
   startChatGptOAuth(connectionSlug: string): Promise<{ success: boolean; error?: string }>
+  getCliProxyStatus(): Promise<import('@craft-agent/shared/protocol').CliProxyStatus>
+  cliProxyCommand(command: import('@craft-agent/shared/protocol').CliProxyCommand): Promise<import('@craft-agent/shared/protocol').CliProxyResult>
+  connectCliProxyAccount(provider: import('@craft-agent/shared/protocol').CliProxyProvider): Promise<{ success: boolean; error?: string }>
+  importLocalCliProxyAccounts(): Promise<import('@craft-agent/shared/protocol').CliProxyResult>
+  cancelCliProxySignIn(): void
   cancelChatGptOAuth(): Promise<{ success: boolean }>
   getChatGptAuthStatus(connectionSlug: string): Promise<{ authenticated: boolean; expiresAt?: number; hasRefreshToken?: boolean }>
   chatGptLogout(connectionSlug: string): Promise<{ success: boolean }>

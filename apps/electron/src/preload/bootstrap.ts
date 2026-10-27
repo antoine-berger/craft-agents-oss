@@ -22,6 +22,8 @@ import { WsRpcClient, type TransportConnectionState } from '../transport/client'
 import { RoutedClient } from '../transport/routed-client'
 import { buildClientApi } from '../transport/build-api'
 import { CHANNEL_MAP } from '../transport/channel-map'
+import { readLocalProxyAccounts } from './local-proxy-accounts'
+import type { CliProxyProvider, CliProxyResult } from '@craft-agent/shared/protocol'
 import {
   createSignInRunner,
   raceDeadline,
@@ -201,6 +203,56 @@ client.handleCapability(CLIENT_BROWSER_INVOKE, async (req: BrowserCapabilityRequ
 // ---------------------------------------------------------------------------
 
 const api = buildClientApi(client, CHANNEL_MAP, (ch) => client.isChannelAvailable(ch))
+
+let cancelProxySignIn: (() => void) | undefined
+api.cancelCliProxySignIn = () => cancelProxySignIn?.()
+api.importLocalCliProxyAccounts = async () => {
+  const accounts = await readLocalProxyAccounts()
+  return client.invoke('cliProxy:importAccounts', accounts) as Promise<CliProxyResult>
+}
+api.connectCliProxyAccount = async (provider: CliProxyProvider) => {
+  if (cancelProxySignIn) return { success: false, error: 'Another account sign-in is already open' }
+  let callback: Awaited<ReturnType<typeof createCallbackServer>> | undefined
+  let state: string | undefined
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let cancellationError: Error | undefined
+  const cancelled = new Promise<never>((_resolve, reject) => {
+    const cancel = (message: string) => { cancellationError = new Error(message); reject(cancellationError) }
+    cancelProxySignIn = () => cancel('Sign-in cancelled')
+    timer = setTimeout(() => cancel('Sign-in timed out'), 300_000)
+  })
+  // Cancellation can happen while the callback listener or remote flow is starting.
+  void cancelled.catch(() => {})
+  try {
+    callback = await createCallbackServer({ appType: 'electron', port: provider === 'claude' ? 54545 : 1455,
+      callbackPaths: provider === 'claude' ? ['/callback'] : ['/auth/callback'] })
+    const start = await client.invoke('cliProxy:command', { action: 'startOAuth', provider }) as CliProxyResult
+    if (!start.oauth) throw new Error('Could not start account sign-in')
+    state = start.oauth.state
+    if (cancellationError) throw cancellationError
+    await shell.openExternal(start.oauth.url)
+    const result = await Promise.race([callback.promise, cancelled])
+    if (result.query.state !== state) throw new Error('Sign-in state did not match')
+    if (result.query.error) throw new Error(result.query.error_description || result.query.error)
+    await client.invoke('cliProxy:command', { action: 'completeOAuth', state, code: result.query.code ?? '' })
+    for (let attempt = 0; attempt < 120; attempt++) {
+      const progress = await Promise.race([
+        client.invoke('cliProxy:command', { action: 'oauthStatus', state }) as Promise<CliProxyResult>, cancelled,
+      ])
+      if (progress.oauthStatus === 'ok') return { success: true }
+      if (progress.oauthStatus === 'error') throw new Error('Account sign-in failed')
+      await Promise.race([new Promise(resolve => setTimeout(resolve, 1000)), cancelled])
+    }
+    throw new Error('Account sign-in timed out')
+  } catch (error) {
+    if (state) void client.invoke('cliProxy:command', { action: 'cancelOAuth', state }).catch(() => {})
+    return { success: false, error: error instanceof Error ? error.message : 'Account sign-in failed' }
+  } finally {
+    if (timer) clearTimeout(timer)
+    callback?.close()
+    cancelProxySignIn = undefined
+  }
+}
 
 ;(api as any).getRuntimeEnvironment = (): 'electron' | 'web' => 'electron'
 

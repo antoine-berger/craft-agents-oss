@@ -4,6 +4,11 @@
  * Key paths are internal and may be reorganized freely.
  */
 export const RPC_CHANNELS = {
+  cliProxy: {
+    STATUS: 'cliProxy:status',
+    COMMAND: 'cliProxy:command',
+    IMPORT_ACCOUNTS: 'cliProxy:importAccounts',
+  },
   remote: {
     TEST_CONNECTION: 'remote:testConnection',
   },

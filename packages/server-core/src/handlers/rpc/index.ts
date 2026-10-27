@@ -2,6 +2,7 @@ import type { RpcServer } from '@craft-agent/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
 
 import { registerAuthHandlers } from './auth'
+import { registerCliProxyHandlers } from './cli-proxy'
 import { registerAutomationsHandlers } from './automations'
 import { registerDecisionsHandlers } from './decisions'
 import { registerFilesHandlers } from './files'
@@ -36,6 +37,7 @@ export function registerCoreRpcHandlers(
   serverCtx?: ServerHandlerContext,
 ): void {
   registerAuthHandlers(server, deps)
+  registerCliProxyHandlers(server, deps)
   registerAutomationsHandlers(server, deps)
   registerDecisionsHandlers(server, deps)
   registerFilesHandlers(server, deps)
