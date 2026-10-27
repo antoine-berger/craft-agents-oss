@@ -526,7 +526,7 @@ export function SessionList({
     const pinnedRows = pinnedItems.map(item => ({ item }))
     return {
       rows: [...pinnedRows, ...groupedRowData.rows],
-      groups: [{ key: 'project-pilots', label: t('session.pinned', { defaultValue: 'Pinned' }), items: pinnedRows, collapsible: false }, ...groupedRowData.groups],
+      groups: [{ key: 'project-pilots', label: '', items: pinnedRows, collapsible: false }, ...groupedRowData.groups],
     }
   }, [groupedRowData, pinnedItems, isSearchMode, t])
   const flatRows = rowData.rows

@@ -30,7 +30,7 @@ import { cn } from '@/lib/utils'
 export interface EntityListGroup<T> {
   /** Unique key for the group */
   key: string
-  /** Label shown in the section header */
+  /** Label shown in the section header; empty renders the rows without a header. */
   label: string
   /** Items in this group (empty array for collapsed groups — items are excluded from the data pipeline) */
   items: T[]
@@ -207,7 +207,7 @@ export function EntityList<T>({
 
                   return (
                     <div key={group.key} className={groupIndex > 0 ? GROUP_GAP : undefined}>
-                      {group.collapsible && onToggleCollapse ? (
+                      {group.label && (group.collapsible && onToggleCollapse ? (
                         <CollapsibleGroupHeader
                           label={group.label}
                           isCollapsed={!!isCollapsed}
@@ -218,7 +218,7 @@ export function EntityList<T>({
                         />
                       ) : (
                         <SectionHeader label={group.label} />
-                      )}
+                      ))}
                       {group.items.map((item, indexInGroup) =>
                         <React.Fragment key={getKey(item)}>
                           {renderItem(item, indexInGroup, indexInGroup === 0)}
