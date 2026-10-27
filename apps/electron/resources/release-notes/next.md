@@ -34,3 +34,5 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 - **GitHub branch prefixes** — New session worktrees use the connected GitHub username as their branch prefix, independently of the repository organization. Existing session branches retain their saved names. (#4)
 
 - **Project empty-state creation** — The New Session button inside an empty project list uses the same project-aware creation action as the global button. New drafts appear immediately in that project. (#4)
+
+- **Compact chat controls** — Remove the shortcut hint row and its reserved space, keep a static input prompt, and move Projects above Labels. Chats use Execute without a mode selector, slash-mode commands or keyboard cycling. (#4)

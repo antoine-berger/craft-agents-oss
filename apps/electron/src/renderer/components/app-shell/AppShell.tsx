@@ -91,7 +91,6 @@ import type { Session, Workspace, FileAttachment, PermissionRequest, LoadedSourc
 import { sessionMetaMapAtom, sendToWorkspaceAtom, type SessionMeta } from "@/atoms/sessions"
 import { sourcesAtom } from "@/atoms/sources"
 import { DECISION_SETTINGS_CHANGED_EVENT, guardedModeAvailableAtom } from "@/atoms/permission-modes"
-import { DEFAULT_PERMISSION_MODES } from "@craft-agent/shared/agent/modes"
 import { RtkUpdatePrompt } from "@/components/RtkUpdateDialog"
 import { skillsAtom } from "@/atoms/skills"
 import { panelStackAtom, panelCountAtom, focusedPanelIdAtom, focusedSessionIdAtom, focusNextPanelAtom, focusPrevPanelAtom, parseSessionIdFromRoute } from "@/atoms/panel-stack"
@@ -699,7 +698,6 @@ function AppShellContent({
   // Guarded permission mode is offered while the decision layer and its `guardedMode` feature
   // are on, on the server this workspace talks to. Refreshed on workspace switch and when the AI
   // settings page saves decision model settings.
-  const guardedModeAvailable = useAtomValue(guardedModeAvailableAtom)
   const setGuardedModeAvailable = useSetAtom(guardedModeAvailableAtom)
   React.useEffect(() => {
     if (!activeWorkspaceId || typeof window.electronAPI?.getDecisionLayerStatus !== 'function') return
@@ -906,8 +904,7 @@ function AppShellContent({
     focusNextZone()
   }, { enabled: () => !document.querySelector('[role="dialog"]') })
 
-  // Shift+Tab cycles permission mode through enabled modes (textarea handles its own, this handles when focus is elsewhere)
-  // In multi-panel, targets the focused panel's session
+  // In multi-panel, actions target the focused panel's session.
   const effectiveSessionId = focusedSessionId ?? session.selected
 
   // Focus chat input for the target session only (multi-panel safe).
@@ -915,25 +912,6 @@ function AppShellContent({
     if (!targetSessionId) return
     dispatchFocusInputEvent({ sessionId: targetSessionId })
   }, [])
-
-  useAction('chat.cyclePermissionMode', () => {
-    if (effectiveSessionId) {
-      const currentOptions = contextValue.sessionOptions.get(effectiveSessionId)
-      const currentMode = currentOptions?.permissionMode ?? 'ask'
-      // Cycle through enabled permission modes. An unavailable Guarded behaves as Ask, so it
-      // stands in as Ask (never re-adding Execute the user left out of the cycle).
-      const base = enabledModes.length >= 2 ? enabledModes : DEFAULT_PERMISSION_MODES
-      const listed = base
-        .map(mode => (mode === 'guarded' && !guardedModeAvailable ? 'ask' : mode))
-        .filter((mode, index, all) => all.indexOf(mode) === index)
-      const modes = listed.length >= 2 ? listed : (['safe', 'ask'] as PermissionMode[])
-      const currentIndex = modes.indexOf(currentMode)
-      // If current mode not in enabled list, jump to first enabled mode
-      const nextIndex = currentIndex === -1 ? 0 : (currentIndex + 1) % modes.length
-      const nextMode = modes[nextIndex]
-      contextValue.onSessionOptionsChange(effectiveSessionId, { permissionMode: nextMode })
-    }
-  })
 
   // Whether the next sidebar/list show-hide animates: pointer toggles glide (FLIP), keyboard toggles
   // (⌘B, ⌘., menu accelerators) are instant — spec §6.1. Set in the same batch as the toggle.
@@ -2176,6 +2154,30 @@ function AppShellContent({
         },
       ],
     },
+    {
+      id: "nav:projects",
+      title: t("sidebar.projects"),
+      label: String(projects.length),
+      icon: FolderKanban,
+      // Highlight only when on Projects view itself, not when a child is "active" (jumped-to filter)
+      variant: isProjectsNavigation(navState) ? "default" : "ghost",
+      onClick: handleProjectsClick,
+      expandable: projects.length > 0,
+      expanded: isExpanded('nav:projects'),
+      onToggle: () => toggleExpanded('nav:projects'),
+      contextMenu: {
+        type: 'projects' as const,
+        onAddProject: openAddProject,
+      },
+      items: projects.map(p => ({
+        id: `nav:projects:${p.config.id}`,
+        title: p.config.name,
+        icon: FolderKanban,
+        // Highlight when on allSessions view AND filter includes this project (the jump-to state)
+        variant: (sessionFilter?.kind === 'allSessions' && projectFilter.get(p.config.id) === 'include') ? "default" as const : "ghost" as const,
+        onClick: () => handleJumpToProjectSessions(p.config.id),
+      })),
+    },
     // Labels: navigable header (shows all labeled sessions) + hierarchical tree (drag-and-drop reorder + re-parent)
     {
       id: "nav:labels",
@@ -2266,30 +2268,6 @@ function AppShellContent({
         type: 'skills',
         onAddSkill: openAddSkill,
       },
-    },
-    {
-      id: "nav:projects",
-      title: t("sidebar.projects"),
-      label: String(projects.length),
-      icon: FolderKanban,
-      // Highlight only when on Projects view itself, not when a child is "active" (jumped-to filter)
-      variant: isProjectsNavigation(navState) ? "default" : "ghost",
-      onClick: handleProjectsClick,
-      expandable: projects.length > 0,
-      expanded: isExpanded('nav:projects'),
-      onToggle: () => toggleExpanded('nav:projects'),
-      contextMenu: {
-        type: 'projects' as const,
-        onAddProject: openAddProject,
-      },
-      items: projects.map(p => ({
-        id: `nav:projects:${p.config.id}`,
-        title: p.config.name,
-        icon: FolderKanban,
-        // Highlight when on allSessions view AND filter includes this project (the jump-to state)
-        variant: (sessionFilter?.kind === 'allSessions' && projectFilter.get(p.config.id) === 'include') ? "default" as const : "ghost" as const,
-        onClick: () => handleJumpToProjectSessions(p.config.id),
-      })),
     },
     {
       id: "nav:pages",

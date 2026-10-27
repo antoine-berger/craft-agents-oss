@@ -35,7 +35,6 @@ import { createPendingPlanDispatcher } from './pending-plan-dispatch'
 import { scrollFocusedCaretIntoView } from '@/lib/scroll-focused-caret'
 import { cn } from '@/lib/utils'
 import { coerceInputText } from '@/lib/input-text'
-import { isMac } from '@/lib/platform'
 import { applySmartTypography } from '@/lib/smart-typography'
 import { AttachmentPreview } from '../AttachmentPreview'
 import { ImageSupportWarningBanner } from './ImageSupportWarningBanner'
@@ -52,8 +51,7 @@ import { CompactWorkingDirectorySelector } from '@/components/ui/CompactWorkingD
 import { FreeFormInputContextBadge } from './FreeFormInputContextBadge'
 import { derivePickerMode } from './picker-mode'
 import type { FileAttachment, LoadedSource, LoadedSkill } from '../../../../shared/types'
-import { isPermissionMode, planExecutionMode, type PermissionMode } from '@craft-agent/shared/agent/modes'
-import { useAvailablePermissionModes } from '@/hooks/useAvailablePermissionModes'
+import { planExecutionMode, type PermissionMode } from '@craft-agent/shared/agent/modes'
 import type { ThinkingLevel } from '@craft-agent/shared/agent/thinking-levels'
 import { useEscapeInterrupt } from '@/context/EscapeInterruptContext'
 import { hasOpenOverlay } from '@/lib/overlay-detection'
@@ -66,7 +64,6 @@ import {
   addRecentWorkingDir,
 } from './working-directory-history'
 import { WorkingDirectorySelector, formatPathForDisplay } from './WorkingDirectorySelector'
-import { CompactPermissionModeSelector } from './CompactPermissionModeSelector'
 import { CompactModelSelector } from './CompactModelSelector'
 import {
   groupConnectionsByProvider,
@@ -77,26 +74,10 @@ import { useModelVisionToggle } from './useModelVisionToggle'
 import { initialRepository, setDraftRepository } from './repository-history'
 import { ComposerRepositorySelector } from './ComposerRepositorySelector'
 import { ComposerModelMenu } from './ComposerModelMenu'
-import { ComposerModeChip } from './ComposerModeChip'
 import { ContextUsageChip } from './ContextUsageChip'
 import { FollowUpChips } from './FollowUpChips'
 import { SendButton } from './SendButton'
 
-
-/** Platform-specific modifier key for keyboard shortcuts */
-const cmdKey = isMac ? '⌘' : 'Ctrl'
-
-/** Default rotating placeholders are now generated inside FreeFormInput via useMemo + t() */
-
-/** Fisher-Yates shuffle — returns a new array in random order */
-function shuffleArray<T>(array: T[]): T[] {
-  const shuffled = [...array]
-  for (let i = shuffled.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]]
-  }
-  return shuffled
-}
 
 export interface FollowUpInputItem {
   id: string
@@ -271,8 +252,6 @@ export function FreeFormInput({
   permissionMode = 'ask',
   previousPermissionMode,
   onPermissionModeChange,
-  enabledModes = ['safe', 'ask', 'allow-all'],
-  showPermissionModeChip = false,
   inputValue,
   onInputChange,
   attachmentsValue,
@@ -319,20 +298,6 @@ export function FreeFormInput({
     if (selected && sessionId) setDraftRepository(selected, sessionId, workspaceId)
   }, [sessionId, workspaceId, worktreeLocked])
   const needsRepository = requireWorktree && isEmptySession && !worktreeConfigured && !selectedRepository
-
-  // Default rotating placeholders for onboarding/empty state (i18n-aware). The keyboard tips are
-  // left out in compact (touch) layouts, where they are noise.
-  const defaultPlaceholders = React.useMemo(() => [
-    t("chatInput.placeholder.workOn"),
-    ...(compactMode ? [] : [t("chatInput.placeholder.shiftTab")]),
-    t("chatInput.placeholder.mention"),
-    t("chatInput.placeholder.labels"),
-    ...(compactMode ? [] : [
-      t("chatInput.placeholder.newLine"),
-      t("chatInput.placeholder.sidebar", { key: cmdKey }),
-      t("chatInput.placeholder.focusMode", { key: cmdKey }),
-    ]),
-  ], [t, compactMode])
 
   // Read connection default model, connections, and workspace info from context.
   // Uses optional variant so playground (no provider) doesn't crash.
@@ -448,31 +413,10 @@ export function FreeFormInput({
   const appShellContext = useOptionalAppShellContext()
   const isFocusedPanel = appShellContext?.isFocusedPanel ?? true
 
-  // In compact mode, suppress desktop-keyboard guidance that is noisy or misleading on
-  // narrow/mobile-like layouts: the defaults drop their keyboard tips above, and caller-provided
-  // lists drop entries that mention keys.
-  const placeholderOptions = React.useMemo(() => {
-    if (placeholder === undefined) return defaultPlaceholders
-    if (!Array.isArray(placeholder)) return placeholder
-    if (!compactMode) return placeholder
-    return placeholder.filter((entry) => {
-      const lower = entry.toLowerCase()
-      return !lower.includes('shift + tab')
-        && !lower.includes('shift + return')
-        && !lower.includes('toggle the sidebar')
-        && !lower.includes('focus mode')
-        && !lower.includes('⌘')
-        && !lower.includes('ctrl')
-    })
-  }, [placeholder, compactMode, defaultPlaceholders])
-
-  // Shuffle placeholder order once per mount so each session feels fresh.
-  // Hide placeholder entirely when panel is unfocused in multi-panel layout
-  const shuffledPlaceholder = React.useMemo(
-    () => Array.isArray(placeholderOptions) ? shuffleArray(placeholderOptions) : placeholderOptions,
-    [] // eslint-disable-line react-hooks/exhaustive-deps -- intentionally shuffle only on mount
-  )
-  const effectivePlaceholder = isFocusedPanel ? shuffledPlaceholder : ''
+  // One fixed prompt, also when callers provide legacy placeholder arrays.
+  const fixedPlaceholder = (Array.isArray(placeholder) ? placeholder[0] : placeholder)
+    ?? t('chatInput.placeholder.workOn')
+  const effectivePlaceholder = isFocusedPanel ? fixedPlaceholder : ''
 
   // Performance optimization: Always use internal state for typing to avoid parent re-renders
   // Sync FROM parent on mount/change (for restoring drafts)
@@ -875,19 +819,10 @@ export function FreeFormInput({
     return () => window.removeEventListener('craft:paste-files', handlePasteFiles as unknown as EventListener)
   }, [disabled, sessionId, isFocusedPanel, richInputRef, refuseOversizedAttachment])
 
-  // Build active commands list for slash command menu
-  const activeCommands = React.useMemo(() => {
-    const active: SlashCommandId[] = []
-    // Add the currently active permission mode
-    if (permissionMode) active.push(permissionMode)
-    return active
-  }, [permissionMode])
-
-  // Handle slash command selection (mode/feature commands)
+  const activeCommands: SlashCommandId[] = []
   const handleSlashCommand = React.useCallback((commandId: SlashCommandId) => {
-    if (isPermissionMode(commandId)) onPermissionModeChange?.(commandId)
-    else if (commandId === 'compact' && !isProcessing) onSubmit('/compact', undefined)
-  }, [onPermissionModeChange, isProcessing, onSubmit])
+    if (commandId === 'compact' && !isProcessing) onSubmit('/compact', undefined)
+  }, [isProcessing, onSubmit])
 
   // Handle folder selection from slash command menu
   const handleSlashFolderSelect = React.useCallback((path: string) => {
@@ -908,12 +843,11 @@ export function FreeFormInput({
     })
   }, [workspaceId])
 
-  // Inline slash command hook (modes, features, and folders); Guarded only while it is offered
-  const availableModes = useAvailablePermissionModes(permissionMode)
+  // Slash commands retain features and folders; chats always execute.
 
   const inlineSlash = useInlineSlashCommand({
     inputRef: richInputRef,
-    modes: availableModes,
+    modes: [],
     onSelectCommand: handleSlashCommand,
     onSelectFolder: handleSlashFolderSelect,
     activeCommands,
@@ -1741,26 +1675,8 @@ export function FreeFormInput({
             <div className="flex-1" />
           )}
 
-          {/* Right: mode · model absorb the squeeze — the model label truncates, and in narrow
-              panels the mode chip folds to its icon. Context and Send sit outside this group and
-              never shrink, so Send stays inside the card (craft-agents-oss#798). The 4px inset
-              keeps focus rings visible inside the clipping group. */}
+          {/* Model selection truncates as needed, keeping Context and Send visible. */}
           <div className="-m-1 flex min-w-0 shrink items-center gap-1 overflow-hidden p-1">
-          {compactMode
-            ? onPermissionModeChange && (
-              <CompactPermissionModeSelector
-                permissionMode={permissionMode}
-                onPermissionModeChange={onPermissionModeChange}
-              />
-            )
-            : showPermissionModeChip && (
-              <ComposerModeChip
-                permissionMode={permissionMode}
-                onPermissionModeChange={onPermissionModeChange}
-                sessionId={sessionId}
-              />
-            )}
-
           {/* Model/Connection selector — drawer in compact (when enabled), dropdown on desktop */}
           {compactMode ? (
             enableCompactModelPicker && (

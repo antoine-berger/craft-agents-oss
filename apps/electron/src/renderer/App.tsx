@@ -1196,7 +1196,7 @@ export default function App() {
   }, [])
 
   const handleCreateSession = useCallback(async (workspaceId: string, options?: import('../shared/types').CreateSessionOptions): Promise<Session> => {
-    const session = await window.electronAPI.createSession(workspaceId, options)
+    const session = await window.electronAPI.createSession(workspaceId, { ...options, permissionMode: 'allow-all' })
     // Add to per-session atom and metadata map (no sessionsAtom)
     addSession(session)
     syncSessionOptionsFromSession(session)
@@ -1307,6 +1307,9 @@ export default function App() {
       const sendingMidStream = beforeSend?.isProcessing === true
       const repository = !beforeSend?.worktree?.owned && !beforeSend?.messages.some(message => message.role === 'user')
         ? initialRepository(sessionId, beforeSend?.workspaceId ?? windowWorkspaceId ?? undefined) : undefined
+
+      // Confirm the real backend mode before sending, including resumed older chats.
+      await window.electronAPI.sessionCommand(sessionId, { type: 'setPermissionMode', mode: 'allow-all' })
 
       // Step 1: Store attachments and get persistent metadata
       let storedAttachments: StoredAttachment[] | undefined
@@ -1477,6 +1480,7 @@ export default function App() {
    * Handles persistence and backend sync for each option type.
    */
   const handleSessionOptionsChange = useCallback((sessionId: string, updates: SessionOptionUpdates) => {
+    if (updates.permissionMode !== undefined) updates = { ...updates, permissionMode: 'allow-all' }
     setSessionOptions(prev => {
       const next = new Map(prev)
       const current = next.get(sessionId) ?? defaultSessionOptions

@@ -32,7 +32,7 @@ export interface SessionOptions {
 
 /** Default values for new sessions */
 export const defaultSessionOptions: SessionOptions = {
-  permissionMode: 'ask', // Default to ask mode (prompt for permissions)
+  permissionMode: 'allow-all', // Chats always use Execute.
   thinkingLevel: DEFAULT_THINKING_LEVEL, // Default to 'medium' level
   codingMode: false,
 }
