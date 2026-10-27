@@ -280,7 +280,8 @@ export class CliProxyManager {
       if (request.url !== expected) throw new Error('Unexpected connector destination')
       // CLIProxyAPI buffers HTTP responses. Claude's own client also disables this GET stream.
       if (request.method === 'GET') return new Response(null, { status: 405 })
-      const headers = Object.fromEntries(request.headers.entries())
+      const headers: Record<string, string> = {}
+      request.headers.forEach((value, key) => { headers[key] = value })
       headers['X-Mcp-Client-Session-Id'] = sessionId
       const result = await this.relayConnector(accountId, serverId, request.method, headers,
         request.body ? await request.text() : undefined, request.signal)
