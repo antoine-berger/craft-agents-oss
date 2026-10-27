@@ -44,6 +44,8 @@ export type ChatGroupingMode = 'date' | 'status' | 'unread' | 'project'
 
 interface SessionListProps {
   items: SessionMeta[]
+  /** Create through the shell so the active project and filters are inherited. */
+  onNewSession: () => void
   onDelete: (sessionId: string, skipConfirmation?: boolean) => Promise<boolean>
   onFlag?: (sessionId: string) => void
   onUnflag?: (sessionId: string) => void
@@ -121,6 +123,7 @@ function formatDateGroupLabel(date: Date, t: (key: string) => string, lang: stri
  */
 export function SessionList({
   items,
+  onNewSession,
   onDelete,
   onFlag,
   onUnflag,
@@ -765,12 +768,7 @@ export function SessionList({
       >
         <Button
           variant="secondary"
-          onClick={() => {
-            const params: { status?: string; label?: string } = {}
-            if (currentFilter?.kind === 'state') params.status = currentFilter.stateId
-            else if (currentFilter?.kind === 'label') params.label = currentFilter.labelId
-            navigate(routes.action.newSession(Object.keys(params).length > 0 ? params : undefined))
-          }}
+          onClick={onNewSession}
         >
           {t("session.newSession")}
         </Button>

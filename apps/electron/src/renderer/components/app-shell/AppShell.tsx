@@ -2624,6 +2624,7 @@ function AppShellContent({
                 <SessionList
                   key={sessionFilter?.kind}
                   items={searchActive ? workspaceSessionMetas : filteredSessionMetas}
+                  onNewSession={() => handleNewChat()}
                   onDelete={handleDeleteSession}
                   onFlag={onFlagSession}
                   onUnflag={onUnflagSession}
