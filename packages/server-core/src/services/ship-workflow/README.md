@@ -1,4 +1,6 @@
-# Native Craft Ship
+# Legacy native Craft Ship (disconnected)
+
+Ship now runs as ordinary `/ship-plan` and `/ship` skills in the current chat, using native SDK subagents. The legacy RPC registration, chat interception and session tool policy below are disconnected. Files remain for historical data/tests; do not reconnect them when changing the skills. Historical sessions and artifacts are preserved.
 
 This service reuses the existing Tasks board, `createTaskFromSpec`, child sessions, `TaskRunner`, node outputs, persisted run logs and project/worktree inheritance. It introduces no external daemon, second hub, CLI, copied Conductor DB, or Mac path. Resource inputs are under `apps/electron/resources/portable-config/`; installation/import belongs to the backed-up host deployment.
 

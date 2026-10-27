@@ -1,7 +1,5 @@
-import { parseShipCommand, type ShipWorkflowState } from '@craft-agent/shared/protocol'
 import { getSessionAttentionService, disposeSessionAttention } from '../handlers/rpc/session-attention'
 import { readSessionHistory, searchSessionHistory } from '../services/session-history'
-import { shipSessionToolDenial } from '../services/ship-workflow/tool-policy'
 import { captureSessionCheckpoint, listSessionCheckpoints as listWorktreeCheckpoints, restoreSessionCheckpoint as restoreWorktreeCheckpoint, assertCheckpointRestoreComplete, SessionCheckpointError, type CheckpointRecord } from '../services/checkpoints/session-checkpoints'
 import type { SessionCheckpointList, SessionCheckpointRestoreResult } from '@craft-agent/shared/protocol'
 import { availableSessionSourceSlugs } from './automatic-session-sources'
@@ -1898,11 +1896,6 @@ export class SessionManager implements ISessionManager {
   /** Pinned desktop client per session for `client:browser:invoke` routing. */
   private browserHostByCanvas = new Map<string, string>()
   private eventSink: EventSink | null = null
-  private workflowCommandHandler?: (sessionId: string, command: NonNullable<ReturnType<typeof parseShipCommand>>) => Promise<ShipWorkflowState>
-
-  setWorkflowCommandHandler(handler: (sessionId: string, command: NonNullable<ReturnType<typeof parseShipCommand>>) => Promise<ShipWorkflowState>): void {
-    this.workflowCommandHandler = handler
-  }
 
   setEventSink(sink: EventSink): void {
     this.eventSink = sink
@@ -4833,7 +4826,6 @@ export class SessionManager implements ISessionManager {
         mcpPool: managed.mcpPool,
         poolServerUrl,
         envOverrides,
-        toolPolicy: (name: string, input: unknown) => shipSessionToolDenial(managed.workspace.rootPath, managed, name, input),
         // Claude-specific
         isHeadless: !AGENT_FLAGS.defaultModesEnabled,
         skipConfigWatcher: true, // Server owns workspace-level ConfigWatcher — don't duplicate in agents
@@ -7583,22 +7575,6 @@ export class SessionManager implements ISessionManager {
       // ensureFreshToken mirrors the disk write to source.config in-memory).
       const agent = await this.getOrCreateAgent(managed, !userMessage.hidden && !options?.hidden && !_isAuthRetry ? userMessage.id : undefined)
       sendSpan.mark('agent.ready')
-      // User-visible slash commands use the same accepted-message, repository and checkpoint
-      // path as chat, but dispatch a native workflow instead of asking a model to run a Mac CLI.
-      if (!options?.hidden && !userMessage.hidden && !_isAuthRetry && /^\/ship(?:-plan)?(?:\s|$)/i.test(message.trim())) {
-        const command = parseShipCommand(message)
-        if (!command) throw new Error('Use /ship-plan ISSUE-123 to plan, or /ship to continue this workflow.')
-        if (!this.workflowCommandHandler) throw new Error('The native Ship workflow is unavailable on this server.')
-        const state = await this.workflowCommandHandler(sessionId, command)
-        const note: Message = { id: generateMessageId(), role: 'info', content: `Ship ${state.ticket}: ${state.phase} (${state.status}).`, timestamp: this.monotonic() }
-        managed.messages.push(note)
-        this.persistSession(managed)
-        this.sendEvent({ type: 'info', sessionId, message: note.content }, managed.workspace.id)
-        sendSpan.end()
-        await this.onProcessingStopped(sessionId, 'complete')
-        this.sendEvent({ type: 'complete', sessionId, tokenUsage: managed.tokenUsage }, managed.workspace.id)
-        return
-      }
 
 
       // Always set all sources for context (even if none are enabled), including built-ins
@@ -10996,7 +10972,6 @@ export class SessionManager implements ISessionManager {
    */
   cleanup(): void {
     disposeSessionAttention()
-    this.workflowCommandHandler = undefined
     sessionLog.info('Cleaning up resources...')
 
     // Stop all ConfigWatchers (file system watchers)

@@ -67,7 +67,7 @@ import { getMiniAgentSystemPrompt } from '../prompts/system.ts';
 import { buildTitlePrompt, buildRegenerateTitlePrompt, validateTitle } from '../utils/title-generator.ts';
 
 // Skill extraction for Codex/Copilot backends (Claude uses native SDK Skill tool)
-import { parseMentions, resolveSkillMentions, resolveSourceMentions, resolveFileMentions } from '../mentions/index.ts';
+import { expandSkillCommand, parseMentions, resolveSkillMentions, resolveSourceMentions, resolveFileMentions } from '../mentions/index.ts';
 import { loadAllSkills } from '../skills/storage.ts';
 
 // ============================================================
@@ -906,6 +906,7 @@ ${formattedMessages}
     const projectRoot = this.config.session?.workingDirectory;
     const skills = loadAllSkills(workspaceRoot, projectRoot);
     const skillSlugs = skills.map(s => s.slug);
+    message = expandSkillCommand(message, skillSlugs);
 
     this.debug(`[extractSkillPaths] Available skills: ${skillSlugs.join(', ')}`);
 

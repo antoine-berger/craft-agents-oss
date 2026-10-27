@@ -39,7 +39,6 @@ export interface ISessionManager {
   initialize(): Promise<void>
   cleanup(): void
   setEventSink(sink: EventSink): void
-  setWorkflowCommandHandler?(handler: (sessionId: string, command: NonNullable<ReturnType<typeof import('@craft-agent/shared/protocol').parseShipCommand>>) => Promise<import('@craft-agent/shared/protocol').ShipWorkflowState>): void
   flushAllSessions(): Promise<void>
 
   // ---------------------------------------------------------------------------

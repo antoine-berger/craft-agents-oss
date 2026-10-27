@@ -47,6 +47,13 @@ export interface ParsedMentions {
 // Parsing Functions
 // ============================================================================
 
+/** Installed skills accept slash commands through the same path as explicit skill mentions. */
+export function expandSkillCommand(text: string, availableSkillSlugs: string[]): string {
+  const match = /^([ \t]*)\/([\w-]+)(?=\s|$)/.exec(text)
+  if (!match || match[2] === 'compact' || !availableSkillSlugs.includes(match[2]!)) return text
+  return text.replace(match[0], `${match[1]}[skill:${match[2]}]`)
+}
+
 /**
  * Parse all mentions from message text
  *

@@ -7,7 +7,23 @@
  * "find the root cause in [Mentioned skill: Datadog API (slug: datadog-api)]").
  */
 import { describe, it, expect } from 'bun:test'
-import { resolveSkillMentions, resolveSourceMentions, stripAllMentions } from '../index.ts'
+import { expandSkillCommand, parseMentions, resolveSkillMentions, resolveSourceMentions, stripAllMentions } from '../index.ts'
+
+describe('installed skill slash commands', () => {
+  it('routes commands with their original arguments through ordinary skill mentions', () => {
+    const skills = ['ship-plan', 'ship', 'review-pr']
+    const message = expandSkillCommand('/ship-plan SAP-4398', skills)
+    expect(message).toBe('[skill:ship-plan] SAP-4398')
+    expect(parseMentions(message, skills, []).skills).toEqual(['ship-plan'])
+    expect(expandSkillCommand('/ship', skills)).toBe('[skill:ship]')
+    expect(expandSkillCommand('/review-pr https://github.com/a/b/pull/1', skills)).toBe('[skill:review-pr] https://github.com/a/b/pull/1')
+  })
+  it('leaves questions, unknown commands, explicit mentions and native compaction untouched', () => {
+    for (const message of ['Comment fonctionne /ship-plan ?', '/ship-plan-extra SAP-4398', '/unknown', '[skill:ship]', '/compact', '/compact keep the plan']) {
+      expect(expandSkillCommand(message, ['ship-plan', 'ship', 'compact'])).toBe(message)
+    }
+  })
+})
 
 // ============================================================================
 // resolveSkillMentions
