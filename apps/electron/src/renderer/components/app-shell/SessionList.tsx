@@ -5,7 +5,7 @@ import { useAtomValue, useSetAtom } from "jotai"
 import { isToday, isYesterday, format, startOfDay } from "date-fns"
 import { getDateLocale } from "@craft-agent/shared/i18n"
 import { useAction } from "@/actions"
-import { Inbox, Archive, Hand } from "lucide-react"
+import { Inbox, Archive } from "lucide-react"
 
 import { getSessionStatus } from "@/utils/session"
 import * as storage from "@/lib/local-storage"
@@ -29,14 +29,13 @@ import { useFocusZone } from "@/hooks/keyboard"
 import { useEscapeInterrupt } from "@/context/EscapeInterruptContext"
 import { useNavigation, useNavigationState, routes, isSessionsNavigation } from "@/contexts/NavigationContext"
 import { useFocusContext } from "@/context/FocusContext"
-import { sendToWorkspaceAtom, sessionMetaMapAtom, type SessionMeta } from "@/atoms/sessions"
+import { sendToWorkspaceAtom, type SessionMeta } from "@/atoms/sessions"
 import type { ViewConfig } from "@craft-agent/shared/views"
 import type { SessionStatusId, SessionStatus } from "@/config/session-status-config"
 import { buildCollapsedGroupsScopeSuffix } from "@/utils/session-list-collapse"
 import { FlipOnChange, SPRING } from "@craft-agent/ui/motion"
 import { useListReorderFlip } from "@/hooks/useListReorderFlip"
 
-const NO_COLLAPSED_GROUPS = new Set<string>()
 
 export interface SessionListRow {
   item: SessionMeta
@@ -159,10 +158,6 @@ export function SessionList({
 }: SessionListProps) {
   const { t, i18n } = useTranslation()
   const attention = useSessionAttention(workspaceId)
-  const allSessionMeta = useAtomValue(sessionMetaMapAtom)
-  const [needsYouOnly, setNeedsYouOnly] = useState(false)
-  const needsYouItems = useMemo(() => Array.from(allSessionMeta.values()).filter(item => item.workspaceId === workspaceId && !item.isArchived && !item.hidden && attention?.sessions[item.id]?.status === 'needs-human'), [allSessionMeta, workspaceId, attention])
-  const visibleItems = needsYouOnly ? needsYouItems : items
   const setSendToWorkspace = useSetAtom(sendToWorkspaceAtom)
 
   // --- Selection (atom-backed, shared with ChatDisplay + BatchActionPanel) ---
@@ -265,16 +260,16 @@ export function SessionList({
     collapsedGroupsMeta,
     searchInputRef,
   } = useSessionSearch({
-    items: visibleItems,
+    items,
     searchActive: searchActive ?? false,
     searchQuery,
     workspaceId,
-    currentFilter: needsYouOnly ? undefined : currentFilter,
+    currentFilter,
     evaluateViews,
-    statusFilter: needsYouOnly ? undefined : statusFilter,
-    labelFilterMap: needsYouOnly ? undefined : labelFilterMap,
+    statusFilter,
+    labelFilterMap,
     labelConfigs: labels,
-    collapsedGroups: needsYouOnly ? NO_COLLAPSED_GROUPS : collapsedGroups,
+    collapsedGroups,
     groupingMode,
     scrollViewportRef,
   })
@@ -756,7 +751,7 @@ export function SessionList({
 
   // --- Empty state (non-search) — render before EntityList ---
   // Don't show empty state when there are collapsed groups with content
-  if (flatRows.length === 0 && rowData.groups.length === 0 && !searchActive && !needsYouOnly && needsYouItems.length === 0) {
+  if (flatRows.length === 0 && rowData.groups.length === 0 && !searchActive) {
     if (currentFilter?.kind === 'archived') {
       return (
         <EntityListEmptyScreen
@@ -812,14 +807,6 @@ export function SessionList({
         }}
         header={
           <>
-            <div className="px-3 pb-2 flex items-center gap-2">
-              <Button variant={needsYouOnly ? 'secondary' : 'ghost'} size="sm" aria-pressed={needsYouOnly} onClick={() => setNeedsYouOnly(value => !value)} className={needsYouOnly ? 'text-info' : 'text-secondary'}>
-                <Hand className="size-3.5 mr-1.5" />
-                {t('attention.needsYou', { defaultValue: 'Needs you' })}
-                {needsYouItems.length > 0 && <span className="ml-1.5 tabular-nums">{needsYouItems.length}</span>}
-              </Button>
-              {needsYouOnly && <span className="text-caption text-tertiary">{t('attention.allProjects', { defaultValue: 'All projects' })}</span>}
-            </div>
             {searchActive && (
               <SessionSearchHeader
                 searchQuery={searchQuery}
@@ -843,9 +830,7 @@ export function SessionList({
           </>
         }
         emptyState={
-          needsYouOnly && needsYouItems.length === 0 ? (
-            <div className="px-4 py-12 text-center text-label text-secondary">{attention ? t('attention.noRequests', { defaultValue: 'No sessions need your attention' }) : t('attention.loading', { defaultValue: 'Checking requests…' })}</div>
-          ) : isSearchMode && !isSearchingContent ? (
+          isSearchMode && !isSearchingContent ? (
             <div className="flex flex-col items-center justify-center py-12 px-4 text-center">
               <p className="text-label text-secondary">{t("session.noSessionsFound")}</p>
               <p className="text-label-sm text-tertiary mt-0.5">
@@ -873,7 +858,7 @@ export function SessionList({
           'aria-label': 'Sessions',
         }}
         scrollAreaClassName="select-none mask-fade-top-short"
-        collapsedGroups={needsYouOnly ? NO_COLLAPSED_GROUPS : collapsedGroups}
+        collapsedGroups={collapsedGroups}
         onToggleCollapse={toggleGroupCollapse}
         onCollapseAll={collapseAllGroups}
         onExpandAll={expandAllGroups}
