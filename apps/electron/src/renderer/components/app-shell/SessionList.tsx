@@ -568,8 +568,6 @@ export function SessionList({
   const {
     handleFlagWithToast,
     handleUnflagWithToast,
-    handleArchiveWithToast,
-    handleUnarchiveWithToast,
     handleDeleteWithToast,
   } = useSessionActions({ onFlag, onUnflag, onArchive, onUnarchive, onDelete })
 
@@ -720,8 +718,8 @@ export function SessionList({
     onSessionStatusChange,
     onFlag: onFlag ? handleFlagWithToast : undefined,
     onUnflag: onUnflag ? handleUnflagWithToast : undefined,
-    onArchive: onArchive ? handleArchiveWithToast : undefined,
-    onUnarchive: onUnarchive ? handleUnarchiveWithToast : undefined,
+    onArchive,
+    onUnarchive,
     onMarkUnread,
     onDelete: handleDeleteWithToast,
     onLabelsChange,
@@ -746,7 +744,7 @@ export function SessionList({
   }), [
     handleRenameClick, onSessionStatusChange,
     onFlag, handleFlagWithToast, onUnflag, handleUnflagWithToast,
-    onArchive, handleArchiveWithToast, onUnarchive, handleUnarchiveWithToast,
+    onArchive, onUnarchive,
     onMarkUnread, handleDeleteWithToast, onLabelsChange,
     projects, onSetProjectId,
     handleSelectSessionById, handleOpenInNewWindow, setSendToWorkspace, handleFocusZone, handleKeyDown,

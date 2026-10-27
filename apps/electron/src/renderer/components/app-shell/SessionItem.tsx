@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next"
-import { Flag } from "lucide-react"
+import { Archive, ArchiveRestore, Flag } from "lucide-react"
 import { useActionLabel } from "@/actions"
 import { cn } from "@/lib/utils"
 import { rendererPerf } from "@/lib/perf"
@@ -65,6 +65,7 @@ export function SessionItem({
   const { hotkey: nextHotkey } = useActionLabel('chat.nextSearchMatch')
   const { hotkey: prevHotkey } = useActionLabel('chat.prevSearchMatch')
   const title = getSessionTitle(item)
+  const archiveAction = item.isArchived ? ctx.onUnarchive : ctx.onArchive
   // For the active session, prefer logical match count over ripgrep count
   const activeMatch = ctx.activeChatMatchInfo
   const isActiveSession = isSelected && activeMatch?.sessionId === item.id
@@ -161,6 +162,11 @@ export function SessionItem({
         },
       }}
       moreButtonLabel={t("session.actionsFor", { title })}
+      actionButton={archiveAction ? {
+        icon: item.isArchived ? <ArchiveRestore className="size-4" /> : <Archive className="size-4" />,
+        label: `${t(item.isArchived ? "sessionMenu.unarchive" : "sessionMenu.archive")}: ${title}`,
+        onClick: () => archiveAction(item.id),
+      } : undefined}
       menuContent={
         <SessionMenu
           item={item}
