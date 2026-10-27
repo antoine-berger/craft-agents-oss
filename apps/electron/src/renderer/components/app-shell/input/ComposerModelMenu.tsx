@@ -17,10 +17,10 @@ import {
   StyledDropdownMenuSubContent,
 } from '@/components/ui/styled-dropdown'
 import { ConnectionIcon } from '@/components/icons/ConnectionIcon'
-import { ANTHROPIC_MODELS, getModelShortName, type ModelDefinition } from '@config/models'
+import { ANTHROPIC_MODELS, type ModelDefinition } from '@config/models'
 import { isCompatProvider, modelSupportsImages, type LlmConnectionWithStatus } from '@config/llm-connections'
 import { THINKING_LEVELS, getThinkingLevelNameKey, type ThinkingLevel } from '@craft-agent/shared/agent/thinking-levels'
-import { stripPiPrefixForDisplay } from './model-picker-helpers'
+import { getPickerModelName, getPickerModelFamily, sortPickerModels } from './model-picker-helpers'
 import type { PickerMode } from './picker-mode'
 import type { ToggleModelVision } from './useModelVisionToggle'
 import type { getContextDisplay, getContextDisplayLabels } from './context-display'
@@ -182,7 +182,7 @@ export function ComposerModelMenu({
                 className="flex items-center justify-between py-1.5"
               >
                 <div className="text-left">
-                  <div className={ITEM_NAME}>{stripPiPrefixForDisplay(connectionDefaultModel)}</div>
+                  <div className={ITEM_NAME}>{getPickerModelName(connectionDefaultModel)}</div>
                   <div className={ITEM_DESCRIPTION}>{t('chat.connectionDefault')}</div>
                 </div>
                 <div className="ml-3 flex shrink-0 items-center gap-1">
@@ -230,42 +230,42 @@ export function ComposerModelMenu({
                       </div>
                     </StyledDropdownMenuSubTrigger>
                     {isAuthenticated && (
-                      <StyledDropdownMenuSubContent className="min-w-[220px]">
+                      <StyledDropdownMenuSubContent className="min-w-[240px] max-h-[min(65vh,480px)] overflow-y-auto">
                         {/* Show models for this connection - use provider-specific models as fallback */}
-                        {(conn.models || ANTHROPIC_MODELS).map((model) => {
+                        {sortPickerModels(conn.models || ANTHROPIC_MODELS).map((model, modelIndex, models) => {
                           const modelId = typeof model === 'string' ? model : model.id
-                          const modelName = typeof model === 'string'
-                            ? stripPiPrefixForDisplay(getModelShortName(model))
-                            : (model.name ?? stripPiPrefixForDisplay(model.id))
+                          const modelName = getPickerModelName(model)
                           const isSelectedModel = isCurrentConnection && currentModel === modelId
                           const showVisionToggle = isCompatProvider(conn.providerType)
                           const visionOn = showVisionToggle && modelSupportsImages(conn, modelId)
                           return (
-                            <StyledDropdownMenuItem
-                              key={modelId}
-                              onSelect={() => {
-                                // If selecting a different connection, update both connection and model
-                                if (!isCurrentConnection && onConnectionChange) {
-                                  onConnectionChange(conn.slug)
-                                }
-                                // Always pass connection with model for proper persistence
-                                onModelChange(modelId, conn.slug)
-                              }}
-                              className="flex cursor-pointer items-center justify-between"
-                            >
-                              <div className={ITEM_NAME}>{modelName}</div>
-                              <div className="ml-3 flex shrink-0 items-center gap-1">
-                                {showVisionToggle && (
-                                  <VisionToggle
-                                    visionOn={visionOn}
-                                    onToggle={() => onToggleVision(conn.slug, modelId, !visionOn)}
-                                  />
-                                )}
-                                {isSelectedModel && (
-                                  <Check className="size-4 text-secondary" />
-                                )}
-                              </div>
-                            </StyledDropdownMenuItem>
+                            <React.Fragment key={modelId}>
+                              {modelIndex > 0 && getPickerModelFamily(models[modelIndex - 1]) !== getPickerModelFamily(model) && <StyledDropdownMenuSeparator className="my-1" />}
+                              <StyledDropdownMenuItem
+                                onSelect={() => {
+                                  // If selecting a different connection, update both connection and model
+                                  if (!isCurrentConnection && onConnectionChange) {
+                                    onConnectionChange(conn.slug)
+                                  }
+                                  // Always pass connection with model for proper persistence
+                                  onModelChange(modelId, conn.slug)
+                                }}
+                                className="flex cursor-pointer items-center justify-between"
+                              >
+                                <div className={ITEM_NAME}>{modelName}</div>
+                                <div className="ml-3 flex shrink-0 items-center gap-1">
+                                  {showVisionToggle && (
+                                    <VisionToggle
+                                      visionOn={visionOn}
+                                      onToggle={() => onToggleVision(conn.slug, modelId, !visionOn)}
+                                    />
+                                  )}
+                                  {isSelectedModel && (
+                                    <Check className="size-4 text-secondary" />
+                                  )}
+                                </div>
+                              </StyledDropdownMenuItem>
+                            </React.Fragment>
                           )
                         })}
                       </StyledDropdownMenuSubContent>
@@ -291,11 +291,9 @@ export function ComposerModelMenu({
               </>
             )}
             {/* Model options based on effective connection's provider type */}
-            {availableModels.map((model) => {
+            {sortPickerModels(availableModels).map((model, modelIndex, models) => {
               const modelId = typeof model === 'string' ? model : model.id
-              const modelName = typeof model === 'string'
-                ? stripPiPrefixForDisplay(getModelShortName(model))
-                : (model.name ?? stripPiPrefixForDisplay(model.id))
+              const modelName = getPickerModelName(model)
               const isSelected = currentModel === modelId
               const descriptionKey = typeof model !== 'string' && 'descriptionKey' in model ? (model.descriptionKey as string) : undefined
               const description = descriptionKey ? t(descriptionKey) : (typeof model !== 'string' && 'description' in model ? (model.description as string) : '')
@@ -303,29 +301,31 @@ export function ComposerModelMenu({
                 !!effectiveConnectionDetails && isCompatProvider(effectiveConnectionDetails.providerType)
               const visionOn = showVisionToggle && modelSupportsImages(effectiveConnectionDetails!, modelId)
               return (
-                <StyledDropdownMenuItem
-                  key={modelId}
-                  onSelect={() => onModelChange(modelId, effectiveConnection)}
-                  className="flex cursor-pointer items-center justify-between py-1.5"
-                >
-                  <div className="text-left">
-                    <div className={ITEM_NAME}>{modelName}</div>
-                    {description && (
-                      <div className={ITEM_DESCRIPTION}>{description}</div>
-                    )}
-                  </div>
-                  <div className="ml-3 flex shrink-0 items-center gap-1">
-                    {showVisionToggle && effectiveConnectionDetails && (
-                      <VisionToggle
-                        visionOn={visionOn}
-                        onToggle={() => onToggleVision(effectiveConnectionDetails.slug, modelId, !visionOn)}
-                      />
-                    )}
-                    {isSelected && (
-                      <Check className="size-4 text-secondary" />
-                    )}
-                  </div>
-                </StyledDropdownMenuItem>
+                <React.Fragment key={modelId}>
+                  {modelIndex > 0 && getPickerModelFamily(models[modelIndex - 1]) !== getPickerModelFamily(model) && <StyledDropdownMenuSeparator className="my-1" />}
+                  <StyledDropdownMenuItem
+                    onSelect={() => onModelChange(modelId, effectiveConnection)}
+                    className="flex cursor-pointer items-center justify-between py-1.5"
+                  >
+                    <div className="text-left">
+                      <div className={ITEM_NAME}>{modelName}</div>
+                      {description && (
+                        <div className={ITEM_DESCRIPTION}>{description}</div>
+                      )}
+                    </div>
+                    <div className="ml-3 flex shrink-0 items-center gap-1">
+                      {showVisionToggle && effectiveConnectionDetails && (
+                        <VisionToggle
+                          visionOn={visionOn}
+                          onToggle={() => onToggleVision(effectiveConnectionDetails.slug, modelId, !visionOn)}
+                        />
+                      )}
+                      {isSelected && (
+                        <Check className="size-4 text-secondary" />
+                      )}
+                    </div>
+                  </StyledDropdownMenuItem>
+                </React.Fragment>
               )
             })}
           </>

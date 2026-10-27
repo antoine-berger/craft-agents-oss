@@ -23,8 +23,6 @@ import { navigate, routes } from '@/lib/navigate'
 import { useOptionalAppShellContext } from '@/context/AppShellContext'
 import {
   ANTHROPIC_MODELS,
-  getModelDisplayName,
-  getModelShortName,
   getModelContextWindow,
 } from '@config/models'
 import {
@@ -41,7 +39,8 @@ import { ConnectionIcon } from '@/components/icons/ConnectionIcon'
 import { derivePickerMode } from './picker-mode'
 import {
   groupConnectionsByProvider,
-  stripPiPrefixForDisplay,
+  getPickerModelName,
+  sortPickerModels,
 } from './model-picker-helpers'
 import { getContextDisplay, getContextDisplayLabels, type ContextStatus } from './context-display'
 import { useModelVisionToggle } from './useModelVisionToggle'
@@ -115,7 +114,7 @@ export function CompactModelSelector({
   const availableModels = React.useMemo(() => {
     if (connectionUnavailable) return []
     if (!effectiveConnectionDetails) return ANTHROPIC_MODELS
-    return effectiveConnectionDetails.models || ANTHROPIC_MODELS
+    return sortPickerModels(effectiveConnectionDetails.models || ANTHROPIC_MODELS)
   }, [effectiveConnectionDetails, connectionUnavailable])
 
   const currentModelDisplayName = React.useMemo(() => {
@@ -123,9 +122,7 @@ export function CompactModelSelector({
     const model = availableModels.find(m =>
       typeof m === 'string' ? m === modelToDisplay : m.id === modelToDisplay,
     )
-    if (!model) return stripPiPrefixForDisplay(getModelDisplayName(modelToDisplay))
-    if (typeof model === 'string') return stripPiPrefixForDisplay(model)
-    return model.name ?? stripPiPrefixForDisplay(model.id)
+    return getPickerModelName(model ?? modelToDisplay)
   }, [availableModels, currentModel, connectionDefaultModel])
 
   const thinkingDisabled = React.useMemo(() => {
@@ -290,11 +287,9 @@ export function CompactModelSelector({
                       </button>
                       {isAuthenticated && isExpanded && (
                         <div className="pl-6 flex flex-col gap-0.5">
-                          {(conn.models || ANTHROPIC_MODELS).map(model => {
+                          {sortPickerModels(conn.models || ANTHROPIC_MODELS).map(model => {
                             const modelId = typeof model === 'string' ? model : model.id
-                            const modelName = typeof model === 'string'
-                              ? stripPiPrefixForDisplay(getModelShortName(model))
-                              : (model.name ?? stripPiPrefixForDisplay(model.id))
+                            const modelName = getPickerModelName(model)
                             const isSelectedModel =
                               isCurrentConnection && currentModel === modelId
                             const showVision = isCompatProvider(conn.providerType)
@@ -343,9 +338,7 @@ export function CompactModelSelector({
             // 'flat' — list models of the active connection
             availableModels.map(model => {
               const modelId = typeof model === 'string' ? model : model.id
-              const modelName = typeof model === 'string'
-                ? stripPiPrefixForDisplay(getModelShortName(model))
-                : (model.name ?? stripPiPrefixForDisplay(model.id))
+              const modelName = getPickerModelName(model)
               const isSelected = currentModel === modelId
               const descriptionKey =
                 typeof model !== 'string' && 'descriptionKey' in model
@@ -486,7 +479,7 @@ function LockedSingleRow({
   return (
     <div className={cn(SHEET_ROW, 'justify-between select-none')}>
       <div className="min-w-0">
-        <div className="text-copy font-medium truncate">{stripPiPrefixForDisplay(modelId)}</div>
+        <div className="text-copy font-medium truncate">{getPickerModelName(modelId)}</div>
         <div className="text-label text-tertiary">{t('chat.connectionDefault')}</div>
       </div>
       <div className="flex items-center gap-1 ml-3 shrink-0">

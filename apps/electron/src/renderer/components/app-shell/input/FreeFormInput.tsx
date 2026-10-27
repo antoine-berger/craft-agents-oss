@@ -39,7 +39,7 @@ import { isMac } from '@/lib/platform'
 import { applySmartTypography } from '@/lib/smart-typography'
 import { AttachmentPreview } from '../AttachmentPreview'
 import { ImageSupportWarningBanner } from './ImageSupportWarningBanner'
-import { ANTHROPIC_MODELS, getModelDisplayName, getModelContextWindow } from '@config/models'
+import { ANTHROPIC_MODELS, getModelContextWindow } from '@config/models'
 import {
   resolveEffectiveConnectionSlug,
   isCompatProvider,
@@ -70,7 +70,8 @@ import { CompactPermissionModeSelector } from './CompactPermissionModeSelector'
 import { CompactModelSelector } from './CompactModelSelector'
 import {
   groupConnectionsByProvider,
-  stripPiPrefixForDisplay,
+  getPickerModelName,
+  sortPickerModels,
 } from './model-picker-helpers'
 import { useModelVisionToggle } from './useModelVisionToggle'
 import { initialRepository, setDraftRepository } from './repository-history'
@@ -374,7 +375,7 @@ export function FreeFormInput({
       return ANTHROPIC_MODELS // Safety net — shouldn't happen
     }
 
-    return connection.models || ANTHROPIC_MODELS
+    return sortPickerModels(connection.models || ANTHROPIC_MODELS)
   }, [llmConnections, currentConnection, workspaceDefaultConnection, connectionUnavailable])
 
   // Disable thinking selector when the current model explicitly doesn't support it
@@ -389,15 +390,7 @@ export function FreeFormInput({
     const model = availableModels.find(m =>
       typeof m === 'string' ? m === modelToDisplay : m.id === modelToDisplay
     )
-    if (!model) {
-      // Fallback: use helper function to format unknown model IDs nicely
-      return stripPiPrefixForDisplay(getModelDisplayName(modelToDisplay))
-    }
-    if (typeof model === 'string') return stripPiPrefixForDisplay(model)
-    // Defensive: partial entries (custom-endpoint user-config or vision-toggle
-    // promotions) may lack `name`. Fall back to the id so the trigger button
-    // never goes blank.
-    return model.name ?? stripPiPrefixForDisplay(model.id)
+    return getPickerModelName(model ?? modelToDisplay)
   }, [availableModels, currentModel, connectionDefaultModel])
 
   // Group connections by provider type for hierarchical dropdown.

@@ -22,3 +22,5 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 - **Account-scoped repository search** — Repository search includes personal, collaborator and organization repositories available to the connected GitHub account, including private repositories and forks. Unrelated worldwide results are excluded. (#4)
 
 - **Automatic connectors in every chat** — All available connectors and configured sources are enabled automatically, including in existing chats and after newly connecting a source. The composer no longer asks you to select Claude connectors or sources. (#4)
+
+- **Clear model picker** — GPT connections appear under OpenAI, model families stay together with versions sorted newest first, and menu/button labels consistently show readable names such as Opus 5.5 and GPT 6.1 Sol. (#4)

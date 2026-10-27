@@ -9,6 +9,8 @@ import { describe, test, expect } from 'bun:test'
 import type { LlmConnection } from '@craft-agent/shared/config/llm-connections'
 import {
   formatTokenCount,
+  getPickerModelName,
+  sortPickerModels,
   groupConnectionsByProvider,
   stripPiPrefixForDisplay,
 } from '../model-picker-helpers'
@@ -152,4 +154,37 @@ describe('groupConnectionsByProvider', () => {
       ['Craft Agents Backend', ['or', 'p']],
     ])
   })
+})
+
+describe('readable model options', () => {
+ test('uses exact Claude versions rather than registry short names or deprecated aliases', () => {
+  for (const [id,name] of [
+   ['claude-opus-5-5','Opus 5.5'], ['claude-sonnet-4-20250514','Sonnet 4'],
+   ['claude-3-7-sonnet-20250219','Sonnet 3.7'], ['claude-3-5-haiku-20241022','Haiku 3.5'],
+   ['claude-opus-4-5-20251101','Opus 4.5'], ['claude-fable-5-1','Fable 5.1'],
+   ['pi/claude-opus-5-5','Opus 5.5'],
+  ]) expect(getPickerModelName(id)).toBe(name)
+ })
+ test('formats GPT names consistently for string and promoted object options', () => {
+  expect(getPickerModelName('gpt-6.1-sol')).toBe('GPT 6.1 Sol')
+  expect(getPickerModelName({id:'gpt-6.1-sol',name:'Gpt 6.1.sol'})).toBe('GPT 6.1 Sol')
+  expect(getPickerModelName({id:'claude-opus-5-5',name:'claude-opus-5-5'})).toBe('Opus 5.5')
+  expect(getPickerModelName('openai/gpt-5.6-luna')).toBe('GPT 5.6 Luna')
+  expect(getPickerModelName({id:'custom/model',name:'My custom model'})).toBe('My custom model')
+ })
+ test('groups families and sorts versions numerically without changing model identifiers', () => {
+  const models=['claude-haiku-4-5-20251001','claude-sonnet-5','claude-opus-4-8','claude-opus-5-5','claude-sonnet-5-5','claude-opus-4-10']
+  expect(sortPickerModels(models)).toEqual(['claude-opus-5-5','claude-opus-4-10','claude-opus-4-8','claude-sonnet-5-5','claude-sonnet-5','claude-haiku-4-5-20251001'])
+  expect(models[0]).toBe('claude-haiku-4-5-20251001')
+  expect(sortPickerModels(['gpt-5.6-sol','gpt-6-sol','gpt-6.1-sol'])).toEqual(['gpt-6.1-sol','gpt-6-sol','gpt-5.6-sol'])
+ })
+ test('puts proxied GPT under OpenAI while retaining genuine local runtimes', () => {
+  const proxy=conn('cli-proxy-codex','pi_compat',{baseUrl:'http://127.0.0.1:41801',piAuthProvider:'openai'})
+  const native=conn('chatgpt','pi',{piAuthProvider:'openai-codex'})
+  const local=conn('ollama','pi_compat',{baseUrl:'http://localhost:11434'})
+  const anthropic=conn('claude','anthropic')
+  expect(groupConnectionsByProvider([local,proxy,native,anthropic]).map(([group,connections])=>[group,connections.map(c=>c.slug)])).toEqual([
+   ['Anthropic',['claude']],['OpenAI',['cli-proxy-codex','chatgpt']],['Local',['ollama']],
+  ])
+ })
 })
