@@ -1677,6 +1677,7 @@ export function FreeFormInput({
           <div className="-m-1 flex min-w-0 shrink items-center gap-1 overflow-hidden p-1">
           <ContextUsageIndicator
             snapshot={contextStatus?.contextUsage}
+            reportedContextWindow={contextStatus?.contextWindow}
             modelName={currentModelDisplayName}
             modelContextWindow={getModelContextWindow(currentModel)}
             isProcessing={isProcessing}

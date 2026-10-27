@@ -9657,6 +9657,26 @@ export class SessionManager implements ISessionManager {
         // Track if already completed to avoid sending duplicate events
         const wasAlreadyComplete = existingToolMsg?.toolStatus === 'completed'
 
+        // The host confirms an attention tool before intentionally stopping the SDK. Claude then
+        // emits this cancellation for that same tool (also on resume). The persisted host result is
+        // authoritative; do not turn a successfully saved human handoff into a failed step.
+        // This is deliberately narrower than ignoring late errors: names, id, turn, parent, saved
+        // result and the observed SDK cancellation must all agree. Real failures still pass through.
+        const isQuestionTool = existingToolMsg?.toolName === 'mcp__session__request_user_input' || existingToolMsg?.toolName === 'request_user_input'
+        const isAttentionTool = existingToolMsg?.toolName === 'mcp__session__mark_attention' || existingToolMsg?.toolName === 'mark_attention'
+        const hasHostHandoffResult = isQuestionTool
+          ? existingToolMsg?.toolResult === 'Question saved. Waiting for your answer.'
+          : isAttentionTool && (existingToolMsg?.toolResult === 'Plan saved for your review.' || existingToolMsg?.toolResult === 'Request saved. Waiting for your response.')
+        const sdkHandoffCancellation = "The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed."
+        if (wasAlreadyComplete && existingToolMsg?.isError === false && hasHostHandoffResult
+          && event.isError === true && event.result.trim().replaceAll('’', "'") === sdkHandoffCancellation
+          && (!event.toolName || event.toolName === existingToolMsg.toolName)
+          && (!event.turnId || event.turnId === existingToolMsg.turnId)
+          && (!event.parentToolUseId || event.parentToolUseId === existingToolMsg.parentToolUseId)) {
+          sessionLog.info(`Preserving completed attention handoff: toolUseId=${event.toolUseId}`)
+          break
+        }
+
         sessionLog.info(`RESULT MATCH: toolUseId=${event.toolUseId}, found=${!!existingToolMsg}, toolName=${existingToolMsg?.toolName || toolName}, wasComplete=${wasAlreadyComplete}`)
 
         // parentToolUseId comes from CraftAgent (SDK-authoritative) or existing message

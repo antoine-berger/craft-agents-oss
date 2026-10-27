@@ -7,6 +7,8 @@ export interface ContextUsageIndicatorProps {
   snapshot?: ContextUsageSnapshot
   modelName?: string
   modelContextWindow?: number | null
+  /** Window reported by this session's backend, distinct from static model capacity. */
+  reportedContextWindow?: number | null
   updatedAt?: number | null
   /** Only current-context cache occupancy belongs here, never lifetime billing totals. */
   currentCacheTokens?: number | null
@@ -18,8 +20,8 @@ export interface ContextUsageIndicatorProps {
 const tokenLabel = (value: number) => new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 }).format(value)
 const count = (value: unknown): number | null => typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null
 
-export function ContextUsageIndicator({ snapshot, modelName, modelContextWindow, updatedAt, currentCacheTokens, isProcessing, onCompact, className }: ContextUsageIndicatorProps) {
-  const value = contextIndicatorValues(snapshot, modelContextWindow)
+export function ContextUsageIndicator({ snapshot, modelName, modelContextWindow, reportedContextWindow, updatedAt, currentCacheTokens, isProcessing, onCompact, className }: ContextUsageIndicatorProps) {
+  const value = contextIndicatorValues(snapshot, modelContextWindow, reportedContextWindow)
   const cache = count(currentCacheTokens)
   const known = value.percent !== null && !value.stale
   const circle = 2 * Math.PI * 5.5
