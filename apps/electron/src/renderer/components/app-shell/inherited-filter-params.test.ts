@@ -35,3 +35,28 @@ describe('resolveInheritedFilterParams (#970)', () => {
     expect(resolveInheritedFilterParams(m(['todo', 'include']), m(['bug', 'include']), m())).toBeNull()
   })
 })
+
+
+describe('new session project context', () => {
+ it('keeps the selected project together with a status filter', () => {
+  expect(resolveInheritedFilterParams(m(['todo','include']),m(),m(['project','include']))).toEqual({project:'project',status:'todo'})
+ })
+ it('keeps the project even when status and label inheritance is ambiguous', () => {
+  expect(resolveInheritedFilterParams(m(['todo','include']),m(['bug','include']),m(['project','include']))).toEqual({project:'project'})
+ })
+ it('does not lose the project when several statuses are displayed', () => {
+  expect(resolveInheritedFilterParams(m(['todo','include'],['done','include']),m(),m(['project','include']))).toEqual({project:'project'})
+ })
+ it('uses the project info page context with the global new-session button', () => {
+  expect(resolveInheritedFilterParams(m(),m(),m(),'opened-project')).toEqual({project:'opened-project'})
+ })
+ it('gives the opened project precedence over a stale project-list filter', () => {
+  expect(resolveInheritedFilterParams(m(),m(),m(['previous-project','include']),'opened-project')).toEqual({project:'opened-project'})
+ })
+ it('does not choose arbitrarily between multiple project filters', () => {
+  expect(resolveInheritedFilterParams(m(),m(),m(['one','include'],['two','include']))).toBeNull()
+ })
+ it('never inherits an excluded project', () => {
+  expect(resolveInheritedFilterParams(m(['todo','include']),m(),m(['excluded','exclude']))).toEqual({status:'todo'})
+ })
+})

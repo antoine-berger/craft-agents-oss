@@ -81,6 +81,8 @@ export interface AppShellContextType {
   sessionOptions: Map<string, SessionOptions>
 
   // Session callbacks
+  /** Create a session and keep its project-scoped list visible. */
+  onNewSessionInProject?: (projectId: string) => void
   onCreateSession: (workspaceId: string, options?: import('../../shared/types').CreateSessionOptions) => Promise<Session>
   onSendMessage: (sessionId: string, message: string, attachments?: FileAttachment[], skillSlugs?: string[], badges?: import('@craft-agent/core').ContentBadge[]) => void
   onRenameSession: (sessionId: string, name: string) => void

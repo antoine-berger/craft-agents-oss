@@ -490,6 +490,18 @@ function AppShellContent({
     navigate(routes.view.allSessions())
   }, [])
 
+  const setNewSessionProjectView = useCallback((projectId: string, statuses: FilterEntry = {}, labels: FilterEntry = {}) => {
+    setViewFiltersMap(previous => ({
+      ...previous,
+      allSessions: { statuses, labels, projects: { [projectId]: 'include' }, groupingMode: previous.allSessions?.groupingMode },
+    }))
+  }, [])
+
+  const handleNewSessionInProject = useCallback((projectId: string) => {
+    setNewSessionProjectView(projectId)
+    navigate(routes.action.newSession({ project: projectId }))
+  }, [navigate, setNewSessionProjectView])
+
   // Jump to All Sessions scoped to a task: replace the allSessions view's label filter
   // (and project filter, when the task is bound to one) with the task's scope, then open
   // the session. These are the SAME user-clearable filters the list-header chips edit —
@@ -1429,6 +1441,7 @@ function AppShellContent({
   const appShellContextValue = React.useMemo<AppShellContextType>(() => ({
     ...contextValue,
     onDeleteSession: handleDeleteSession,
+    onNewSessionInProject: handleNewSessionInProject,
     enabledSources: sources,
     skills,
     chatStarters,
@@ -1453,7 +1466,7 @@ function AppShellContent({
     automationTestResults,
     getAutomationHistory,
     onReplayAutomation: handleReplayAutomation,
-  }), [contextValue, handleDeleteSession, sources, skills, chatStarters, activeSessionWorkingDirectory, displayLabelConfigs, handleSessionLabelsChange, enabledModes, effectiveSessionStatuses, handleSessionSourcesChange, handleJumpToTaskSessions, isAutoCompact, searchActive, searchQuery, handleChatMatchInfoChange, handleTestAutomation, handleToggleAutomation, handleDuplicateAutomation, handleDeleteAutomation, automationTestResults, getAutomationHistory, handleReplayAutomation])
+  }), [contextValue, handleDeleteSession, handleNewSessionInProject, sources, skills, chatStarters, activeSessionWorkingDirectory, displayLabelConfigs, handleSessionLabelsChange, enabledModes, effectiveSessionStatuses, handleSessionSourcesChange, handleJumpToTaskSessions, isAutoCompact, searchActive, searchQuery, handleChatMatchInfoChange, handleTestAutomation, handleToggleAutomation, handleDuplicateAutomation, handleDeleteAutomation, automationTestResults, getAutomationHistory, handleReplayAutomation])
 
   // Persist expanded folders to localStorage (workspace-scoped)
   React.useEffect(() => {
@@ -1751,14 +1764,12 @@ function AppShellContent({
     }
   }, [activeWorkspace?.id, navigate, t])
 
-  /**
-   * Resolve the "inherit sole active filter" rule for new sessions. Only
-   * include-mode filters are candidates — an excluded status/label/project must
-   * never be inherited (#970). See resolveInheritedFilterParams.
-   */
+  // The project page is an explicit context even though it has no session-list filter.
+  const openedProjectSlug = isProjectsNavigation(navState) ? navState.details?.projectSlug : undefined
+  const openedProjectId = projects.find(project => project.config.slug === openedProjectSlug)?.config.id
   const resolveInheritedNewSessionParams = useCallback(
-    () => resolveInheritedFilterParams(listFilter, labelFilter, projectFilter),
-    [listFilter, labelFilter, projectFilter]
+    () => resolveInheritedFilterParams(listFilter, labelFilter, projectFilter, openedProjectId),
+    [listFilter, labelFilter, projectFilter, openedProjectId]
   )
 
   // Create a new chat and select it
@@ -1771,6 +1782,9 @@ function AppShellContent({
 
     // Inherit sole-active filter into the new session when unambiguous.
     const inherited = resolveInheritedNewSessionParams()
+    if (inherited?.project) {
+      setNewSessionProjectView(inherited.project, Object.fromEntries(listFilter), Object.fromEntries(labelFilter))
+    }
 
     // Delegate to NavigationContext which handles session creation
     navigate(
@@ -1780,7 +1794,7 @@ function AppShellContent({
 
     // Focus the chat input after navigation completes
     setTimeout(() => focusZone('chat', { intent: 'programmatic' }), 50)
-  }, [activeWorkspace, focusZone, navigate, resolveInheritedNewSessionParams])
+  }, [activeWorkspace, focusZone, navigate, resolveInheritedNewSessionParams, listFilter, labelFilter, setNewSessionProjectView])
 
   // Create a brand new dedicated browser window and focus it.
   // Intentionally unbound: this action should always create a NEW window.

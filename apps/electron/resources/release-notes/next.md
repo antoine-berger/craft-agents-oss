@@ -24,3 +24,5 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 - **Automatic connectors in every chat** — All available connectors and configured sources are enabled automatically, including in existing chats and after newly connecting a source. The composer no longer asks you to select Claude connectors or sources. (#4)
 
 - **Clear model picker** — GPT connections appear under OpenAI, model families stay together with versions sorted newest first, and menu/button labels consistently show readable names such as Opus 5.5 and GPT 6.1 Sol. (#4)
+
+- **New sessions stay in their project** — The global New Session button inherits the open project info page or selected project filter, even alongside status/label filters. Navigation keeps the new session visible in that project. (#4)

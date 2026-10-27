@@ -41,7 +41,7 @@ export default function ProjectInfoPage({ projectSlug }: ProjectInfoPageProps) {
   const workspace = useActiveWorkspace()
   const workspaceId = workspace?.id
   const sessionMetaMap = useAtomValue(sessionMetaMapAtom)
-  const { onCreateSession, onOpenFile } = useAppShellContext()
+  const { onCreateSession, onNewSessionInProject, onOpenFile } = useAppShellContext()
 
   const [project, setProject] = useState<LoadedProject | null>(null)
   const [loading, setLoading] = useState(true)
@@ -130,6 +130,10 @@ export default function ProjectInfoPage({ projectSlug }: ProjectInfoPageProps) {
   const handleStartSession = useCallback(async () => {
     if (!workspaceId || !project) return
     try {
+      if (onNewSessionInProject) {
+        onNewSessionInProject(project.config.id)
+        return
+      }
       const session = await onCreateSession(workspaceId, { projectId: project.config.id })
       if (session?.id) {
         navigate(routes.view.allSessions(session.id))
@@ -140,7 +144,7 @@ export default function ProjectInfoPage({ projectSlug }: ProjectInfoPageProps) {
         description: err instanceof Error ? err.message : undefined,
       })
     }
-  }, [workspaceId, project, onCreateSession, t])
+  }, [workspaceId, project, onCreateSession, onNewSessionInProject, t])
 
   const handleSaveSettings = useCallback(async () => {
     if (!workspaceId || !project) return

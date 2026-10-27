@@ -737,6 +737,7 @@ export function NavigationProvider({
 
           // Determine navigation filter
           const filter: import('../../shared/types').SessionFilter =
+            parsed.params.project ? { kind: 'allSessions' } :
             parsed.params.status ? { kind: 'state', stateId: parsed.params.status } :
             parsed.params.label ? { kind: 'label', labelId: parsed.params.label } :
             { kind: 'allSessions' }
