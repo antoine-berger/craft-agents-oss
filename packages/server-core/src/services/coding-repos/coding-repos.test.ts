@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, 
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { cloneRootFor, discoverLocalRepos, findRepoDirs, SCAN_DEPTH, scanRoots } from './discover'
-import { isValidNameWithOwner, parseGhRepoList } from './github'
+import { filterGitHubRepos, isValidNameWithOwner, parseGhRepoList, parseGhRepoPages } from './github'
 import { branchSlug, createWorktree, gitReason, worktreePath, WorktreeError } from './worktree'
 
 let base: string
@@ -219,6 +219,34 @@ describe('github helpers', () => {
   })
   it('parses GitHub search results as selectable repositories', () => {
     expect(parseGhRepoList('[{"fullName":"acme/new-project","description":"search result","isPrivate":false}]')[0]).toMatchObject({kind:'github',nameWithOwner:'acme/new-project'})
+  })
+  it('combines all gh API pages, including private repos beyond the first page', () => {
+    const pages = '[{"nameWithOwner":"me/fork","isPrivate":false}]\n[{"nameWithOwner":"org/private","isPrivate":true}]\n'
+    expect(parseGhRepoPages(pages).map(repo => repo.nameWithOwner)).toEqual(['me/fork', 'org/private'])
+    expect(parseGhRepoPages('[]\n')).toEqual([])
+  })
+  it('searches only the account-affiliated catalog, preserving private repos and forks', () => {
+    const repos = parseGhRepoList(JSON.stringify([
+      {nameWithOwner:'me/sapiom-fork', isPrivate:false},
+      {nameWithOwner:'my-org/sapiom-private', isPrivate:true},
+      {nameWithOwner:'collaborator/sapiom-tool', isPrivate:false},
+      {nameWithOwner:'my-org/unrelated', isPrivate:true},
+    ]))
+    expect(filterGitHubRepos(repos, 'SAPIOM').map(repo => repo.nameWithOwner)).toEqual([
+      'me/sapiom-fork', 'my-org/sapiom-private', 'collaborator/sapiom-tool',
+    ])
+    expect(filterGitHubRepos(repos, 'user:outsider')).toEqual([])
+    expect(filterGitHubRepos(repos, 'my-org/sapiom')).toHaveLength(1)
+  })
+  it('searches the full paginated catalog before applying the result limit', () => {
+    const repos = parseGhRepoList(JSON.stringify(Array.from({length:150}, (_,i) => ({nameWithOwner:`me/repo-${i}`,isPrivate:true}))))
+    expect(filterGitHubRepos(repos)).toHaveLength(100)
+    expect(filterGitHubRepos(repos, 'repo-149')[0]?.nameWithOwner).toBe('me/repo-149')
+  })
+  it('matches multiple words against names and descriptions without a global query', () => {
+    const repos = parseGhRepoList('[{"nameWithOwner":"team/app","description":"Payment Service","isPrivate":true}]')
+    expect(filterGitHubRepos(repos, 'TEAM payment')).toHaveLength(1)
+    expect(filterGitHubRepos(repos, 'team billing')).toEqual([])
   })
   it('accepts owner/repo only', () => {
     expect(isValidNameWithOwner('acme/app.js')).toBe(true)

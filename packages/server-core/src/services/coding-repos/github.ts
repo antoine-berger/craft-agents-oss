@@ -1,6 +1,7 @@
 /**
- * The signed-in user's GitHub repositories, from the GitHub CLI (`gh repo list`). No token handling
- * here: `gh` uses its own login. Cached briefly so reopening the picker is instant.
+ * The signed-in user's owned, collaborator and organization repositories, via `gh api user/repos`.
+ * Search only this authenticated catalog; public GitHub search would include unrelated repositories.
+ * `gh` owns the login. Cache the complete paginated catalog so subsequent searches are local.
  */
 
 import { execFile } from 'node:child_process'
@@ -9,7 +10,9 @@ import type { GitHubRepo, RepoListing } from '@craft-agent/shared/protocol'
 const LIST_LIMIT = 100
 const CACHE_MS = 60_000
 
-const cache = new Map<string, { at: number; value: { repos: GitHubRepo[]; unavailable?: RepoListing['githubUnavailable'] } }>()
+type GitHubRepoResult = { repos: GitHubRepo[]; unavailable?: RepoListing['githubUnavailable'] }
+let cache: { at: number; value: GitHubRepoResult } | undefined
+let pending: Promise<GitHubRepoResult> | undefined
 
 interface GhRepo {
   nameWithOwner?: string
@@ -30,34 +33,56 @@ export function parseGhRepoList(stdout: string): GitHubRepo[] {
   }))
 }
 
-export function listGitHubRepos({ fresh = false, query }: { fresh?: boolean; query?: string } = {}): Promise<{ repos: GitHubRepo[]; unavailable?: RepoListing['githubUnavailable'] }> {
-  const key = query?.trim() ?? ''
-  const cached = cache.get(key)
-  if (!fresh && cached && Date.now() - cached.at < CACHE_MS) return Promise.resolve(cached.value)
-  const args = key ? ['search', 'repos', '--include-forks', 'true', '--limit', String(LIST_LIMIT), '--json', 'fullName,description,isPrivate,updatedAt', '--', key]
-    : ['repo', 'list', '--limit', String(LIST_LIMIT), '--json', 'nameWithOwner,description,isPrivate,updatedAt']
-  return new Promise((done) => {
+/** gh emits one compact JSON array per page; --slurp cannot be combined with --jq. */
+export function parseGhRepoPages(stdout: string): GitHubRepo[] {
+  return stdout.split(/\r?\n/).filter(line => line.trim()).flatMap(parseGhRepoList)
+}
+
+/** Filter after pagination, so a matching repo beyond the first page is still found. */
+export function filterGitHubRepos(repos: readonly GitHubRepo[], query = ''): GitHubRepo[] {
+  const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean)
+  return repos.filter(repo => {
+    const text = `${repo.nameWithOwner} ${repo.description ?? ''}`.toLowerCase()
+    return words.every(word => text.includes(word))
+  }).slice(0, LIST_LIMIT)
+}
+
+async function accessibleGitHubRepos(fresh: boolean): Promise<GitHubRepoResult> {
+  if (!fresh && cache && Date.now() - cache.at < CACHE_MS) return cache.value
+  if (pending) return pending
+  pending = new Promise((done) => {
     execFile(
       'gh',
-      args,
-      { timeout: 15_000, maxBuffer: 4 * 1024 * 1024, windowsHide: true },
+      ['api', '--paginate',
+        'user/repos?affiliation=owner,collaborator,organization_member&visibility=all&per_page=100&sort=updated&direction=desc',
+        '--jq', '[.[] | {nameWithOwner: .full_name, description, isPrivate: .private, updatedAt: .updated_at}] | @json'],
+      { timeout: 30_000, maxBuffer: 8 * 1024 * 1024, windowsHide: true },
       (error, stdout) => {
-        let value: { repos: GitHubRepo[]; unavailable?: RepoListing['githubUnavailable'] }
+        let value: GitHubRepoResult
         if (error) {
           value = { repos: [], unavailable: (error as NodeJS.ErrnoException).code === 'ENOENT' ? 'not-installed' : 'not-signed-in' }
         } else {
           try {
-            value = { repos: parseGhRepoList(stdout) }
+            value = { repos: parseGhRepoPages(stdout) }
           } catch {
             value = { repos: [], unavailable: 'not-signed-in' }
           }
         }
-        cache.set(key, { at: Date.now(), value })
-        if (cache.size > 20) cache.delete(cache.keys().next().value!)
+        cache = { at: Date.now(), value }
         done(value)
       },
     )
   })
+  try {
+    return await pending
+  } finally {
+    pending = undefined
+  }
+}
+
+export async function listGitHubRepos({ fresh = false, query }: { fresh?: boolean; query?: string } = {}): Promise<GitHubRepoResult> {
+  const result = await accessibleGitHubRepos(fresh)
+  return { ...result, repos: filterGitHubRepos(result.repos, query) }
 }
 
 /** `owner/repo` with GitHub's allowed characters only (it ends up in a `gh` argument and a path). */
