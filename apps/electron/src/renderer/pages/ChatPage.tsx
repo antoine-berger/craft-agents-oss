@@ -1,6 +1,3 @@
-import { SessionAttentionBanner } from '@/components/app-shell/SessionAttentionBanner'
-import { useSessionAttention } from '@/hooks/useSessionAttention'
-import { ShipWorkflowPanel } from '@/components/settings/ShipWorkflowPanel'
 /**
  * ChatPage
  *
@@ -321,7 +318,6 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     return connection?.defaultModel ?? ''
   }, [session?.id, session?.model, session?.llmConnection, workspaceDefaultLlmConnection, llmConnections, connectionUnavailable])
 
-  const sessionAttention = useSessionAttention(activeWorkspaceId ?? undefined)
   const [gitReviewOpen, setGitReviewOpen] = React.useState(false)
   const openGitReview = React.useCallback(() => setGitReviewOpen(true), [])
   React.useEffect(() => { setGitReviewOpen(false) }, [sessionId])
@@ -538,8 +534,6 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
         onSetPrAutoFix={prWatch.setAutoFix}
         onPrCardOpenChange={prWatch.onCardOpenChange}
       />
-      <SessionAttentionBanner attention={sessionAttention?.sessions[sessionId]} onOpenUrl={handleOpenUrl} />
-      <div className="max-h-[35%] shrink-0 overflow-auto"><ShipWorkflowPanel workspaceId={session.workspaceId} sessionId={sessionId} api={window.electronAPI} hideWhenEmpty /></div>
       <GitReviewDialog key={sessionId} sessionId={sessionId} open={gitReviewOpen} onOpenChange={setGitReviewOpen} onAddToChat={addGitReviewComments} />
       <div className="flex-1 flex flex-col min-h-0">
         <ChatDisplay
