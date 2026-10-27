@@ -214,7 +214,7 @@ export class CliProxyManager {
   private async syncModels(): Promise<void> {
     const status = await this.status()
     for (const provider of ['claude', 'codex'] as const) {
-      const models = status.models.filter(model => provider === 'claude' ? model.startsWith('claude-') : /^(gpt-|o[134](?:-|$))/.test(model))
+      const models = status.models.filter(model => provider === 'claude' ? model.startsWith('claude-') : /^(gpt-|o[134](?:-|$))/.test(model) && !model.startsWith('gpt-image-'))
       if (!models.length || !status.accounts.some(account => account.provider === provider && !account.disabled)) continue
       const slug = `cli-proxy-${provider}`
       const existing = getLlmConnection(slug)
