@@ -13,8 +13,7 @@ export async function assertShipEvidenceTree(cwd: string, run: ShipCommandRunner
   if (stdout.trim()) throw new Error('Review/E2E proof requires a clean worktree at the exact committed HEAD. Commit owned changes and clean up disposable test files first.')
 }
 export async function assertShipRepository(cwd: string, run: ShipCommandRunner = exec): Promise<void> {
-  const { stdout } = await run('git', ['remote', 'get-url', 'origin'], { cwd, timeout: 10_000, maxBuffer: 16_384 })
-  if (/(?:[:/])sapiom\/(?:sapiom|sapiom-js)(?:\.git)?\/?$/i.test(stdout.trim())) throw new Error('Sapiom remains read-only. Native Ship workflows are disabled for this repository.')
+  await run('git', ['remote', 'get-url', 'origin'], { cwd, timeout: 10_000, maxBuffer: 16_384 })
   const { stdout: branch } = await run('git', ['branch', '--show-current'], { cwd, timeout: 10_000, maxBuffer: 16_384 })
   if (!branch.trim() || /^(main|master|dev|develop)$/.test(branch.trim())) throw new Error('Choose an isolated worktree branch before starting Ship.')
 }

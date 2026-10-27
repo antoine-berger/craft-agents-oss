@@ -7,14 +7,14 @@ These preferences are adapted for native Craft sessions on Linux. Original Mac c
 - Speak French with Antoine, briefly and concretely. Plans, commits, PRs, Linear issues and other third-party content use English. Avoid em dashes.
 - Slack is strictly read-only. Draft messages in the chat for the owner to send. Never send, react, schedule, or create Slack content.
 - Production, Render, Datadog and databases remain read-only unless the owner explicitly authorizes the precise write. Never open a production DB/follower session or start an external workflow as a side effect of research.
-- Sapiom and sapiom-js remain read-only for this setup. Never merge or start a real Ship/workflow there. Do not alter their configuration or repository guidance.
+- Follow each repository's instructions and the user's explicit scope. A user-started `/ship-plan` authorizes planning in that session's isolated worktree; implementation still requires approval of the plan. Never alter repository guidance to bypass it.
 - Do not publish artifacts without an explicit request. Keep concise reports in the chat.
 
 ## Execution
 
 - Use the current Craft project and its server-side worktree. Never reuse a foreign session's checkout, Mac cwd or SDK resume identifier. Do not hardcode `/Users/...`, Conductor services, launchd, a personal Mac CLI path, or a local Ship installation.
 - Do not start the development stack, detached commands, background Node processes, polling loops, cron jobs or monitors. Ask the owner to start an unavailable stack when a test needs it. Native Tasks launched explicitly by the user are tracked server-side jobs, not a reason for an agent to spawn hidden processes.
-- Tests run in the foreground with explicit timeouts and at most two workers. Use the repository's actual scoped command. In Sapiom's pnpm test scripts, `--maxWorkers=2` precedes the spec; do not invoke that repository's workflows here.
+- Tests run in the foreground with explicit timeouts and at most two workers. Use the repository's actual scoped command. In Sapiom's pnpm test scripts, `--maxWorkers=2` precedes the spec.
 - Preserve originals and back up before destructive replacement. Never change MCP credentials, provider accounts or connection pools to make an unrelated task work. Do not copy Mac hooks or absolute paths to Linux.
 
 ## GitHub

@@ -6,7 +6,7 @@ disable-model-invocation: true
 
 # Ship plan in Craft
 
-This skill is a portable description of the native Ship flow. It does not authorize running the original Mac Ship CLI, editing workflow state, starting Sapiom workflows, or granting a human approval.
+This skill is a portable description of the native Ship flow. It does not authorize running the original Mac Ship CLI, editing workflow state, starting a workflow without the user's request, or granting a human approval.
 
 When the user types `/ship-plan ISSUE-123` (or a canonical Linear issue URL), Craft starts/resumes the server-side Ship Task in the current project/worktree. If the native flow has not been installed, explain the missing capability; never substitute `/Users/.../bin/ship`, an invented command, a second orchestration app or a hand-written approval file.
 

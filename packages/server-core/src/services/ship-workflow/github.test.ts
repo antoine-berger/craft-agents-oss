@@ -42,9 +42,17 @@ test('ready adapter checks current local/remote head and clean worktree, exposes
   f.setDirty(); await expect(readyShipPR('/fixture', 12, f.head, f.run)).rejects.toThrow('clean worktree')
   await expect(readyShipPR('/fixture', 12, f.other, f.run)).rejects.toThrow('HEAD changed')
 })
-test('the current Sapiom read-only rule and isolated-branch requirement are enforced before dispatch', async () => {
-  const f = fixture(); f.setRemote('git@github.com:sapiom/Sapiom.git')
-  await expect(assertShipRepository('/fixture', f.run)).rejects.toThrow('read-only')
-  f.setRemote('https://github.com/sapiom/sapiom-js.git'); await expect(assertShipRepository('/fixture', f.run)).rejects.toThrow('read-only')
-  f.setRemote('git@github.com:owner/disposable.git'); f.setBranch('main'); await expect(assertShipRepository('/fixture', f.run)).rejects.toThrow('isolated')
+test('Ship accepts isolated branches without a repository-specific denylist', async () => {
+  for (const remote of ['git@github.com:sapiom/Sapiom.git', 'https://github.com/sapiom/sapiom-js.git', 'git@github.com:owner/disposable.git']) {
+    const f = fixture(); f.setRemote(remote)
+    await expect(assertShipRepository('/fixture', f.run)).resolves.toBeUndefined()
+  }
+})
+test('Ship still rejects shared branches and detached HEAD for every repository', async () => {
+  for (const remote of ['git@github.com:sapiom/Sapiom.git', 'https://github.com/sapiom/sapiom-js.git', 'git@github.com:owner/disposable.git']) {
+    for (const branch of ['main', 'master', 'dev', 'develop', '']) {
+      const f = fixture(); f.setRemote(remote); f.setBranch(branch)
+      await expect(assertShipRepository('/fixture', f.run)).rejects.toThrow('isolated')
+    }
+  }
 })
