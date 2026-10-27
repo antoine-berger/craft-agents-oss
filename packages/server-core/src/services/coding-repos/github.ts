@@ -89,3 +89,31 @@ export async function listGitHubRepos({ fresh = false, query }: { fresh?: boolea
 export function isValidNameWithOwner(value: string): boolean {
   return /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(value) && !value.split('/').some(part => part === '.' || part === '..')
 }
+
+
+/** The authenticated account owns the branch prefix, independently of the repository owner. */
+export function isValidGitHubLogin(login: string): boolean {
+  return /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/.test(login)
+}
+
+let loginRequest: Promise<string> | undefined
+let loginCache: { value: string; at: number } | undefined
+
+export async function getGitHubBranchPrefix(): Promise<string> {
+  if (loginCache && Date.now() - loginCache.at < CACHE_MS) return loginCache.value
+  if (loginRequest) return loginRequest
+  loginRequest = new Promise<string>((resolve, reject) => {
+    // gh caches the authenticated response on disk as well, across server restarts.
+    execFile('gh', ['api', 'user', '--cache', '1h', '--jq', '.login'],
+      { timeout: 10_000, maxBuffer: 4096, windowsHide: true }, (error, stdout) => {
+        const login = stdout?.trim()
+        if (error || !login || !isValidGitHubLogin(login)) {
+          reject(new Error('Sign in to GitHub to create a session branch with your GitHub username.'))
+          return
+        }
+        loginCache = { value: login, at: Date.now() }
+        resolve(login)
+      })
+  })
+  try { return await loginRequest } finally { loginRequest = undefined }
+}

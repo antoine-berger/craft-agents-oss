@@ -30,6 +30,25 @@ afterEach(() => rmSync(root, { recursive: true, force: true }))
 const plan = (sessionId = 'test-session', baseBranch?: string) => planOwnedWorktree({ repositoryPath: repo, ownerId: `workspace/${sessionId}`, sessionId, baseBranch })
 
 describe('session-owned worktrees', () => {
+  it('persists the GitHub login prefix across restart, cleanup and restoration', async () => {
+    const pending = await planOwnedWorktree({ repositoryPath: repo, ownerId: 'workspace/prefixed', sessionId: 'prefixed', branchPrefix: 'developer-name' })
+    expect(pending.branch).toStartWith('developer-name/session-prefixed-')
+    const ready = await ensureOwnedWorktree(pending)
+    const reloaded = JSON.parse(JSON.stringify(ready)) as OwnedWorktree
+    expect(await ensureOwnedWorktree(reloaded)).toEqual(ready)
+    expect(await removeOwnedWorktree(reloaded)).toEqual({ removed: true })
+    const restored = await ensureOwnedWorktree({ ...reloaded, status: 'removed' })
+    expect(git(restored.path, 'symbolic-ref', '--short', 'HEAD')).toBe(pending.branch)
+    await expect(ensureOwnedWorktree({ ...restored, branchPrefix: 'another-user' })).rejects.toBeInstanceOf(OwnedWorktreeError)
+  })
+
+  it('rejects invalid GitHub prefixes before creating Git state', async () => {
+    for (const branchPrefix of ['../other', '-invalid', 'name/other', '', 'a'.repeat(40)]) {
+      await expect(planOwnedWorktree({ repositoryPath: repo, ownerId: 'workspace/bad', sessionId: 'bad', branchPrefix })).rejects.toBeInstanceOf(OwnedWorktreeError)
+    }
+    expect(git(repo, 'worktree', 'list', '--porcelain').match(/^worktree /gm)).toHaveLength(1)
+  })
+
   it('creates separate branches/checkouts for parallel chats without touching the project checkout', async () => {
     const [firstPlan, secondPlan] = await Promise.all([plan('first'), plan('second')])
     expect(existsSync(firstPlan.path)).toBe(false)

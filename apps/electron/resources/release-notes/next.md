@@ -30,3 +30,5 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 - **Consistent composer after the first message** — Prepared sessions keep the same repository chip as the draft, showing the repository name instead of a generated worktree folder. Branch and checkout paths remain available in read-only details. (#4)
 
 - **Repository logos** — Repository badges and choices show the repository name without the organization prefix, alongside its GitHub owner avatar. Existing worktree sessions use the same presentation. (#4)
+
+- **GitHub branch prefixes** — New session worktrees use the connected GitHub username as their branch prefix, independently of the repository organization. Existing session branches retain their saved names. (#4)

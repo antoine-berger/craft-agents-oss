@@ -38,11 +38,16 @@ let root: string
 let repository: string
 let workspace: ManagedSession['workspace']
 const sessionIds = new Set<string>()
+const originalPath = process.env.PATH
 
 beforeAll(() => { setupI18n() })
 
 beforeEach(() => {
   root = realpathSync(mkdtempSync(join(tmpdir(), 'session-worktree-lifecycle-')))
+  const bin = join(root, 'bin')
+  mkdirSync(bin)
+  writeFileSync(join(bin, 'gh'), '#!/bin/sh\nprintf "test-developer\\n"\n', { mode: 0o755 })
+  process.env.PATH = `${bin}:${originalPath ?? ''}`
   repository = join(root, 'repo')
   mkdirSync(repository)
   git(repository, 'init', '-b', 'main')
@@ -55,6 +60,7 @@ beforeEach(() => {
 })
 
 afterEach(async () => {
+  process.env.PATH = originalPath
   for (const id of sessionIds) {
     await sessionPersistenceQueue.flush(id)
     sessionPersistenceQueue.cancel(id)
@@ -154,6 +160,7 @@ describe('SessionManager worktree lifecycle', () => {
     const second = await manager.prepareNewSessionWorktree(workspace.id, b.id, repository)
     expect(first.path).not.toBe(second.path)
     expect(first.branch).not.toBe(second.branch)
+    expect(first.branch).toStartWith('test-developer/')
     expect(first.path).not.toBe(repository)
     expect(readFileSync(join(repository, 'code.txt'), 'utf8')).toBe('main checkout\n')
     expect(restoreChat(a.id).worktree?.owned?.path).toBe(first.path)

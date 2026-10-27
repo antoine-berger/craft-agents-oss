@@ -125,6 +125,8 @@ export interface OwnedWorktree {
   path: string;
   /** Project folder relative to the source checkout root; absent in legacy/root-only plans. */
   projectSubdirectory?: string;
+  /** GitHub login captured when this branch was planned; absent for legacy craft/ branches. */
+  branchPrefix?: string;
   branch: string;
   base: string;
   baseCommit: string;

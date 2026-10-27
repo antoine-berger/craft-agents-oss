@@ -131,6 +131,7 @@ import { AutomationSystem, createPromptHistoryEntry, appendAutomationHistoryEntr
 import { buildBackendRuntimeSignature, buildRestartRequiredSignature, filterAttachmentsForModelInput } from './runtime-config'
 import { validateArchiveTarget } from './archive-guards'
 import { resolveSessionWorktreePolicy, defaultSessionWorktreePolicy, isSessionDirectoryInWorktree } from './session-worktree'
+import { getGitHubBranchPrefix } from '../services/coding-repos/github'
 import { planOwnedWorktree, ensureOwnedWorktree, removeOwnedWorktree, ownedWorktreeWorkingDirectory } from '../services/coding-repos/owned-worktree'
 import { addTurnUsage, branchStartTotals, type BranchParent } from './turn-usage'
 
@@ -4155,6 +4156,7 @@ export class SessionManager implements ISessionManager {
         repositoryPath: metadata.repositoryPath,
         ownerId,
         sessionId: managed.id,
+        branchPrefix: await getGitHubBranchPrefix(),
         baseBranch: metadata.baseBranch,
       })
     }

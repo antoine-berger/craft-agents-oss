@@ -13,6 +13,7 @@ import { expandPath } from '@craft-agent/shared/utils'
 import { runGit, runGitResult } from '../git'
 import { commonGitDir, repoCommandDir, worktreeParentFor } from './discover'
 import { branchSlug, gitReason, resolveWorktreeBase } from './worktree'
+import { isValidGitHubLogin } from './github'
 
 const GIT_WRITE_TIMEOUT_MS = 60_000
 const MARKER_DIRECTORY = 'craft-session-worktrees'
@@ -28,6 +29,7 @@ export interface PlanOwnedWorktreeInput {
   repositoryPath: string
   ownerId: string
   sessionId: string
+  branchPrefix?: string
   baseBranch?: string
 }
 
@@ -163,7 +165,9 @@ async function validatePlan(plan: OwnedWorktree): Promise<void> {
   if (!gitDir || gitDir !== plan.gitDir || resolve(plan.repoPath) !== repoCommandDir(gitDir)) {
     throw new OwnedWorktreeError('The session repository no longer matches its worktree record', 'not-a-repo')
   }
-  if (!plan.branch.startsWith('craft/session-') || !plan.branch.endsWith(`-${ownerKey(plan.ownerId).slice(0, 16)}`)
+  const prefix = plan.branchPrefix ?? 'craft'
+  if ((plan.branchPrefix !== undefined && !isValidGitHubLogin(plan.branchPrefix))
+    || !plan.branch.startsWith(`${prefix}/session-`) || !plan.branch.endsWith(`-${ownerKey(plan.ownerId).slice(0, 16)}`)
     || plan.path !== expectedPath(gitDir, plan.branch)
     || !(await runGit(plan.repoPath, ['check-ref-format', '--branch', plan.branch]))) {
     throw new OwnedWorktreeError('The worktree path or branch is not owned by this session', 'invalid-plan')
@@ -177,7 +181,7 @@ async function validatePlan(plan: OwnedWorktree): Promise<void> {
 }
 
 function sameReservation(left: OwnedWorktree, right: OwnedWorktree): boolean {
-  return ['version', 'ownerId', 'token', 'repoPath', 'gitDir', 'path', 'projectSubdirectory', 'branch', 'base', 'baseCommit']
+  return ['version', 'ownerId', 'token', 'repoPath', 'gitDir', 'path', 'projectSubdirectory', 'branchPrefix', 'branch', 'base', 'baseCommit']
     .every(key => left[key as keyof OwnedWorktree] === right[key as keyof OwnedWorktree])
 }
 
@@ -198,6 +202,9 @@ async function readReservation(plan: OwnedWorktree): Promise<OwnedWorktree | nul
 /** Read-only planning (apart from a best-effort fetch). Persist this result before creating Git state. */
 export async function planOwnedWorktree(input: PlanOwnedWorktreeInput): Promise<OwnedWorktree> {
   if (!input.ownerId || !input.sessionId) throw new OwnedWorktreeError('A worktree requires a session owner', 'invalid-plan')
+  if (input.branchPrefix !== undefined && !isValidGitHubLogin(input.branchPrefix)) {
+    throw new OwnedWorktreeError('Invalid GitHub username for the session branch', 'invalid-plan')
+  }
   const repositoryPath = expandPath(input.repositoryPath)
   const gitDir = await commonGitDir(repositoryPath)
   if (!gitDir) throw new OwnedWorktreeError('The project folder is not a Git repository', 'not-a-repo')
@@ -210,10 +217,11 @@ export async function planOwnedWorktree(input: PlanOwnedWorktreeInput): Promise<
     throw new OwnedWorktreeError(`The project subdirectory "${subdirectory}" is not a directory in base branch "${input.baseBranch ?? base}"`, 'invalid-directory')
   }
   const sessionName = branchSlug(input.sessionId).slice(0, 48)
-  const branch = `craft/session-${sessionName}-${ownerKey(input.ownerId).slice(0, 16)}`
+  const branch = `${input.branchPrefix ?? 'craft'}/session-${sessionName}-${ownerKey(input.ownerId).slice(0, 16)}`
   const plan: OwnedWorktree = {
     version: 1,
     ownerId: input.ownerId,
+    ...(input.branchPrefix ? { branchPrefix: input.branchPrefix } : {}),
     token: randomUUID(),
     repoPath,
     gitDir,
