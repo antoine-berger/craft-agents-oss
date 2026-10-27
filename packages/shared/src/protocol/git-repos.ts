@@ -41,6 +41,11 @@ export interface RepoListing {
   githubUnavailable?: 'not-installed' | 'not-signed-in'
 }
 
+/** A draft choice, not a prepared checkout. Git work begins only on first send. */
+export type RepositorySelection =
+  | { kind: 'local'; gitDir: string; name: string; nameWithOwner?: string }
+  | { kind: 'github'; nameWithOwner: string };
+
 export interface CreateWorktreeRequest {
   /** Bind and persist an isolated worktree owned by this new session. */
   sessionId?: string

@@ -20,6 +20,7 @@ import type { ThinkingLevel } from '../agent/thinking-levels'
 import type { BoundPr, PrMonitorState } from './pr-watch'
 import type { CustomEndpointConfig } from '../config/llm-connections'
 import type { SessionWorktreeMetadata } from '../sessions/types'
+import type { RepositorySelection } from './git-repos'
 import type {
   AuthRequest as SharedAuthRequest,
   CredentialInputMode as SharedCredentialInputMode,
@@ -489,6 +490,8 @@ export type SessionEvent =
   | { type: 'working_directory_error'; sessionId: string; error: string }
 
 export interface SendMessageOptions {
+  /** Captured with the first message; selecting it in the composer never touches Git. */
+  repository?: RepositorySelection
   skillSlugs?: string[]
   badges?: ContentBadge[]
   optimisticMessageId?: string

@@ -1,3 +1,4 @@
+import { initialRepository, clearDraftRepository, seedSelectedRepositories } from './components/app-shell/input/repository-history'
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useTheme } from '@/hooks/useTheme'
@@ -553,6 +554,7 @@ export default function App() {
       // Initialize per-session atoms and metadata map
       // NOTE: No sessionsAtom used - sessions are only in per-session atoms
       initializeSessions(loadedSessions)
+      seedSelectedRepositories(loadedSessions)
 
       // Initialize unified sessionOptions from session data
       const optionsMap = new Map<string, SessionOptions>()
@@ -1301,7 +1303,10 @@ export default function App() {
       // Capture pre-send processing state so we can flag mid-stream sends
       // for the queued badge (#616 follow-up — covers Pi steer path which
       // returns status 'accepted', not 'queued').
-      const sendingMidStream = store.get(sessionAtomFamily(sessionId))?.isProcessing === true
+      const beforeSend = store.get(sessionAtomFamily(sessionId))
+      const sendingMidStream = beforeSend?.isProcessing === true
+      const repository = !beforeSend?.worktree?.owned && !beforeSend?.messages.some(message => message.role === 'user')
+        ? initialRepository(sessionId, beforeSend?.workspaceId ?? windowWorkspaceId ?? undefined) : undefined
 
       // Step 1: Store attachments and get persistent metadata
       let storedAttachments: StoredAttachment[] | undefined
@@ -1447,7 +1452,9 @@ export default function App() {
         skillSlugs,
         badges: badges.length > 0 ? badges : undefined,
         optimisticMessageId: userMessage.id,
+        repository,
       })
+      if (repository) clearDraftRepository(sessionId, beforeSend?.workspaceId ?? windowWorkspaceId ?? undefined)
     } catch (error) {
       console.error('Failed to send message:', error)
       updateSessionById(sessionId, (s) => ({

@@ -74,6 +74,7 @@ import {
 } from './model-picker-helpers'
 import { useModelVisionToggle } from './useModelVisionToggle'
 import { ComposerSourcesChip } from './ComposerSourcesChip'
+import { initialRepository, setDraftRepository } from './repository-history'
 import { ComposerRepositorySelector } from './ComposerRepositorySelector'
 import { ComposerModelMenu } from './ComposerModelMenu'
 import { ComposerModeChip } from './ComposerModeChip'
@@ -199,6 +200,7 @@ export interface FreeFormInputProps {
   codingMode?: boolean
   requireWorktree?: boolean
   worktreeConfigured?: boolean
+  worktreeLocked?: boolean
   worktreeRepository?: string
   /** Toggle coding mode (only before the first message) */
   onCodingModeChange?: (enabled: boolean) => void
@@ -295,6 +297,7 @@ export function FreeFormInput({
   isEmptySession = false,
   requireWorktree = false,
   worktreeConfigured = false,
+  worktreeLocked = false,
   worktreeRepository,
   contextStatus,
   followUpItems = [],
@@ -309,9 +312,13 @@ export function FreeFormInput({
   onRequestExpand,
 }: FreeFormInputProps) {
   const { t } = useTranslation()
-  const [selectedWorktree, setSelectedWorktree] = React.useState<string>()
-  React.useEffect(() => { setSelectedWorktree(undefined) }, [sessionId])
-  const needsRepository = requireWorktree && isEmptySession && !worktreeConfigured && !selectedWorktree
+  const [selectedRepository, setSelectedRepository] = React.useState(() => initialRepository(sessionId, workspaceId))
+  React.useEffect(() => {
+    const selected = worktreeLocked ? undefined : initialRepository(sessionId, workspaceId)
+    setSelectedRepository(selected)
+    if (selected && sessionId) setDraftRepository(selected, sessionId, workspaceId)
+  }, [sessionId, workspaceId, worktreeLocked])
+  const needsRepository = requireWorktree && isEmptySession && !worktreeConfigured && !selectedRepository
 
   // Default rotating placeholders for onboarding/empty state (i18n-aware). The keyboard tips are
   // left out in compact (touch) layouts, where they are noise.
@@ -1797,11 +1804,9 @@ export function FreeFormInput({
           {/* Working directory chip */}
           {requireWorktree && isEmptySession ? (
             <ComposerRepositorySelector key={sessionId} workspaceId={workspaceId} sessionId={sessionId}
-              repositoryPath={worktreeConfigured ? worktreeRepository : undefined}
-              configured={!needsRepository} disabled={disabled} onReady={path => {
-                setSelectedWorktree(path)
-                onWorkingDirectoryChange?.(path)
-              }} />
+              repository={worktreeLocked ? undefined : selectedRepository}
+              repositoryPath={worktreeRepository} locked={worktreeLocked} disabled={disabled}
+              onChoose={setSelectedRepository} />
           ) : onWorkingDirectoryChange && (compactMode ? (
             <CompactWorkingDirectorySelector
               workingDirectory={workingDirectory}

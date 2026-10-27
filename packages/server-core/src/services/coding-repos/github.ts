@@ -9,10 +9,11 @@ import type { GitHubRepo, RepoListing } from '@craft-agent/shared/protocol'
 const LIST_LIMIT = 100
 const CACHE_MS = 60_000
 
-let cache: { at: number; value: { repos: GitHubRepo[]; unavailable?: RepoListing['githubUnavailable'] } } | null = null
+const cache = new Map<string, { at: number; value: { repos: GitHubRepo[]; unavailable?: RepoListing['githubUnavailable'] } }>()
 
 interface GhRepo {
-  nameWithOwner: string
+  nameWithOwner?: string
+  fullName?: string
   description?: string | null
   isPrivate: boolean
   updatedAt?: string
@@ -22,19 +23,23 @@ export function parseGhRepoList(stdout: string): GitHubRepo[] {
   const parsed = JSON.parse(stdout) as GhRepo[]
   return parsed.map(repo => ({
     kind: 'github',
-    nameWithOwner: repo.nameWithOwner,
+    nameWithOwner: repo.nameWithOwner ?? repo.fullName ?? '',
     description: repo.description || undefined,
     isPrivate: repo.isPrivate,
     updatedAt: repo.updatedAt ? Date.parse(repo.updatedAt) : undefined,
   }))
 }
 
-export function listGitHubRepos({ fresh = false }: { fresh?: boolean } = {}): Promise<{ repos: GitHubRepo[]; unavailable?: RepoListing['githubUnavailable'] }> {
-  if (!fresh && cache && Date.now() - cache.at < CACHE_MS) return Promise.resolve(cache.value)
+export function listGitHubRepos({ fresh = false, query }: { fresh?: boolean; query?: string } = {}): Promise<{ repos: GitHubRepo[]; unavailable?: RepoListing['githubUnavailable'] }> {
+  const key = query?.trim() ?? ''
+  const cached = cache.get(key)
+  if (!fresh && cached && Date.now() - cached.at < CACHE_MS) return Promise.resolve(cached.value)
+  const args = key ? ['search', 'repos', '--limit', String(LIST_LIMIT), '--json', 'fullName,description,isPrivate,updatedAt', '--', key]
+    : ['repo', 'list', '--limit', String(LIST_LIMIT), '--json', 'nameWithOwner,description,isPrivate,updatedAt']
   return new Promise((done) => {
     execFile(
       'gh',
-      ['repo', 'list', '--limit', String(LIST_LIMIT), '--json', 'nameWithOwner,description,isPrivate,updatedAt'],
+      args,
       { timeout: 15_000, maxBuffer: 4 * 1024 * 1024, windowsHide: true },
       (error, stdout) => {
         let value: { repos: GitHubRepo[]; unavailable?: RepoListing['githubUnavailable'] }
@@ -47,7 +52,8 @@ export function listGitHubRepos({ fresh = false }: { fresh?: boolean } = {}): Pr
             value = { repos: [], unavailable: 'not-signed-in' }
           }
         }
-        cache = { at: Date.now(), value }
+        cache.set(key, { at: Date.now(), value })
+        if (cache.size > 20) cache.delete(cache.keys().next().value!)
         done(value)
       },
     )

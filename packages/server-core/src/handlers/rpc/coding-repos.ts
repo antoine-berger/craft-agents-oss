@@ -30,14 +30,14 @@ function workspaceFolders(workspaceId: string): { root: string; folder?: string 
   return { root: workspace.rootPath, folder: folder ? expandPath(folder) : undefined }
 }
 
-async function listing(workspaceId: string, recentDirs: unknown, refreshGitHub: boolean): Promise<RepoListing> {
+async function listing(workspaceId: string, recentDirs: unknown, refreshGitHub: boolean, query?: string): Promise<RepoListing> {
   const { root, folder } = workspaceFolders(workspaceId)
   const recent = Array.isArray(recentDirs) ? recentDirs.filter((d): d is string => typeof d === 'string').slice(0, MAX_RECENT_DIRS) : []
   // Workspace data folders (sessions, sources) hold no code: the repo scan never enters them
   const skipDirs = [root, ...getWorkspaces().map(workspace => expandPath(workspace.rootPath))]
   const [local, github] = await Promise.all([
     discoverLocalRepos({ workspaceFolder: folder, recentDirs: recent, skipDirs }),
-    listGitHubRepos({ fresh: refreshGitHub }),
+    listGitHubRepos({ fresh: refreshGitHub, query }),
   ])
   // A GitHub repo that is already on disk is listed once, as the local one
   const localNames = new Set(local.map(repo => repo.nameWithOwner?.toLowerCase()).filter(Boolean))
@@ -50,8 +50,9 @@ async function listing(workspaceId: string, recentDirs: unknown, refreshGitHub: 
 }
 
 export function registerCodingReposHandlers(server: RpcServer, deps: HandlerDeps): void {
-  server.handle(RPC_CHANNELS.git.LIST_REPOS, async (_ctx, workspaceId: string, recentDirs: string[], options?: { refreshGitHub?: boolean }): Promise<RepoListing> => {
-    return listing(workspaceId, recentDirs, !!options?.refreshGitHub)
+  server.handle(RPC_CHANNELS.git.LIST_REPOS, async (_ctx, workspaceId: string, recentDirs: string[], options?: { refreshGitHub?: boolean; query?: string }): Promise<RepoListing> => {
+    const query = typeof options?.query === 'string' ? options.query.trim().slice(0, 250) : undefined
+    return listing(workspaceId, recentDirs, !!options?.refreshGitHub, query)
   })
 
   server.handle(RPC_CHANNELS.git.CREATE_WORKTREE, async (_ctx, workspaceId: string, request: CreateWorktreeRequest, recentDirs: string[]): Promise<CreateWorktreeResult> => {

@@ -40,6 +40,8 @@ export const KEYS = {
 
   // Working directory
   recentWorkingDirs: 'recent-working-dirs',
+  selectedRepositories: 'selected-repositories',
+  draftRepository: 'draft-repository',
 
   // TurnCard expansion state (persisted across session switches)
   turnCardExpansion: 'turncard-expansion',

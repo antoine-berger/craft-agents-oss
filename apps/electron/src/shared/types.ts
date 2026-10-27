@@ -656,7 +656,7 @@ export interface ElectronAPI {
   // Git operations
   getGitBranch(dirPath: string): Promise<string | null>
   /** Coding mode worktree picker: local repos (workspace folder + these recent folders) and `gh repo list` */
-  listCodingRepos(workspaceId: string, recentDirs: string[], options?: { refreshGitHub?: boolean }): Promise<import('@craft-agent/shared/protocol').RepoListing>
+  listCodingRepos(workspaceId: string, recentDirs: string[], options?: { refreshGitHub?: boolean; query?: string }): Promise<import('@craft-agent/shared/protocol').RepoListing>
   /** Creates a new session's worktree (cloning a GitHub-only repo first); rejects with git's reason */
   createCodingWorktree(workspaceId: string, request: import('@craft-agent/shared/protocol').CreateWorktreeRequest, recentDirs: string[]): Promise<import('@craft-agent/shared/protocol').CreateWorktreeResult>
 

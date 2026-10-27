@@ -39,24 +39,25 @@ export function defaultWorktreeBranch(sessionId?: string): string {
   return `craft/${(sessionId ?? 'session').replace(/[^A-Za-z0-9._-]+/g, '-')}`
 }
 
-export function useRepoListing(workspaceId: string | undefined, active: boolean) {
+export function useRepoListing(workspaceId: string | undefined, active: boolean, query?: string) {
   const [state, setState] = React.useState<{ status: 'idle' | 'loading' | 'ready' | 'error'; listing?: RepoListing; error?: string }>({ status: 'idle' })
   React.useEffect(() => {
     if (!active || !workspaceId || !window.electronAPI?.listCodingRepos) return
     let cancelled = false
-    setState(current => ({ ...current, status: current.listing ? 'ready' : 'loading' }))
-    window.electronAPI.listCodingRepos(workspaceId, getRecentWorkingDirs(workspaceId)).then(
+    setState(current => ({ ...current, status: 'loading' }))
+    const timer = setTimeout(() => window.electronAPI.listCodingRepos(workspaceId, getRecentWorkingDirs(workspaceId), query ? { query } : undefined).then(
       (listing) => {
         if (!cancelled) setState({ status: 'ready', listing })
       },
       (error: unknown) => {
         if (!cancelled) setState({ status: 'error', error: error instanceof Error ? error.message : String(error) })
       },
-    )
+    ), query ? 200 : 0)
     return () => {
       cancelled = true
+      clearTimeout(timer)
     }
-  }, [active, workspaceId])
+  }, [active, workspaceId, query])
   return state
 }
 

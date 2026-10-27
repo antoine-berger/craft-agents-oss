@@ -1,3 +1,5 @@
+import { resolveWorktreeRepository } from '../services/coding-repos/worktree'
+import { cloneRootFor, commonGitDir, discoverLocalRepos, repoCommandDir } from '../services/coding-repos/discover'
 import { loadProxyConnectorSources, usesCliProxyForAll } from '../services/cli-proxy/connectors'
 import type { EventSink, RpcServer } from '@craft-agent/server-core/transport'
 import { CLIENT_BROWSER_INVOKE } from '@craft-agent/server-core/transport'
@@ -99,7 +101,7 @@ import { CraftMcpClient, McpClientPool, McpPoolServer } from '@craft-agent/share
 import { type Session, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, type BackgroundTaskOutput, type StopBackgroundTaskResult, type BoundPr, type PrMonitorState, RPC_CHANNELS, generateMessageId } from '@craft-agent/shared/protocol'
 import { launchOutputFile, readBackgroundTaskOutput } from './background-task-output'
 import { messageToStored, storedToMessage, type Message, type StoredAttachment, type ToolDisplayMeta, type TokenUsage } from '@craft-agent/core/types'
-import { formatPathsToRelative, formatToolInputPaths, perf, encodeIconToDataUrlAsync, getEmojiIcon, resetSummarizationClient, resolveToolIcon, readFileAttachment, selectSpreadMessages, normalizePath } from '@craft-agent/shared/utils'
+import { formatPathsToRelative, formatToolInputPaths, perf, encodeIconToDataUrlAsync, getEmojiIcon, resetSummarizationClient, resolveToolIcon, readFileAttachment, selectSpreadMessages, normalizePath, expandPath } from '@craft-agent/shared/utils'
 import { loadAllSkills, loadSkillBySlug, invalidateSkillsCache, type LoadedSkill } from '@craft-agent/shared/skills'
 import { invalidateContextFileCache } from '@craft-agent/shared/prompts/system'
 import { getToolIconsDir, getMiniModel } from '@craft-agent/shared/config'
@@ -129,7 +131,6 @@ import { buildBackendRuntimeSignature, buildRestartRequiredSignature, filterAtta
 import { validateArchiveTarget } from './archive-guards'
 import { resolveSessionWorktreePolicy, defaultSessionWorktreePolicy, isSessionDirectoryInWorktree } from './session-worktree'
 import { planOwnedWorktree, ensureOwnedWorktree, removeOwnedWorktree, ownedWorktreeWorkingDirectory } from '../services/coding-repos/owned-worktree'
-import { commonGitDir } from '../services/coding-repos/discover'
 import { addTurnUsage, branchStartTotals, type BranchParent } from './turn-usage'
 
 // Import from server-core domain utilities
@@ -3274,10 +3275,8 @@ export class SessionManager implements ISessionManager {
     // Get default model from workspace config (used when no session-specific model is set)
     const defaultModel = wsConfig?.defaults?.model
     // Get default enabled sources from workspace config
-    const proxyDefaults = usesCliProxyForAll() && !options?.hidden && !options?.unattended && options?.enabledSourceSlugs === undefined
-      ? (await loadProxyConnectorSources(workspace)).filter(source => source.config.isAuthenticated).map(source => source.config.slug) : []
-    const defaultEnabledSourceSlugs = options?.enabledSourceSlugs
-      ?? [...new Set([...(wsConfig?.defaults?.enabledSourceSlugs ?? []), ...proxyDefaults])]
+    // A draft opens without connector discovery. Default connectors are resolved on first send.
+    const defaultEnabledSourceSlugs = options?.enabledSourceSlugs ?? wsConfig?.defaults?.enabledSourceSlugs
 
     // Resolve model tier hints ('fast' / 'default') to actual model IDs.
     // EditPopover uses tier hints instead of hardcoded Anthropic model names
@@ -4122,6 +4121,21 @@ export class SessionManager implements ISessionManager {
       throw new Error(i18n.t('worktree.session.initialized'))
     }
 
+    if (!metadata.owned && metadata.pendingRepository) {
+      const choice = metadata.pendingRepository
+      let cloneRoot: string | null = null
+      if (choice.kind === 'github') {
+        const configuredFolder = loadWorkspaceConfig(managed.workspace.rootPath)?.defaults?.workingDirectory
+        const folder = configuredFolder ? expandPath(configuredFolder) : undefined
+        const local = await discoverLocalRepos({ workspaceFolder: folder, recentDirs: [], skipDirs: [managed.workspace.rootPath] })
+        cloneRoot = cloneRootFor(local, folder, managed.workspace.rootPath)
+      }
+      const resolved = await resolveWorktreeRepository(choice.kind === 'local'
+        ? { gitDir: choice.gitDir } : { cloneNameWithOwner: choice.nameWithOwner }, cloneRoot)
+      metadata.repositoryPath = repoCommandDir(resolved.gitDir)
+      delete metadata.pendingRepository
+      await this.persistWorktreeState(managed)
+    }
     if (!metadata.owned) {
       metadata.owned = await planOwnedWorktree({
         repositoryPath: metadata.repositoryPath,
@@ -4200,6 +4214,12 @@ export class SessionManager implements ISessionManager {
     if (managed.isDeleting) throw new DOMException('Session was deleted', 'AbortError')
     const prepareAgent = async () => {
       try {
+        if (managed.enabledSourceSlugs === undefined && !managed.hidden && !managed.parentSessionId && !managed.taskSlug && usesCliProxyForAll()) {
+          managed.enabledSourceSlugs = (await loadProxyConnectorSources(managed.workspace))
+            .filter(source => source.config.isAuthenticated).map(source => source.config.slug)
+          this.persistSession(managed)
+          this.sendEvent({ type: 'sources_changed', sessionId: managed.id, enabledSourceSlugs: managed.enabledSourceSlugs }, managed.workspace.id)
+        }
         return await this.getOrCreatePreparedAgent(managed)
       } catch (error) {
         // Source setup or backend construction can fail before postInit. Release title waiters
@@ -6880,6 +6900,23 @@ export class SessionManager implements ISessionManager {
 
     // Ensure messages are loaded before we try to add new ones
     await this.ensureMessagesLoaded(managed)
+
+    if (options?.repository && !existingMessageId && !_isAuthRetry) {
+      const choice = options.repository
+      if (!choice || !['local', 'github'].includes(choice.kind)
+        || (choice.kind === 'local' && (typeof choice.gitDir !== 'string' || !choice.gitDir || choice.gitDir.length > 4096))
+        || (choice.kind === 'github' && (typeof choice.nameWithOwner !== 'string' || !/^[\w.-]+\/[\w.-]+$/.test(choice.nameWithOwner)))) {
+        throw new Error('Invalid repository selection')
+      }
+      await this.withWorktreeLock(managed, async () => {
+        if (hasConversationStarted(managed) || managed.isProcessing || managed.agent || managed.sdkSessionId || managed.worktree?.owned) {
+          throw new Error('The repository is fixed after the chat starts')
+        }
+        managed.worktree = { repositoryPath: choice.kind === 'local' ? choice.gitDir : '',
+          pendingRepository: choice, needsRepository: false, cleanupOnArchive: managed.worktree?.cleanupOnArchive ?? false }
+        await this.persistWorktreeState(managed)
+      })
+    }
 
     // If currently processing, behavior depends on the connection's
     // `midStreamBehavior` (resolved via {@link resolveMidStreamBehavior},

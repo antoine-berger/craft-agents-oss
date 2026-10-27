@@ -131,6 +131,21 @@ function sendHarness() {
 }
 
 describe('SessionManager worktree lifecycle', () => {
+  it('keeps a repository choice as metadata until the first backend starts', async () => {
+    const { manager, createChat } = harness()
+    const chat = createChat({ messages: [], worktree: { repositoryPath: '', needsRepository: false,
+      pendingRepository: { kind: 'local', gitDir: join(repository, '.git'), name: 'repo' } } })
+    manager.persistSession(chat)
+    await manager.flushSession(chat.id)
+    expect(git(repository, 'worktree', 'list', '--porcelain').split('worktree ').length - 1).toBe(1)
+    expect(chat.worktree?.owned).toBeUndefined()
+    await manager.getOrCreateAgent(chat)
+    expect(chat.worktree?.owned?.status).toBe('ready')
+    expect(chat.worktree?.pendingRepository).toBeUndefined()
+    expect(chat.workingDirectory).not.toBe(repository)
+    expect(git(repository, 'worktree', 'list', '--porcelain').split('worktree ').length - 1).toBe(2)
+  })
+
   it('creates distinct durable worktrees for two repository selections and resumes the same checkout after reload', async () => {
     const { manager, createChat, restoreChat } = harness()
     const a = createChat({ messages: [], worktree: { repositoryPath: root, needsRepository: true } })

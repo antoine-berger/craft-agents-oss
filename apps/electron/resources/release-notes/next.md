@@ -16,3 +16,5 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 ## Breaking Changes
 
 - **Multiple Claude and GPT accounts** — Connect accounts in AI settings using an integrated CLIProxyAPI service, import existing CLI logins, and pause individual accounts. An optional all-proxy mode also routes legacy chats and claude.ai MCP discovery/tool calls through CLIProxyAPI, making those connectors available to Claude and GPT. (#4)
+
+- **Repository drafts** — The composer suggests only repositories selected before, remembers the last choice, and searches for other repositories on demand. Repository selection is instant: cloning and worktree preparation start with the first message, when the chat also receives its title. (#4)

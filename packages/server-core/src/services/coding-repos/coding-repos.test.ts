@@ -217,6 +217,9 @@ describe('github helpers', () => {
       { kind: 'github', nameWithOwner: 'acme/app', description: undefined, isPrivate: true, updatedAt: Date.parse('2026-10-01T00:00:00Z') },
     ])
   })
+  it('parses GitHub search results as selectable repositories', () => {
+    expect(parseGhRepoList('[{"fullName":"acme/new-project","description":"search result","isPrivate":false}]')[0]).toMatchObject({kind:'github',nameWithOwner:'acme/new-project'})
+  })
   it('accepts owner/repo only', () => {
     expect(isValidNameWithOwner('acme/app.js')).toBe(true)
     for (const bad of ['acme', 'acme/../x', 'acme/app;rm', '../x/y', 'a/b/c']) expect(isValidNameWithOwner(bad)).toBe(false)

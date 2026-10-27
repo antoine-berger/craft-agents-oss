@@ -9,7 +9,7 @@ Projects organize initiatives, not unique repositories: “Checkout redesign” 
 3. New independent chats automatically use their own branch and worktree. Optionally set **Base branch** to an existing branch such as `main` or `origin/main`; leave it blank for the repository default.
 4. Save, then use **New session in …** from the project.
 
-The worktree is created before the agent starts on the first message. When a workspace has no single repository, the new chat asks you to choose one and prepares its worktree immediately. No Coding mode switch is required. Subsequent messages and resumed chats reuse the same branch and directory. Existing chats are not migrated.
+The worktree is created before the agent starts on the first message. The composer remembers repositories you selected explicitly and preselects your last choice. An empty search shows only those repositories, alphabetically. Searching discovers other local/GitHub repositories. Selecting one updates the draft immediately; cloning, fetching and worktree creation wait until the first message. Chat titles are derived from that first message. No Coding mode switch is required. Subsequent messages and resumed chats reuse the same branch and directory. Existing chats are not migrated.
 
 Delegated chats and subtasks inherit their parent's current folder unless another folder or project is explicitly selected. They share the parent's worktree; creating a child can prepare that checkout if the parent has not started yet. Conversation forks and standalone task sessions retain their existing directory behavior.
 
@@ -19,7 +19,7 @@ Choosing a repository before the first message keeps automatic isolation enabled
 
 ## Claude account MCP connectors
 
-Sources and the chat's connector menu show the native connectors supplied by each Claude account, including their connection status and tools. These rows are read-only: use **Open claude.ai** to authenticate or manage them. Discovery uses SDK control messages without sending a model prompt or calling a connector's tools. Connector credentials remain with Claude; the display does not create duplicate Craft source files. Craft-managed API and local sources retain their existing controls.
+Sources and the chat's connector menu show the native connectors supplied by each Claude account, including their connection status and tools. These rows are read-only: use **Open claude.ai** to authenticate or manage them. In all-proxy mode, discovery and MCP traffic use the selected CLIProxyAPI account; both Claude and GPT can call the connectors. In per-chat mode, native account discovery uses SDK control messages without a model prompt or tool call. Connector credentials remain with Claude; the display does not create duplicate Craft source files. Craft-managed API and local sources retain their existing controls.
 
 ### Archive and delete
 

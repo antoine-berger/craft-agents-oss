@@ -1,65 +1,83 @@
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
-import { FolderGit2 } from 'lucide-react'
+import { FolderGit2, Github } from 'lucide-react'
 import { Spinner } from '@craft-agent/ui'
-import type { GitHubRepo, LocalRepo } from '@craft-agent/shared/protocol'
+import type { RepositorySelection } from '@craft-agent/shared/protocol'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
 import { COMPOSER_CHIP } from './composer-styles'
-import { defaultWorktreeBranch, RepoPicker, useRepoListing } from './CodingWorkspacePanel'
-import { getRecentWorkingDirs } from './working-directory-history'
+import { useRepoListing } from './CodingWorkspacePanel'
+import { getSelectedRepositories, repositoryKey, repositoryLabel, rememberRepository, setDraftRepository } from './repository-history'
 import { getPathBasename } from '@/lib/platform'
 
 interface ComposerRepositorySelectorProps {
   workspaceId?: string
   sessionId?: string
-  configured: boolean
+  repository?: RepositorySelection
   repositoryPath?: string
   disabled: boolean
-  onReady: (path: string) => void
+  locked?: boolean
+  onChoose: (repository: RepositorySelection) => void
 }
 
-export function ComposerRepositorySelector({ workspaceId, sessionId, configured, repositoryPath, disabled, onReady }: ComposerRepositorySelectorProps) {
+export function ComposerRepositorySelector({ workspaceId, sessionId, repository, repositoryPath, disabled, locked, onChoose }: ComposerRepositorySelectorProps) {
   const { t } = useTranslation()
-  const [open, setOpen] = React.useState(!configured)
-  const [busy, setBusy] = React.useState(false)
-  const [error, setError] = React.useState<string>()
-  const [selectedName, setSelectedName] = React.useState<string>()
-  const repos = useRepoListing(workspaceId, open && !configured && !disabled)
+  const [open, setOpen] = React.useState(false)
+  const [query, setQuery] = React.useState('')
+  const [history, setHistory] = React.useState(() => getSelectedRepositories(workspaceId))
+  const searching = !!query.trim()
+  // No scans or GitHub requests when opening the list: empty search means chosen repos only.
+  const repos = useRepoListing(workspaceId, open && searching && !disabled && !locked, query.trim())
+  const choices = React.useMemo(() => {
+    const all: RepositorySelection[] = searching
+      ? [...history, ...(repos.listing?.local ?? []), ...(repos.status === 'ready' && repos.listing?.cloneRoot ? repos.listing.github : [])] : history
+    const remoteKeys = new Set((repos.status === 'ready' ? repos.listing?.github ?? [] : []).map(repositoryKey))
+    const seen = new Set<string>()
+    const search = query.trim().toLowerCase()
+    return all.filter(repo => {
+      const key = repositoryKey(repo)
+      if (seen.has(key)) return false
+      seen.add(key)
+      return !search || `${repositoryLabel(repo)} ${repo.kind === 'local' ? repo.gitDir : ''}`.toLowerCase().includes(search)
+        || (repo.kind === 'github' && remoteKeys.has(key))
+    }).sort((a, b) => repositoryLabel(a).localeCompare(repositoryLabel(b)))
+  }, [history, repos.listing, repos.status, query, searching])
 
-  const chooseRepository = async (repo: LocalRepo | GitHubRepo) => {
-    if (!workspaceId || !sessionId || busy) return
-    setBusy(true)
-    setError(undefined)
-    try {
-      const result = await window.electronAPI.createCodingWorktree(workspaceId, {
-        sessionId, branch: defaultWorktreeBranch(sessionId),
-        ...(repo.kind === 'local' ? { gitDir: repo.gitDir } : { cloneNameWithOwner: repo.nameWithOwner }),
-      }, getRecentWorkingDirs(workspaceId))
-      setSelectedName(repo.kind === 'local' ? repo.name : repo.nameWithOwner)
-      onReady(result.path)
-      setOpen(false)
-    } catch (error) {
-      setError(error instanceof Error ? error.message : String(error))
-    } finally { setBusy(false) }
+  const choose = (repo: RepositorySelection) => {
+    if (!sessionId || disabled || locked) return
+    // A selection is local, synchronous draft state. Clone/worktree creation happens on send.
+    rememberRepository(repo, workspaceId)
+    setDraftRepository(repo, sessionId, workspaceId)
+    setHistory(getSelectedRepositories(workspaceId))
+    onChoose(repo)
+    setOpen(false)
+    setQuery('')
   }
-
   return (
-    <Popover open={open && !disabled} onOpenChange={setOpen}>
+    <Popover open={open && !disabled} onOpenChange={value => { setOpen(value); if (value) setHistory(getSelectedRepositories(workspaceId)); else setQuery('') }}>
       <PopoverTrigger asChild>
-        <button type="button" className={COMPOSER_CHIP} disabled={disabled}
-          aria-label={t('chat.repository.label')}>
+        <button type="button" className={COMPOSER_CHIP} disabled={disabled} aria-label={t('chat.repository.label')}>
           <FolderGit2 className="size-4 shrink-0" />
-          <span>{selectedName ?? (repositoryPath ? getPathBasename(repositoryPath) : t('chat.codingMode.repos.title'))}</span>
+          <span>{repository ? repositoryLabel(repository) : repositoryPath ? getPathBasename(repositoryPath.replace(/[\\/]\.git$/, '')) : t('chat.codingMode.repos.title')}</span>
         </button>
       </PopoverTrigger>
       <PopoverContent side="top" align="start" className="w-[340px] max-w-[calc(100vw-24px)] p-0">
-        {configured ? <p className="p-3 text-label text-secondary">{selectedName ?? repositoryPath}</p> : (
-          <>
-            <p className="border-b border-separator p-3 text-label text-secondary">{t('chat.codingMode.repos.title')}</p>
-            {busy ? <div className="flex items-center gap-2 p-4"><Spinner />{t('chat.repository.preparing')}</div>
-              : <RepoPicker state={repos} onPick={chooseRepository} />}
-            {error && <p role="alert" className="p-3 text-label-sm text-destructive">{error}</p>}
-          </>
+        {locked ? <p className="p-3 text-label text-secondary">{repositoryPath}</p> : (
+          <Command shouldFilter={false} className="bg-transparent" label={t('chat.codingMode.repos.title')}>
+            <CommandInput placeholder={t('chat.repository.searchNew')} value={query} onValueChange={setQuery} autoFocus />
+            <CommandList className="max-h-[300px]">
+              {searching && repos.status === 'loading' && <div className="flex items-center gap-2 px-3 py-2 text-label-sm text-tertiary"><Spinner />{t('chat.codingMode.repos.loading')}</div>}
+              {searching && repos.status === 'error' && <p role="alert" className="px-3 py-2 text-label-sm text-destructive">{repos.error}</p>}
+              {(!searching || repos.status !== 'loading') && <CommandEmpty>{t(searching ? 'chat.codingMode.repos.empty' : 'chat.repository.searchHint')}</CommandEmpty>}
+              {searching && repos.listing?.githubUnavailable && <p className="px-3 py-2 text-label-sm text-tertiary">{t('chat.repository.remoteSearchUnavailable')}</p>}
+              <CommandGroup heading={t(searching ? 'chat.repository.searchResults' : 'chat.repository.chosen')}>
+                {choices.map(repo => <CommandItem key={repositoryKey(repo)} value={repositoryKey(repo)} onSelect={() => choose(repo)}>
+                  {repo.kind === 'github' ? <Github className="size-4 text-tertiary" /> : <FolderGit2 className="size-4 text-tertiary" />}
+                  <span className="truncate">{repositoryLabel(repo)}</span>
+                </CommandItem>)}
+              </CommandGroup>
+            </CommandList>
+          </Command>
         )}
       </PopoverContent>
     </Popover>

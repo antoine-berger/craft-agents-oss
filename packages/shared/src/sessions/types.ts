@@ -136,6 +136,8 @@ export interface SessionWorktreeMetadata {
   /** A new independent session must choose a repository before it can run. */
   needsRepository?: boolean;
   repositoryPath: string;
+  /** Durable draft choice, resolved/cloned when the first message prepares the checkout. */
+  pendingRepository?: import('../protocol/git-repos').RepositorySelection;
   baseBranch?: string;
   cleanupOnArchive?: boolean;
   owned?: OwnedWorktree;
