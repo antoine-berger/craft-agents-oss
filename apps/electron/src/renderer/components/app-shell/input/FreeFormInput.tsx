@@ -71,7 +71,7 @@ import {
   sortPickerModels,
 } from './model-picker-helpers'
 import { useModelVisionToggle } from './useModelVisionToggle'
-import { initialRepository, setDraftRepository } from './repository-history'
+import { initialRepository, setDraftRepository, clearDraftRepository } from './repository-history'
 import { ComposerRepositorySelector } from './ComposerRepositorySelector'
 import { ComposerModelMenu } from './ComposerModelMenu'
 import { ContextUsageChip } from './ContextUsageChip'
@@ -181,6 +181,8 @@ export interface FreeFormInputProps {
   codingMode?: boolean
   requireWorktree?: boolean
   worktreeConfigured?: boolean
+  pendingRepository?: import('@craft-agent/shared/protocol').RepositorySelection
+  worktreeChoicePending?: boolean
   worktreeLocked?: boolean
   worktreeRepository?: string
   worktreeBranch?: string
@@ -276,6 +278,8 @@ export function FreeFormInput({
   requireWorktree = false,
   worktreeConfigured = false,
   worktreeLocked = false,
+  worktreeChoicePending = false,
+  pendingRepository,
   worktreeRepository,
   worktreeBranch,
   contextStatus,
@@ -293,11 +297,12 @@ export function FreeFormInput({
   const { t } = useTranslation()
   const [selectedRepository, setSelectedRepository] = React.useState(() => initialRepository(sessionId, workspaceId))
   React.useEffect(() => {
-    const selected = worktreeLocked ? undefined : initialRepository(sessionId, workspaceId)
+    if (worktreeLocked && sessionId) clearDraftRepository(sessionId, workspaceId)
+    const selected = worktreeLocked ? undefined : pendingRepository ?? initialRepository(sessionId, workspaceId)
     setSelectedRepository(selected)
     if (selected && sessionId) setDraftRepository(selected, sessionId, workspaceId)
-  }, [sessionId, workspaceId, worktreeLocked])
-  const needsRepository = requireWorktree && isEmptySession && !worktreeConfigured && !selectedRepository
+  }, [sessionId, workspaceId, worktreeLocked, pendingRepository])
+  const needsRepository = requireWorktree && (isEmptySession || worktreeChoicePending) && !worktreeConfigured && !selectedRepository
 
   // Read connection default model, connections, and workspace info from context.
   // Uses optional variant so playground (no provider) doesn't crash.
@@ -1633,10 +1638,10 @@ export function FreeFormInput({
           />
 
           {/* Working directory chip */}
-          {(requireWorktree && (isEmptySession || !!worktreeRepository)) || worktreeLocked ? (
+          {(requireWorktree && (isEmptySession || worktreeChoicePending || !!worktreeRepository)) || worktreeLocked ? (
             <ComposerRepositorySelector key={sessionId} workspaceId={workspaceId} sessionId={sessionId}
               repository={worktreeLocked ? undefined : selectedRepository}
-              repositoryPath={worktreeRepository} worktreePath={workingDirectory} branch={worktreeBranch} locked={worktreeLocked || !isEmptySession} disabled={disabled}
+              repositoryPath={worktreeRepository} worktreePath={workingDirectory} branch={worktreeBranch} locked={worktreeLocked || (!isEmptySession && !worktreeChoicePending)} disabled={disabled}
               onChoose={setSelectedRepository} />
           ) : onWorkingDirectoryChange && (compactMode ? (
             <CompactWorkingDirectorySelector

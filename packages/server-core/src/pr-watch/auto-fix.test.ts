@@ -80,10 +80,10 @@ describe('auto-fix arming', () => {
     expect(t.monitor.armedSessions()).toEqual([])
   })
 
-  it('never arms a session outside Coding mode or an archived one', async () => {
+  it('arms ordinary repository chats but never archived ones', async () => {
     const notCoding = setup({ session: { codingMode: false } })
     await notCoding.monitor.sync('s1')
-    expect(notCoding.calls.subscribe).toHaveLength(0)
+    expect(notCoding.calls.subscribe).toHaveLength(1)
     const archived = setup({ session: { isArchived: true } })
     await archived.monitor.sync('s1')
     expect(archived.calls.subscribe).toHaveLength(0)

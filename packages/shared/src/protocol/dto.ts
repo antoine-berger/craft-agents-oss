@@ -48,6 +48,7 @@ export type BuiltInStatusId = 'todo' | 'in-progress' | 'needs-review' | 'done' |
  * Extends core Session with messages array and processing state.
  */
 export interface Session {
+  importedFrom?: import('./conductor-import').ConductorImportOrigin
   id: string
   workspaceId: string
   workspaceName: string
@@ -435,6 +436,7 @@ export interface PermissionModeState {
 
 // turnId: Correlation ID from the API's message.id, groups all events in an assistant turn
 export type SessionEvent =
+  | { type: 'session_restored'; sessionId: string; session: Session }
   | { type: 'text_discard'; sessionId: string; turnId: string }
   | { type: 'retry'; sessionId: string; phase: 'backoff'; message: string }
   | { type: 'retry'; sessionId: string; phase: 'active' | 'end' }

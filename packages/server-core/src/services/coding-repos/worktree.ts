@@ -12,6 +12,7 @@ import type { CreateWorktreeRequest, CreateWorktreeResult } from '@craft-agent/s
 import { runGit, runGitResult } from '../git'
 import { commonGitDir, repoCommandDir, worktreeParentFor } from './discover'
 import { isValidNameWithOwner } from './github'
+import { isGitHubDotCom, parseRemoteUrl } from '../pr-watch/remote-url'
 
 const FETCH_TIMEOUT_MS = 60_000
 const CLONE_TIMEOUT_MS = 10 * 60_000
@@ -47,6 +48,10 @@ export async function resolveWorktreeBase(dir: string, requestedBase?: string): 
     const requested = requestedBase.trim()
     if (requested.startsWith('-') || !(await runGit(dir, ['check-ref-format', '--branch', requested]))) {
       throw new WorktreeError(`"${requested}" is not a valid base branch`, 'invalid-branch')
+    }
+    if (/^refs\/(heads|remotes)\//.test(requested)) {
+      if (await runGit(dir, ['rev-parse', '--verify', '--quiet', `${requested}^{commit}`])) return requested
+      throw new WorktreeError(`Base branch "${requested}" does not exist`, 'invalid-branch')
     }
     const remoteBranch = requested.replace(/^origin\//, '')
     await runGitResult(dir, ['fetch', '--quiet', '--', 'origin', remoteBranch], FETCH_TIMEOUT_MS)
@@ -94,7 +99,8 @@ export async function resolveWorktreeRepository(request: Pick<CreateWorktreeRequ
       // Reuse an earlier clone of the same repository; never clone into an unrelated folder
       gitDir = await commonGitDir(target)
       const url = gitDir ? await runGit(repoCommandDir(gitDir), ['config', '--get', 'remote.origin.url']) : null
-      if (!gitDir || !url?.toLowerCase().includes(request.cloneNameWithOwner.toLowerCase())) {
+      const coordinates = url ? parseRemoteUrl(url) : null
+      if (!gitDir || !coordinates || !isGitHubDotCom(coordinates.host) || `${coordinates.owner}/${coordinates.repo}`.toLowerCase() !== request.cloneNameWithOwner.toLowerCase()) {
         throw new WorktreeError(`${target} already exists and is not a clone of ${request.cloneNameWithOwner}`, 'clone-failed')
       }
     } else {

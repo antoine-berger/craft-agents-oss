@@ -115,7 +115,7 @@ export function registerPrWatchHandlers(server: RpcServer, deps: HandlerDeps): v
 
   server.handle(RPC_CHANNELS.prWatch.SUBSCRIBE, async (ctx, sessionId: string): Promise<{ subscriptionId: string | null; state: PrWatchSessionState }> => {
     const session = deps.sessionManager.getSessionSnapshot(sessionId)
-    if (!session?.codingMode) return { subscriptionId: null, state: { kind: 'unavailable', reason: 'not-git' } }
+    if (!session) return { subscriptionId: null, state: { kind: 'unavailable', reason: 'not-git' } }
     const dir = deps.sessionManager.getSessionWorkingDirectory(sessionId) ?? session.workingDirectory
     const workspaceRootPath = resolveWorkspaceRootPath(session.workspaceId)
     if (!dir || !workspaceRootPath) return { subscriptionId: null, state: { kind: 'unavailable', reason: 'not-git' } }

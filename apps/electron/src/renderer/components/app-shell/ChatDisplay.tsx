@@ -1795,6 +1795,8 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
               requireWorktree: !session.hidden && !session.parentSessionId && !session.taskSlug,
               worktreeConfigured: !!session.worktree && !session.worktree.needsRepository,
               worktreeLocked: !!session.worktree?.owned,
+              pendingRepository: session.worktree?.pendingRepository,
+              worktreeChoicePending: !session.worktree?.owned && !!(session.worktree?.pendingRepository || session.worktree?.needsRepository),
               worktreeRepository: session.worktree?.owned?.repoPath ?? session.worktree?.repositoryPath,
               worktreeBranch: session.worktree?.owned?.branch,
               onCodingModeChange,

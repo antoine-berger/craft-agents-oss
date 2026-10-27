@@ -80,7 +80,7 @@ export function createAutoFixMonitor(deps: AutoFixMonitorDeps): AutoFixMonitor {
   async function doSync(sessionId: string): Promise<void> {
     const registry = deps.getRegistry()
     const session = deps.sessionManager.getSessionSnapshot(sessionId)
-    if (!registry || !session?.codingMode || session.isArchived || !hasAutoFix(sessionId)) {
+    if (!registry || !session || session.isArchived || !hasAutoFix(sessionId)) {
       disarm(sessionId)
       return
     }

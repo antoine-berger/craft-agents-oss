@@ -25,6 +25,7 @@
  *   CRAFT_MESSAGING_NODE_BIN   — Node binary used to spawn the WhatsApp worker (default: node)
  */
 
+import { HeadlessBrowserPaneManager } from '@craft-agent/server-core/browser'
 import { join } from 'node:path'
 import { readFileSync, existsSync } from 'node:fs'
 import { version as packageVersion } from '../package.json'
@@ -163,6 +164,8 @@ const waNodeBin = process.env.CRAFT_MESSAGING_NODE_BIN ?? 'node'
 // publisher after bootstrapServer resolves.
 let messagingHandle: MessagingBootstrapHandle | null = null
 
+let serverBrowser: HeadlessBrowserPaneManager | undefined
+
 const instance = await (async () => {
   try {
     return await bootstrapServer<SessionManager, HandlerDeps>({
@@ -204,7 +207,22 @@ const instance = await (async () => {
           oauthIdToken: oauth?.idToken,
         }
       }),
-      createSessionManager: () => new SessionManager(),
+      createSessionManager: () => {
+        const manager = new SessionManager()
+        const browser = new HeadlessBrowserPaneManager({
+          dataDir: join(CONFIG_DIR, 'browser', 'server'),
+          executablePath: process.env.CRAFT_BROWSER_EXECUTABLE_PATH || undefined,
+          resolveUploadDirectories: (sessionId) => {
+            const session = manager.getSessionSnapshot(sessionId)
+            return [session?.workingDirectory, manager.getSessionPath(sessionId)]
+              .filter((path): path is string => Boolean(path))
+          },
+          log: (message) => console.log(`[browser] ${message}`),
+        })
+        manager.setBrowserPaneManager(browser)
+        serverBrowser = browser
+        return manager
+      },
       bindRpcServer: (sm, server) => sm.setRpcServer(server),
       createHandlerDeps: ({ sessionManager, platform, oauthFlowStore }) => {
         messagingHandle = createMessagingBootstrap({
@@ -244,6 +262,7 @@ const instance = await (async () => {
           await sessionManager.flushAllSessions()
         } finally {
           sessionManager.cleanup()
+          await serverBrowser?.close()
         }
       },
       cleanupClientResources: cleanupRpcClientResources,
@@ -341,6 +360,7 @@ if (!isLocalBind && instance.protocol === 'ws') {
 }
 
 const shutdown = async () => {
+  await serverBrowser?.close()
   webuiHandler?.dispose()
   healthServer?.stop()
   if (messagingHandle) {

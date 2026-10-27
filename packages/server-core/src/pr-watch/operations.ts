@@ -216,7 +216,6 @@ export function createPrWatchOps(registry: PrWatchRegistry, sessionManager: ISes
     async setAutoFix(sessionId, prId, enabled) {
       const session = sessionManager.getSessionSnapshot(sessionId)
       if (!session) return { ok: false, error: 'Session not found.' }
-      if (!session.codingMode) return { ok: false, error: 'Auto-fix needs a Coding mode session.' }
       if (!PR_ENTRY_ID.test(prId)) return { ok: false, error: `Not a PR id: "${prId}".` }
       const id = prId.toLowerCase()
       // Turning it on needs the branch's own PR (its fixes run on this checkout); turning it off always works

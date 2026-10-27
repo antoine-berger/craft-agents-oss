@@ -4,6 +4,11 @@
  * Key paths are internal and may be reorganized freely.
  */
 export const RPC_CHANNELS = {
+  conductor: {
+    LIST_LOCAL: 'conductor:listLocal',
+    EXPORT_LOCAL: 'conductor:exportLocal',
+    IMPORT: 'conductor:import',
+  },
   cliProxy: {
     STATUS: 'cliProxy:status',
     COMMAND: 'cliProxy:command',
@@ -39,6 +44,8 @@ export const RPC_CHANNELS = {
     RESPOND_TO_PERMISSION: 'sessions:respondToPermission',
     RESPOND_TO_CREDENTIAL: 'sessions:respondToCredential',
     COMMAND: 'sessions:command',
+    LIST_CHECKPOINTS: 'sessions:listCheckpoints',
+    RESTORE_CHECKPOINT: 'sessions:restoreCheckpoint',
     GET_PENDING_PLAN_EXECUTION: 'sessions:getPendingPlanExecution',
     GET_PERMISSION_MODE_STATE: 'sessions:getPermissionModeState',
     EVENT: 'session:event',
@@ -372,6 +379,7 @@ export const RPC_CHANNELS = {
   git: {
     GET_BRANCH: 'git:getBranch',
     GET_REPOSITORY_IDENTITY: 'git:getRepositoryIdentity',
+    GET_REVIEW: 'git:getReview',
     /** Coding mode's worktree picker: local repos + `gh repo list` (see protocol/git-repos.ts) */
     LIST_REPOS: 'git:listRepos',
     /** Creates a worktree (cloning first for a GitHub-only repo) for a new Coding session */

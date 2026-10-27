@@ -148,8 +148,8 @@ describe('PR watch operations — auto-fix toggle', () => {
     expect(calls.monitorsChanged).toEqual(['s1'])
   })
 
-  it('refuses outside Coding mode and for something that is not a PR id', async () => {
-    expect((await fakes({ codingMode: false }).ops.setAutoFix('s1', 'github.com/acme/app#7', true)).ok).toBe(false)
+  it('supports ordinary repository chats and rejects something that is not a PR id', async () => {
+    expect((await fakes({ codingMode: false, cached: BRANCH_AND_PINNED }).ops.setAutoFix('s1', 'github.com/acme/app#7', true)).ok).toBe(true)
     const { ops, calls } = fakes()
     expect((await ops.setAutoFix('s1', 'not-an-id', true)).ok).toBe(false)
     expect(calls.monitorsChanged).toEqual([])

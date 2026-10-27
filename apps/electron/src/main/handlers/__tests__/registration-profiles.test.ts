@@ -89,6 +89,7 @@ async function getExpectedCoreChannels(): Promise<Set<string>> {
   // Core handler channels (now in server-core)
   const [
     auth,
+    cliProxy,
     automations,
     files,
     labels,
@@ -110,8 +111,12 @@ async function getExpectedCoreChannels(): Promise<Set<string>> {
     decisions,
     prWatch,
     codingRepos,
+    gitReview,
+    checkpoints,
+    conductorImport,
   ] = await Promise.all([
     import('@craft-agent/server-core/handlers/rpc/auth'),
+    import('@craft-agent/server-core/handlers/rpc/cli-proxy'),
     import('@craft-agent/server-core/handlers/rpc/automations'),
     import('@craft-agent/server-core/handlers/rpc/files'),
     import('@craft-agent/server-core/handlers/rpc/labels'),
@@ -133,10 +138,14 @@ async function getExpectedCoreChannels(): Promise<Set<string>> {
     import('@craft-agent/server-core/handlers/rpc/decisions'),
     import('@craft-agent/server-core/handlers/rpc/pr-watch'),
     import('@craft-agent/server-core/handlers/rpc/coding-repos'),
+    import('@craft-agent/server-core/handlers/rpc/git-review'),
+    import('@craft-agent/server-core/handlers/rpc/checkpoints'),
+    import('@craft-agent/server-core/handlers/rpc/conductor-import'),
   ])
 
   return new Set([
     ...auth.HANDLED_CHANNELS,
+    ...cliProxy.HANDLED_CHANNELS,
     ...automations.HANDLED_CHANNELS,
     ...files.HANDLED_CHANNELS,
     ...labels.HANDLED_CHANNELS,
@@ -158,11 +167,15 @@ async function getExpectedCoreChannels(): Promise<Set<string>> {
     ...decisions.HANDLED_CHANNELS,
     ...prWatch.HANDLED_CHANNELS,
     ...codingRepos.HANDLED_CHANNELS,
+    ...gitReview.HANDLED_CHANNELS,
+    ...checkpoints.HANDLED_CHANNELS,
+    ...conductorImport.HANDLED_CHANNELS,
   ])
 }
 
 async function getExpectedGuiChannels(): Promise<Set<string>> {
-  const [browser, system, workspace, settings] = await Promise.all([
+  const [conductor, browser, system, workspace, settings] = await Promise.all([
+    import('../conductor-import'),
     import('../browser'),
     import('../system'),
     import('../workspace'),
@@ -171,6 +184,7 @@ async function getExpectedGuiChannels(): Promise<Set<string>> {
 
   return new Set([
     ...browser.HANDLED_CHANNELS,
+    ...conductor.GUI_HANDLED_CHANNELS,
     ...system.GUI_HANDLED_CHANNELS,
     ...workspace.GUI_HANDLED_CHANNELS,
     ...settings.GUI_HANDLED_CHANNELS,

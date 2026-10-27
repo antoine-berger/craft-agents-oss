@@ -61,6 +61,8 @@ export interface ISessionManager {
    *  (The PR watcher refetches then: a turn is when pushes and `gh pr create` happen.) */
   onTurnComplete?(listener: (sessionId: string) => void): () => void
   deleteSession(sessionId: string): Promise<void>
+  listSessionCheckpoints(sessionId: string): Promise<import('@craft-agent/shared/protocol').SessionCheckpointList>
+  restoreSessionCheckpoint(sessionId: string, checkpointId: string): Promise<import('@craft-agent/shared/protocol').SessionCheckpointRestoreResult>
 
   // ---------------------------------------------------------------------------
   // Session state

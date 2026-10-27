@@ -72,6 +72,7 @@
     "./automations": "./src/automations/index.ts",
     "./automations/resolve-config-path": "./src/automations/resolve-config-path.ts",
     "./protocol": "./src/protocol/index.ts",
+    "./browser/security-challenge": "./src/browser/security-challenge.ts",
     "./pr-watch": "./src/pr-watch/index.ts",
     "./tasks": "./src/tasks/index.ts",
     "./i18n": "./src/i18n/index.ts",

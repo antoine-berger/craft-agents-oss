@@ -4,6 +4,11 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Features
 
+- **Review and restore coding sessions** — Review committed and uncommitted changes against the base branch, attach inline comments to your next message, and restore files plus conversation to a saved turn after creating a recovery backup. PR and CI controls no longer depend on a hidden Coding mode. (#4)
+- **Start from existing work** — Choose a branch, GitHub pull request, GitHub issue or connected Linear issue before sending. New branches use your GitHub login and a descriptive task name; occupied branches require an explicit copy. (#4)
+- **Browser on the server** — Linux sessions can browse with a private Chromium profile without a connected Mac. Challenges pause for human intervention; existing desktop cookies stay separate. (#4)
+- **Copy Conductor chats** — Preview, select and copy local Conductor history and attachments into Craft projects without changing the originals. Repeated copies are deduplicated and incomplete cloud caches are identified. (#4)
+
 - **Claude account connectors in Sources** — Native claude.ai MCP connectors appear with their connection status and tools in the source list and chat selector. Authentication and management stay on claude.ai; no duplicate Craft source or connector credential is created.
 - **A worktree for every new session** — New independent sessions automatically isolate their repository in a session-owned branch and worktree. Choose a repository when the workspace contains several; project repositories are used automatically. The composer no longer requires a Coding mode toggle. Existing conversations retain their folders.
 

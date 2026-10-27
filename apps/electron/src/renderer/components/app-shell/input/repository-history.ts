@@ -16,7 +16,8 @@ export function isRepositorySelection(value: unknown): value is RepositorySelect
   return repo.kind === 'github' && typeof repo.nameWithOwner === 'string' && /^[\w.-]+\/[\w.-]+$/.test(repo.nameWithOwner)
 }
 export function addSelectedRepository(history: RepositorySelection[], repository: RepositorySelection): RepositorySelection[] {
-  return [repository, ...history.filter(previous => repositoryKey(previous) !== repositoryKey(repository)
+  const { start: _start, ...remembered } = repository
+  return [remembered, ...history.filter(previous => repositoryKey(previous) !== repositoryKey(repository)
     && !(repository.kind === 'local' && repository.nameWithOwner && previous.kind === 'github' && repository.nameWithOwner.toLowerCase() === previous.nameWithOwner.toLowerCase()))].slice(0, LIMIT)
 }
 export function getSelectedRepositories(workspaceId?: string): RepositorySelection[] {

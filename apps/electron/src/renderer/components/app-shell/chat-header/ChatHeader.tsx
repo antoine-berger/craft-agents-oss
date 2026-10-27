@@ -13,7 +13,7 @@
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 import { useSetAtom } from 'jotai'
-import { Info, MoreHorizontal, Pencil } from 'lucide-react'
+import { Info, MoreHorizontal, Pencil, GitCompareArrows } from 'lucide-react'
 import { PanelHeaderCenterButton } from '@/components/ui/PanelHeaderCenterButton'
 import { RenameDialog } from '@/components/ui/rename-dialog'
 import { DropdownMenu, DropdownMenuTrigger, StyledDropdownMenuContent } from '@/components/ui/styled-dropdown'
@@ -45,6 +45,8 @@ export interface ChatHeaderProps {
   isRegeneratingTitle?: boolean
   /** Published viewer link; the loaded session can know it before the metadata does */
   sharedUrl?: string | null
+  checkpointControl?: React.ReactNode
+  onReviewChanges?: () => void
   workingDirectory?: string
   sessionFolderPath?: string
   /** The active pull request; shown only for Coding-mode sessions, on the desktop layout */
@@ -83,6 +85,8 @@ function sameHeaderProps(prev: ChatHeaderProps, next: ChatHeaderProps): boolean 
     && prev.title === next.title
     && prev.isRegeneratingTitle === next.isRegeneratingTitle
     && prev.sharedUrl === next.sharedUrl
+    && prev.checkpointControl === next.checkpointControl
+    && prev.onReviewChanges === next.onReviewChanges
     && prev.workingDirectory === next.workingDirectory
     && prev.sessionFolderPath === next.sessionFolderPath
     && prev.prWatch === next.prWatch
@@ -104,6 +108,8 @@ export const ChatHeader = React.memo(function ChatHeader({
   isRegeneratingTitle,
   sharedUrl,
   workingDirectory,
+  onReviewChanges,
+  checkpointControl,
   sessionFolderPath,
   prWatch,
   prWatchNav,
@@ -223,7 +229,7 @@ export const ChatHeader = React.memo(function ChatHeader({
   const folderName = sessionFolderPath ? deriveSelectionFlags(workingDirectory, sessionFolderPath).folderName : undefined
   const meta = folderName ?? ''
   const codingMode = !!item?.codingMode
-  const showPrChip = codingMode && !compact && isPrWatchVisible(prWatch)
+  const showPrChip = !compact && isPrWatchVisible(prWatch)
   // The PR chip, measured by the label strip (state: it mounts after the strip's first layout)
   const [prReserveEl, setPrReserveEl] = React.useState<HTMLElement | null>(null)
 
@@ -292,6 +298,8 @@ export const ChatHeader = React.memo(function ChatHeader({
   const moreLabel = t('session.actionsFor', { title })
   const actions = (
     <div className="flex items-center gap-1">
+      {checkpointControl}
+      {onReviewChanges && <PanelHeaderCenterButton icon={<GitCompareArrows className="h-4 w-4" />} tooltip={t('gitReview.title', { defaultValue: 'Review changes' })} onClick={onReviewChanges} />}
       {isTaskOrchestrator && (
         <PanelHeaderCenterButton
           icon={<Pencil className="h-4 w-4" />}

@@ -1,4 +1,4 @@
-import { initialRepository, clearDraftRepository, seedSelectedRepositories } from './components/app-shell/input/repository-history'
+import { initialRepository, seedSelectedRepositories } from './components/app-shell/input/repository-history'
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useTheme } from '@/hooks/useTheme'
@@ -1305,7 +1305,7 @@ export default function App() {
       // returns status 'accepted', not 'queued').
       const beforeSend = store.get(sessionAtomFamily(sessionId))
       const sendingMidStream = beforeSend?.isProcessing === true
-      const repository = !beforeSend?.worktree?.owned && !beforeSend?.messages.some(message => message.role === 'user')
+      const repository = !beforeSend?.worktree?.owned && (beforeSend?.worktree?.pendingRepository || beforeSend?.worktree?.needsRepository || !beforeSend?.messages.some(message => message.role === 'user'))
         ? initialRepository(sessionId, beforeSend?.workspaceId ?? windowWorkspaceId ?? undefined) : undefined
 
       // Confirm the real backend mode before sending, including resumed older chats.
@@ -1457,7 +1457,6 @@ export default function App() {
         optimisticMessageId: userMessage.id,
         repository,
       })
-      if (repository) clearDraftRepository(sessionId, beforeSend?.workspaceId ?? windowWorkspaceId ?? undefined)
     } catch (error) {
       console.error('Failed to send message:', error)
       updateSessionById(sessionId, (s) => ({

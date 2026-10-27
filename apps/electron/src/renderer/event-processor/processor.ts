@@ -68,6 +68,9 @@ export function processEvent(
   event: AgentEvent
 ): ProcessResult {
   switch (event.type) {
+    case 'session_restored':
+      return { state: { session: { ...state.session, ...event.session, isProcessing: false }, streaming: null }, effects: [] }
+
     case 'text_discard':
       return { state: handleTextDiscard(state, event), effects: [] }
 

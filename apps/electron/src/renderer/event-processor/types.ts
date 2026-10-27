@@ -543,6 +543,7 @@ export interface UsageUpdateEvent {
  * Union of all agent events
  */
 export type AgentEvent =
+  | Extract<SessionEvent, { type: 'session_restored' }>
   | TextDiscardEvent
   | RetryEvent
   | TextDeltaEvent

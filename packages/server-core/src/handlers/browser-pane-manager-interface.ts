@@ -146,6 +146,8 @@ export interface AccessibilitySnapshot {
 // ---------------------------------------------------------------------------
 
 export interface IBrowserPaneManager {
+  /** True for a server-owned browser with no desktop window for a human hand-off. */
+  readonly isHeadless?: boolean
   // -- Session lifecycle ---------------------------------------------------
 
   /** Register a callback that resolves session IDs to file paths */

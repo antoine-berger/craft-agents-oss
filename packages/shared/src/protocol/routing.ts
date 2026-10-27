@@ -15,6 +15,8 @@ import { RPC_CHANNELS } from './channels'
 // ---------------------------------------------------------------------------
 
 export const LOCAL_ONLY_CHANNELS = new Set<string>([
+  RPC_CHANNELS.conductor.LIST_LOCAL,
+  RPC_CHANNELS.conductor.EXPORT_LOCAL,
   // remote — local connectivity management (reaches out to remote server from local app)
   RPC_CHANNELS.remote.TEST_CONNECTION,
 
@@ -215,6 +217,7 @@ export const LOCAL_ONLY_CHANNELS = new Set<string>([
 // ---------------------------------------------------------------------------
 
 export const REMOTE_ELIGIBLE_CHANNELS = new Set<string>([
+  RPC_CHANNELS.conductor.IMPORT,
   // server — server-level operations (no workspace context needed)
   RPC_CHANNELS.server.GET_WORKSPACES,
   RPC_CHANNELS.server.CREATE_WORKSPACE,
@@ -233,6 +236,8 @@ export const REMOTE_ELIGIBLE_CHANNELS = new Set<string>([
   RPC_CHANNELS.sessions.CREATE,
   RPC_CHANNELS.sessions.DELETE,
   RPC_CHANNELS.sessions.GET_MESSAGES,
+  RPC_CHANNELS.sessions.LIST_CHECKPOINTS,
+  RPC_CHANNELS.sessions.RESTORE_CHECKPOINT,
   RPC_CHANNELS.sessions.SEND_MESSAGE,
   RPC_CHANNELS.sessions.CANCEL,
   RPC_CHANNELS.sessions.KILL_SHELL,
@@ -478,6 +483,7 @@ export const REMOTE_ELIGIBLE_CHANNELS = new Set<string>([
   // git — workspace filesystem
   RPC_CHANNELS.git.GET_BRANCH,
   RPC_CHANNELS.git.GET_REPOSITORY_IDENTITY,
+  RPC_CHANNELS.git.GET_REVIEW,
   RPC_CHANNELS.git.LIST_REPOS,
   RPC_CHANNELS.git.CREATE_WORKTREE,
 

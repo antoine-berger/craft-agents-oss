@@ -9,6 +9,7 @@ import { useRepoListing } from './CodingWorkspacePanel'
 import { getSelectedRepositories, repositoryKey, repositoryLabel, rememberRepository, setDraftRepository } from './repository-history'
 import { getPathBasename } from '@/lib/platform'
 import { RepositoryAvatar, useRepositoryIdentity } from './RepositoryAvatar'
+import { RepositoryStartForm } from './RepositoryStartForm'
 
 interface ComposerRepositorySelectorProps {
   workspaceId?: string
@@ -86,6 +87,7 @@ export function ComposerRepositorySelector({ workspaceId, sessionId, repository,
             </dl>
           </div>
         ) : (
+          <>
           <Command shouldFilter={false} className="bg-transparent" label={t('chat.codingMode.repos.title')}>
             <CommandInput placeholder={t('chat.repository.searchNew')} value={query} onValueChange={setQuery} autoFocus />
             <CommandList className="max-h-[300px]">
@@ -101,6 +103,8 @@ export function ComposerRepositorySelector({ workspaceId, sessionId, repository,
               </CommandGroup>
             </CommandList>
           </Command>
+          <RepositoryStartForm repository={repository} disabled={disabled} onChoose={choose} />
+          </>
         )}
       </PopoverContent>
     </Popover>

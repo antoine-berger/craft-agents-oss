@@ -29,6 +29,13 @@ describe('chosen repositories and draft selection', () => {
  it('deduplicates a cloned GitHub repository while retaining its selected local checkout', () => {
   expect(addSelectedRepository([{kind:'github',nameWithOwner:'ME/REPO-ONE'}],one)).toEqual([one])
  })
+ it('keeps starting context in its draft without carrying it into the next session', () => {
+  const selected: RepositorySelection = {...one,start:{kind:'pull-request',number:42}}
+  rememberRepository(selected,'workspace')
+  setDraftRepository(selected,'current','workspace')
+  expect(initialRepository('current','workspace')).toEqual(selected)
+  expect(initialRepository('next','workspace')).toEqual(one)
+ })
  it('does not populate suggestions from scanned or unprepared session folders', () => {
   seedSelectedRepositories([{workspaceId:'workspace',worktree:undefined}])
   expect(getSelectedRepositories('workspace')).toEqual([])

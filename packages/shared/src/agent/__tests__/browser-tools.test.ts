@@ -324,6 +324,31 @@ describe('createBrowserTools', () => {
       expect(result.content[0].text).not.toContain('When you are done using the browser')
     })
 
+    it('reports a server challenge honestly without claiming a visible window or automating verification', async () => {
+      mockFns.headless = true
+      mockFns.snapshot = async () => ({ url: 'https://protected.example.com', title: 'Just a moment...', nodes: [] })
+      mockFns.detectChallenge = async () => ({ detected: true, provider: 'cloudflare', signals: ['title:just-a-moment'] })
+      let focused = false
+      mockFns.focusWindow = async () => { focused = true; throw new Error('No desktop') }
+      const result = await executeTool(tools, 'browser_tool', { command: 'snapshot' })
+      expect(focused).toBe(false)
+      expect(result.content[0].text).toContain('Automation is paused for human verification')
+      expect(result.content[0].text).toContain('Do not bypass the challenge')
+      expect(result.content[0].text).not.toContain('Browser shown')
+      expect(result.content.some((item: any) => item.type === 'image')).toBe(true)
+    })
+
+    it('opens a headless server browser without waiting for native window visibility', async () => {
+      mockFns.headless = true
+      mockFns.listWindows = async () => []
+      let focused = false
+      mockFns.focusWindow = async () => { focused = true; throw new Error('No desktop') }
+      const result = await executeTool(tools, 'browser_tool', { command: 'open --foreground' })
+      expect(result.content[0].text).toContain('Opened server browser in headless mode')
+      expect(result.content[0].text).not.toContain('Visibility settle')
+      expect(focused).toBe(false)
+    })
+
     it('still reports challenge when screenshot capture fails or is empty', async () => {
       mockFns.snapshot = async () => ({
         url: 'https://protected.example.com',

@@ -15,6 +15,9 @@ import { cleanupSessionFileWatchForClient, registerSessionsHandlers } from './se
 export { registerSessionsHandlers, cleanupSessionFileWatchForClient } from './sessions'
 import { cleanupPrWatchForClient, registerPrWatchHandlers } from './pr-watch'
 import { registerCodingReposHandlers } from './coding-repos'
+import { registerGitReviewHandlers } from './git-review'
+import { registerConductorImportHandlers } from './conductor-import'
+import { registerCheckpointHandlers } from './checkpoints'
 import { registerServerHandlers } from './server'
 import type { ServerHandlerContext } from '../../bootstrap/headless-start'
 export type { ServerHandlerContext } from '../../bootstrap/headless-start'
@@ -53,6 +56,9 @@ export function registerCoreRpcHandlers(
   registerPagesHandlers(server, deps)
   registerPrWatchHandlers(server, deps)
   registerCodingReposHandlers(server, deps)
+  registerGitReviewHandlers(server, deps)
+  registerCheckpointHandlers(server, deps)
+  registerConductorImportHandlers(server, deps)
   registerSkillsHandlers(server, deps)
   registerSourcesHandlers(server, deps)
   registerStatusesHandlers(server, deps)

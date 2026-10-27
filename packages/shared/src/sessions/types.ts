@@ -11,6 +11,7 @@
 
 import type { PermissionMode } from '../agent/mode-manager.ts';
 import type { ThinkingLevel } from '../agent/thinking-levels.ts';
+import type { ConductorImportOrigin } from '../protocol/conductor-import';
 import type { BoundPr, PrMonitorState } from '../protocol/pr-watch.ts';
 import type { StoredAttachment, MessageRole, ToolStatus, AuthRequestType, AuthStatus, CredentialInputMode, StoredMessage, ContextUsageSnapshot } from '@craft-agent/core/types';
 
@@ -62,6 +63,7 @@ export const SESSION_PERSISTENT_FIELDS = [
   'triggeredBy',
   // Project binding (workspace-scoped grouping)
   'projectId',
+  'importedFrom',
   // Kanban: task/subtask hierarchy + board column
   'parentSessionId',
   'kanbanColumn',
@@ -127,6 +129,8 @@ export interface OwnedWorktree {
   projectSubdirectory?: string;
   /** GitHub login captured when this branch was planned; absent for legacy craft/ branches. */
   branchPrefix?: string;
+  /** Legacy hash branches omit this; task/existing names retain durable ownership markers. */
+  branchNaming?: 'task' | 'existing';
   branch: string;
   base: string;
   baseCommit: string;
@@ -140,6 +144,10 @@ export interface SessionWorktreeMetadata {
   repositoryPath: string;
   /** Durable draft choice, resolved/cloned when the first message prepares the checkout. */
   pendingRepository?: import('../protocol/git-repos').RepositorySelection;
+  /** Task/PR metadata resolved once before checkout creation and retained across restarts. */
+  resolvedStart?: { baseBranch?: string; existingBranch?: string; taskTitle?: string; context?: string; pullRequestUrl?: string };
+  startContextApplied?: boolean;
+  repositoryResolved?: boolean;
   baseBranch?: string;
   cleanupOnArchive?: boolean;
   owned?: OwnedWorktree;
@@ -149,6 +157,7 @@ export interface SessionWorktreeMetadata {
  * Session configuration (persisted metadata)
  */
 export interface SessionConfig {
+  importedFrom?: ConductorImportOrigin;
   id: string;
   /** SDK session ID (captured after first message) */
   sdkSessionId?: string;
@@ -298,6 +307,7 @@ export interface StoredSession extends SessionConfig {
  * This enables fast session listing without parsing message content.
  */
 export interface SessionHeader {
+  importedFrom?: ConductorImportOrigin;
   id: string;
   /** SDK session ID (captured after first message) */
   sdkSessionId?: string;
@@ -420,6 +430,7 @@ export interface SessionHeader {
  * Session metadata (lightweight, for lists)
  */
 export interface SessionMetadata {
+  importedFrom?: ConductorImportOrigin;
   id: string;
   workspaceRootPath: string;
   name?: string;

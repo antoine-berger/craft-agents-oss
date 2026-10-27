@@ -1,3 +1,4 @@
+import type { ConductorImportAPI } from '@craft-agent/shared/protocol'
 // =============================================================================
 // Protocol re-exports (channels, DTOs, events, wire types)
 // =============================================================================
@@ -241,7 +242,7 @@ import type {
 /** Native window material the renderer may paint translucently over (see ThemeContext data-vibrancy). */
 export type WindowVibrancy = 'under-window' | 'mica'
 
-export interface ElectronAPI {
+export interface ElectronAPI extends ConductorImportAPI {
   // Session management
   getSessions(): Promise<Session[]>
   getUnreadSummary(): Promise<UnreadSummary>
@@ -657,6 +658,9 @@ export interface ElectronAPI {
   getGitBranch(dirPath: string): Promise<string | null>
   /** Read the chosen repository origin without scanning or fetching GitHub repositories. */
   getRepositoryIdentity(dirPath: string): Promise<string | null>
+  listSessionCheckpoints(sessionId: string): Promise<import('@craft-agent/shared/protocol').SessionCheckpointList>
+  restoreSessionCheckpoint(sessionId: string, checkpointId: string): Promise<import('@craft-agent/shared/protocol').SessionCheckpointRestoreResult>
+  getGitReview(sessionId: string): Promise<import('@craft-agent/shared/protocol').GitReviewSnapshot>
   /** Coding mode worktree picker: local repos (workspace folder + these recent folders) and `gh repo list` */
   listCodingRepos(workspaceId: string, recentDirs: string[], options?: { refreshGitHub?: boolean; query?: string }): Promise<import('@craft-agent/shared/protocol').RepoListing>
   /** Creates a new session's worktree (cloning a GitHub-only repo first); rejects with git's reason */

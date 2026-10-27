@@ -30,6 +30,75 @@ afterEach(() => rmSync(root, { recursive: true, force: true }))
 const plan = (sessionId = 'test-session', baseBranch?: string) => planOwnedWorktree({ repositoryPath: repo, ownerId: `workspace/${sessionId}`, sessionId, baseBranch })
 
 describe('session-owned worktrees', () => {
+  it('uses readable task names and atomically separates concurrent matching tasks', async () => {
+    const [a, b] = await Promise.all([
+      planOwnedWorktree({ repositoryPath: repo, ownerId: 'workspace/task-a', sessionId: 'task-a', branchPrefix: 'developer', taskTitle: 'Fix login redirect' }),
+      planOwnedWorktree({ repositoryPath: repo, ownerId: 'workspace/task-b', sessionId: 'task-b', branchPrefix: 'developer', taskTitle: 'Fix login redirect' }),
+    ])
+    expect(new Set([a.branch, b.branch])).toEqual(new Set(['developer/fix-login-redirect', 'developer/fix-login-redirect-2']))
+    const [readyA, readyB] = await Promise.all([ensureOwnedWorktree(a), ensureOwnedWorktree(b)])
+    expect(git(readyA.path, 'symbolic-ref', '--short', 'HEAD')).toBe(a.branch)
+    expect(git(readyB.path, 'symbolic-ref', '--short', 'HEAD')).toBe(b.branch)
+    expect(git(repo, 'symbolic-ref', '--short', 'HEAD')).toBe('main')
+    const recovered = await planOwnedWorktree({ repositoryPath: repo, ownerId: 'workspace/task-a', sessionId: 'task-a', branchPrefix: 'changed-account', taskTitle: 'A different later title' })
+    expect(recovered.branch).toBe(a.branch)
+    expect(recovered.token).toBe(a.token)
+    await expect(ensureOwnedWorktree({ ...readyA, branch: b.branch, path: readyB.path })).rejects.toBeInstanceOf(OwnedWorktreeError)
+  })
+
+  it('recovers the exact allocation after a crash before its owner journal is published', async () => {
+    const input = { repositoryPath: repo, ownerId: 'workspace/interrupted-plan', sessionId: 'interrupted-plan', branchPrefix: 'developer', taskTitle: 'Recover allocation' }
+    const pending = await planOwnedWorktree(input)
+    const directory = join(repo, '.git', 'craft-session-worktrees')
+    const ownerFile = readdirSync(directory).find(name => name.endsWith('.json'))!
+    rmSync(join(directory, ownerFile))
+    const recovered = await planOwnedWorktree(input)
+    expect(recovered.branch).toBe(pending.branch)
+    expect(recovered.token).toBe(pending.token)
+    expect((await ensureOwnedWorktree(recovered)).status).toBe('ready')
+  })
+
+  it('continues a free existing branch and preserves it through cleanup and restoration', async () => {
+    git(repo, 'branch', 'feature/existing')
+    const pending = await planOwnedWorktree({ repositoryPath: repo, ownerId: 'workspace/pr', sessionId: 'pr', branchPrefix: 'developer', existingBranch: 'feature/existing', baseBranch: 'main' })
+    expect(pending.branch).toBe('feature/existing')
+    expect(pending.branchNaming).toBe('existing')
+    const ready = await ensureOwnedWorktree(pending)
+    writeFileSync(join(ready.path, 'code.txt'), 'PR update\n')
+    git(ready.path, 'add', '.')
+    git(ready.path, 'commit', '-m', 'Update existing PR')
+    const commit = git(ready.path, 'rev-parse', 'HEAD')
+    expect(await removeOwnedWorktree(ready)).toEqual({ removed: true })
+    expect(git(repo, 'rev-parse', 'refs/heads/feature/existing')).toBe(commit)
+    const restored = await ensureOwnedWorktree({ ...ready, status: 'removed' })
+    expect(git(restored.path, 'rev-parse', 'HEAD')).toBe(commit)
+  })
+
+  it('allows a new session to continue a cleaned branch and refuses concurrent restoration by its old owner', async () => {
+    git(repo, 'branch', 'feature/reusable')
+    const first = await ensureOwnedWorktree(await planOwnedWorktree({ repositoryPath: repo, ownerId: 'workspace/old', sessionId: 'old', existingBranch: 'feature/reusable' }))
+    await removeOwnedWorktree(first)
+    const next = await ensureOwnedWorktree(await planOwnedWorktree({ repositoryPath: repo, ownerId: 'workspace/new', sessionId: 'new', existingBranch: 'feature/reusable' }))
+    await expect(ensureOwnedWorktree({ ...first, status: 'removed' })).rejects.toBeInstanceOf(OwnedWorktreeError)
+    expect(git(next.path, 'symbolic-ref', '--short', 'HEAD')).toBe('feature/reusable')
+    await removeOwnedWorktree(next)
+    expect((await ensureOwnedWorktree({ ...first, status: 'removed' })).branch).toBe('feature/reusable')
+  })
+
+  it('refuses to continue a branch already in another checkout', async () => {
+    await expect(planOwnedWorktree({ repositoryPath: repo, ownerId: 'workspace/busy', sessionId: 'busy', existingBranch: 'main' })).rejects.toThrow('already checked out')
+    expect(git(repo, 'symbolic-ref', '--short', 'HEAD')).toBe('main')
+    expect(git(repo, 'worktree', 'list', '--porcelain').match(/^worktree /gm)).toHaveLength(1)
+  })
+
+  it('does not appropriate a task branch created outside its pending reservation', async () => {
+    const pending = await planOwnedWorktree({ repositoryPath: repo, ownerId: 'workspace/late', sessionId: 'late', branchPrefix: 'developer', taskTitle: 'Handle timeout' })
+    git(repo, 'branch', pending.branch)
+    await expect(ensureOwnedWorktree(pending)).rejects.toThrow('created outside this session')
+    expect(git(repo, 'rev-parse', `refs/heads/${pending.branch}`)).toBe(git(repo, 'rev-parse', 'main'))
+    expect(existsSync(pending.path)).toBe(false)
+  })
+
   it('persists the GitHub login prefix across restart, cleanup and restoration', async () => {
     const pending = await planOwnedWorktree({ repositoryPath: repo, ownerId: 'workspace/prefixed', sessionId: 'prefixed', branchPrefix: 'developer-name' })
     expect(pending.branch).toStartWith('developer-name/session-prefixed-')
