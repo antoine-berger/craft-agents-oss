@@ -1,6 +1,7 @@
+import { availableSessionSourceSlugs } from './automatic-session-sources'
 import { resolveWorktreeRepository } from '../services/coding-repos/worktree'
 import { cloneRootFor, commonGitDir, discoverLocalRepos, repoCommandDir } from '../services/coding-repos/discover'
-import { loadProxyConnectorSources, usesCliProxyForAll } from '../services/cli-proxy/connectors'
+import { loadProxyConnectorSources } from '../services/cli-proxy/connectors'
 import type { EventSink, RpcServer } from '@craft-agent/server-core/transport'
 import { CLIENT_BROWSER_INVOKE } from '@craft-agent/server-core/transport'
 import type { ISessionManager, IBrowserPaneManager, ExecutePromptAutomationInput } from '@craft-agent/server-core/handlers'
@@ -2410,6 +2411,17 @@ export class SessionManager implements ISessionManager {
       : sources
   }
 
+  /** Every visible chat uses all currently available sources, independent of old selections. */
+  private async syncAutomaticSessionSources(managed: ManagedSession, sources?: LoadedSource[]): Promise<void> {
+    if (managed.hidden) return
+    const slugs = availableSessionSourceSlugs(sources ?? await this.loadSessionSources(managed))
+    const previous = managed.enabledSourceSlugs ?? []
+    if (previous.length === slugs.length && slugs.every(slug => previous.includes(slug))) return
+    managed.enabledSourceSlugs = slugs
+    this.persistSession(managed)
+    this.sendEvent({ type: 'sources_changed', sessionId: managed.id, enabledSourceSlugs: slugs }, managed.workspace.id)
+  }
+
   /**
    * Reload sources for a session with an active agent.
    * Called by ConfigWatcher when source files change on disk.
@@ -2425,7 +2437,9 @@ export class SessionManager implements ISessionManager {
     const allSources = await this.loadSessionSources(managed)
     managed.agent.setAllSources(allSources)
 
-    // Rebuild MCP and API servers for session's enabled sources
+    await this.syncAutomaticSessionSources(managed, allSources)
+
+    // Rebuild MCP and API servers for all available sources
     const enabledSlugs = managed.enabledSourceSlugs || []
     const enabledSources = allSources.filter(s =>
       enabledSlugs.includes(s.config.slug) && isSourceUsable(s)
@@ -4214,12 +4228,7 @@ export class SessionManager implements ISessionManager {
     if (managed.isDeleting) throw new DOMException('Session was deleted', 'AbortError')
     const prepareAgent = async () => {
       try {
-        if (managed.enabledSourceSlugs === undefined && !managed.hidden && !managed.parentSessionId && !managed.taskSlug && usesCliProxyForAll()) {
-          managed.enabledSourceSlugs = (await loadProxyConnectorSources(managed.workspace))
-            .filter(source => source.config.isAuthenticated).map(source => source.config.slug)
-          this.persistSession(managed)
-          this.sendEvent({ type: 'sources_changed', sessionId: managed.id, enabledSourceSlugs: managed.enabledSourceSlugs }, managed.workspace.id)
-        }
+        await this.syncAutomaticSessionSources(managed)
         return await this.getOrCreatePreparedAgent(managed)
       } catch (error) {
         // Source setup or backend construction can fail before postInit. Release title waiters
@@ -6099,7 +6108,9 @@ export class SessionManager implements ISessionManager {
     }
 
     const workspaceRootPath = managed.workspace.rootPath
-    if (this.usesClaudeAccountConnectors(managed)) {
+    if (!managed.hidden) {
+      sourceSlugs = availableSessionSourceSlugs(await this.loadSessionSources(managed))
+    } else if (this.usesClaudeAccountConnectors(managed)) {
       sourceSlugs = (await this.loadSessionSources(managed, sourceSlugs))
         .map(source => source.config.slug)
     }
@@ -7209,10 +7220,10 @@ export class SessionManager implements ISessionManager {
     const sendSpan = perf.span('session.sendMessage', { sessionId })
 
     const workspaceRootPath = managed.workspace.rootPath
-    const enabledSlugs = managed.enabledSourceSlugs ?? []
-    const hasSources = enabledSlugs.length > 0
-
     try {
+      await this.syncAutomaticSessionSources(managed)
+      const enabledSlugs = managed.enabledSourceSlugs ?? []
+      const hasSources = enabledSlugs.length > 0
       // Load enabled sources up-front so we can refresh tokens BEFORE getOrCreateAgent
       // runs its internal cold-session build. Otherwise that build sees stale tokens
       // and emits AUTH_REQUIRED, causing a brief "needs_auth" UI flicker before the
@@ -7243,7 +7254,7 @@ export class SessionManager implements ISessionManager {
       sendSpan.mark('sources.loaded')
 
       // Apply source servers if any are enabled
-      if (hasSources) {
+      if (hasSources || !managed.hidden) {
         const sessionPath = getSessionStoragePath(workspaceRootPath, sessionId)
         // Single fresh build — tokens already refreshed above.
         const { mcpServers, apiServers, errors } = await buildServersFromSources(sources, sessionPath, managed.tokenRefreshManager, agent.getSummarizeCallback())
@@ -7253,7 +7264,7 @@ export class SessionManager implements ISessionManager {
 
         const mcpCount = Object.keys(mcpServers).length
         const apiCount = Object.keys(apiServers).length
-        if (mcpCount > 0 || apiCount > 0 || enabledSlugs.length > 0) {
+        if (mcpCount > 0 || apiCount > 0 || enabledSlugs.length > 0 || !managed.hidden) {
           const usableSources = sources.filter(isSourceUsable)
           const intendedSlugs = usableSources.map(s => s.config.slug)
           await agent.setSourceServers(mcpServers, apiServers, intendedSlugs)

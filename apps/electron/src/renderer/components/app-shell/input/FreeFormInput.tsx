@@ -73,7 +73,6 @@ import {
   stripPiPrefixForDisplay,
 } from './model-picker-helpers'
 import { useModelVisionToggle } from './useModelVisionToggle'
-import { ComposerSourcesChip } from './ComposerSourcesChip'
 import { initialRepository, setDraftRepository } from './repository-history'
 import { ComposerRepositorySelector } from './ComposerRepositorySelector'
 import { ComposerModelMenu } from './ComposerModelMenu'
@@ -281,8 +280,6 @@ export function FreeFormInput({
   maxHeight,
   onFocusChange,
   sources: configuredSources = [],
-  enabledSourceSlugs = [],
-  onSourcesChange,
   skills = [],
   labels = [],
   sessionLabels = [],
@@ -551,27 +548,6 @@ export function FreeFormInput({
     onAttachmentsChangeRef.current?.(attachments)
   }, [attachments])
 
-  // Optimistic state for source selection - updates UI immediately before IPC round-trip completes
-  const [optimisticSourceSlugs, setOptimisticSourceSlugs] = React.useState(enabledSourceSlugs)
-  const visibleSelectedSourceSlugs = React.useMemo(
-    () => optimisticSourceSlugs.filter(slug => sources.some(source => source.config.slug === slug)),
-    [optimisticSourceSlugs, sources],
-  )
-
-  // Sync from prop when server state changes (reconciles after IPC or on external updates)
-  // Use content comparison (not reference) to avoid infinite loops with empty arrays
-  const prevEnabledSourceSlugsRef = React.useRef(enabledSourceSlugs)
-  React.useEffect(() => {
-    const prev = prevEnabledSourceSlugsRef.current
-    const changed = enabledSourceSlugs.length !== prev.length ||
-      enabledSourceSlugs.some((slug, i) => slug !== prev[i])
-
-    if (changed) {
-      setOptimisticSourceSlugs(enabledSourceSlugs)
-      prevEnabledSourceSlugsRef.current = enabledSourceSlugs
-    }
-  }, [enabledSourceSlugs])
-
   // Sync from parent when inputValue changes externally (e.g., switching sessions)
   const prevInputValueRef = React.useRef(coerceInputText(inputValue))
   React.useEffect(() => {
@@ -613,7 +589,6 @@ export function FreeFormInput({
 
   const [isDraggingOver, setIsDraggingOver] = React.useState(false)
   const [loadingCount, setLoadingCount] = React.useState(0)
-  const [sourceDropdownOpen, setSourceDropdownOpen] = React.useState(false)
   const [isFocused, setIsFocused] = React.useState(false)
   const [modelDropdownOpen, setModelDropdownOpen] = React.useState(false)
 
@@ -650,7 +625,6 @@ export function FreeFormInput({
   const contentScrollRef = React.useRef<HTMLDivElement>(null)
   const availableHeight = useInputAvailableHeight(containerRef, maxHeight === undefined)
   const composerMaxHeight = maxHeight ?? getComposerMaxHeight(availableHeight, 'freeform')
-  const sourceButtonRef = React.useRef<HTMLButtonElement>(null)
   const fileInputRef = React.useRef<HTMLInputElement>(null)
 
   // Merge refs for RichTextInput
@@ -952,29 +926,12 @@ export function FreeFormInput({
     homeDir,
   })
 
-  // Handle mention selection (sources, skills, files)
-  const handleMentionSelect = React.useCallback((item: MentionItem) => {
-    // For sources: enable the source immediately
-    if (item.type === 'source' && item.source && onSourcesChange) {
-      const slug = item.source.config.slug
-      if (!optimisticSourceSlugs.includes(slug)) {
-        const newSlugs = [...optimisticSourceSlugs, slug]
-        setOptimisticSourceSlugs(newSlugs)
-        onSourcesChange(newSlugs)
-      }
-    }
-
-    // Files via @ mention in text are sufficient context for the agent.
-    // Skills also don't need special handling beyond text insertion.
-  }, [optimisticSourceSlugs, onSourcesChange])
-
   // Inline mention hook (for skills, sources, and files)
   const inlineMention = useInlineMention({
     inputRef: richInputRef,
     skills,
     sources,
     basePath: workingDirectory,
-    onSelect: handleMentionSelect,
     // Use workspace slug (not UUID) for SDK skill qualification
     workspaceId: workspaceSlug,
   })
@@ -1264,15 +1221,6 @@ export function FreeFormInput({
     const sourceSlugs = sources.map(s => s.config.slug)
     const mentions = parseMentions(input, skillSlugs, sourceSlugs)
 
-    // Enable any mentioned sources that aren't already enabled
-    if (mentions.sources.length > 0 && onSourcesChange) {
-      const newSlugs = [...new Set([...optimisticSourceSlugs, ...mentions.sources])]
-      if (newSlugs.length > optimisticSourceSlugs.length) {
-        setOptimisticSourceSlugs(newSlugs)
-        onSourcesChange(newSlugs)
-      }
-    }
-
     const attachmentSnapshot = attachments
 
     onSubmit(
@@ -1294,7 +1242,7 @@ export function FreeFormInput({
     })
 
     return true
-  }, [input, attachments, followUpItems, disabled, disableSend, needsRepository, onInputChange, onAttachmentsChange, onSubmit, skills, sources, optimisticSourceSlugs, onSourcesChange, onWorkingDirectoryChange, homeDir, showAttachmentSizeProblem])
+  }, [input, attachments, followUpItems, disabled, disableSend, needsRepository, onInputChange, onAttachmentsChange, onSubmit, skills, sources, onWorkingDirectoryChange, homeDir, showAttachmentSizeProblem])
 
   // Listen for craft:submit-input events (simulate pressing the Send button)
   React.useEffect(() => {
@@ -1425,29 +1373,10 @@ export function FreeFormInput({
   // Handle input changes from RichTextInput
   const handleInputChange = React.useCallback((value: string) => {
     const nextValue = coerceInputText(value)
-    // Get previous input value before updating state
-    const prevValue = inputRef.current
-
     setInput(nextValue)
     syncToParent(nextValue) // Debounced sync to parent for draft persistence
 
-    // Sync source selection when mentions are removed from input
-    if (onSourcesChange) {
-      const sourceSlugs = sources.map(s => s.config.slug)
-
-      // Parse mentions from previous and current input
-      const prevMentions = parseMentions(prevValue, [], sourceSlugs)
-      const currMentions = parseMentions(nextValue, [], sourceSlugs)
-
-      // Remove sources that were mentioned before but not anymore
-      const removedSources = prevMentions.sources.filter(slug => !currMentions.sources.includes(slug))
-      if (removedSources.length > 0) {
-        const newSlugs = optimisticSourceSlugs.filter(slug => !removedSources.includes(slug))
-        setOptimisticSourceSlugs(newSlugs)
-        onSourcesChange(newSlugs)
-      }
-    }
-  }, [syncToParent, sources, optimisticSourceSlugs, onSourcesChange])
+  }, [syncToParent])
 
   // Handle input with cursor position (for menu detection)
   const handleRichInput = React.useCallback((value: string, cursorPosition: number) => {
@@ -1580,15 +1509,6 @@ export function FreeFormInput({
   React.useLayoutEffect(() => {
     if (contentScrollRef.current) scrollFocusedCaretIntoView(contentScrollRef.current)
   }, [composerMaxHeight, attachments, followUpItems, showVisionWarning, isCollapsedInCompact])
-
-  const handleToggleSourceSlug = (slug: string) => {
-    const isEnabled = optimisticSourceSlugs.includes(slug)
-    const newSlugs = isEnabled
-      ? optimisticSourceSlugs.filter(currentSlug => currentSlug !== slug)
-      : [...optimisticSourceSlugs, slug]
-    setOptimisticSourceSlugs(newSlugs)
-    onSourcesChange?.(newSlugs)
-  }
 
   return (
     <form onSubmit={handleSubmit}>
@@ -1783,23 +1703,6 @@ export function FreeFormInput({
             disabled={disabled}
             className="input-toolbar-btn"
           />
-
-          {/* Source selector chip - only show if onSourcesChange is provided */}
-          {onSourcesChange && (
-            <ComposerSourcesChip
-              compact={compactMode}
-              sources={sources}
-              selectedSlugs={visibleSelectedSourceSlugs}
-              onToggleSlug={handleToggleSourceSlug}
-              open={sourceDropdownOpen}
-              setOpen={setSourceDropdownOpen}
-              isEmptySession={isEmptySession}
-              disabled={disabled}
-              buttonRef={sourceButtonRef}
-              claudeAccountConnectors={claudeAccountConnectors}
-              managedConnectors={configuredSources.filter(source => source.claudeAccount?.connectionSlug === effectiveConnection)}
-            />
-          )}
 
           {/* Working directory chip */}
           {requireWorktree && isEmptySession ? (

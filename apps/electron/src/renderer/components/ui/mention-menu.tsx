@@ -461,7 +461,7 @@ export interface UseInlineMentionOptions {
   sources: LoadedSource[]
   /** Base path for file search (working directory) */
   basePath?: string
-  onSelect: (item: MentionItem) => void
+  onSelect?: (item: MentionItem) => void
   /** Workspace ID for fully-qualified skill names */
   workspaceId?: string
 }
@@ -721,7 +721,7 @@ export function useInlineMention({
       newCursorPosition = before.length + mentionText.length
     }
 
-    onSelect(item)
+    onSelect?.(item)
     setIsOpen(false)
     setCommittedFilter('')
     // Clear file search state and cache to prevent stale results on next open

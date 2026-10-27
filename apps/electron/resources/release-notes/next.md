@@ -20,3 +20,5 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 - **Repository drafts** — The composer suggests only repositories selected before, remembers the last choice, and searches for other repositories on demand. Repository selection is instant: cloning and worktree preparation start with the first message, when the chat also receives its title. (#4)
 
 - **Account-scoped repository search** — Repository search includes personal, collaborator and organization repositories available to the connected GitHub account, including private repositories and forks. Unrelated worldwide results are excluded. (#4)
+
+- **Automatic connectors in every chat** — All available connectors and configured sources are enabled automatically, including in existing chats and after newly connecting a source. The composer no longer asks you to select Claude connectors or sources. (#4)
