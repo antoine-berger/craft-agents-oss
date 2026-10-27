@@ -15,6 +15,7 @@ type RetryHarness = {
   sendMessage: ReturnType<typeof mock>
   setProcessing: ReturnType<typeof mock>
   monotonic(): number
+  loadSessionSources(): Promise<never[]>
 }
 
 function harness() {
@@ -23,6 +24,9 @@ function harness() {
   manager.sendMessage = mock(async () => {})
   manager.setProcessing = mock(() => {})
   manager.monotonic = () => 1
+  // Auth/setup tests use no sources and a deliberately non-filesystem workspace.
+  // Retain automatic synchronization, but keep source discovery outside this fixture.
+  manager.loadSessionSources = async () => []
   const managed = createManagedSession({ id: 'auth-retry-test' }, {
     id: 'workspace', slug: 'workspace', name: 'Test', rootPath: '/unused-auth-retry-test', createdAt: 1,
   })

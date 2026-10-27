@@ -5,7 +5,7 @@ import type { RepositorySelection } from '@craft-agent/shared/protocol'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
 import { COMPOSER_CHIP } from './composer-styles'
-import { useRepoListing } from './CodingWorkspacePanel'
+import { useRepoListing } from './use-repo-listing'
 import { getSelectedRepositories, repositoryKey, repositoryLabel, rememberRepository, setDraftRepository } from './repository-history'
 import { getPathBasename } from '@/lib/platform'
 import { RepositoryAvatar, useRepositoryIdentity } from './RepositoryAvatar'
@@ -30,7 +30,7 @@ export function ComposerRepositorySelector({ workspaceId, sessionId, repository,
   const nameWithOwner = useRepositoryIdentity(knownNameWithOwner, identityPath)
   const label = nameWithOwner?.split('/').pop()
     ?? (repository ? repositoryLabel(repository).split('/').pop()!
-      : repositoryPath ? getPathBasename(repositoryPath.replace(/[\\/]\.git$/, '')) : t('chat.codingMode.repos.title'))
+      : repositoryPath ? getPathBasename(repositoryPath.replace(/[\\/]\.git$/, '')) : t('chat.repository.repos.title'))
   const [open, setOpen] = React.useState(false)
   const [query, setQuery] = React.useState('')
   const [history, setHistory] = React.useState(() => getSelectedRepositories(workspaceId))
@@ -88,12 +88,12 @@ export function ComposerRepositorySelector({ workspaceId, sessionId, repository,
           </div>
         ) : (
           <>
-          <Command shouldFilter={false} className="bg-transparent" label={t('chat.codingMode.repos.title')}>
+          <Command shouldFilter={false} className="bg-transparent" label={t('chat.repository.repos.title')}>
             <CommandInput placeholder={t('chat.repository.searchNew')} value={query} onValueChange={setQuery} autoFocus />
             <CommandList className="max-h-[300px]">
-              {searching && repos.status === 'loading' && <div className="flex items-center gap-2 px-3 py-2 text-label-sm text-tertiary"><Spinner />{t('chat.codingMode.repos.loading')}</div>}
+              {searching && repos.status === 'loading' && <div className="flex items-center gap-2 px-3 py-2 text-label-sm text-tertiary"><Spinner />{t('chat.repository.repos.loading')}</div>}
               {searching && repos.status === 'error' && <p role="alert" className="px-3 py-2 text-label-sm text-destructive">{repos.error}</p>}
-              {(!searching || repos.status !== 'loading') && <CommandEmpty>{t(searching ? 'chat.codingMode.repos.empty' : 'chat.repository.searchHint')}</CommandEmpty>}
+              {(!searching || repos.status !== 'loading') && <CommandEmpty>{t(searching ? 'chat.repository.repos.empty' : 'chat.repository.searchHint')}</CommandEmpty>}
               {searching && repos.listing?.githubUnavailable && <p className="px-3 py-2 text-label-sm text-tertiary">{t('chat.repository.remoteSearchUnavailable')}</p>}
               <CommandGroup heading={t(searching ? 'chat.repository.searchResults' : 'chat.repository.chosen')}>
                 {choices.map(repo => <CommandItem key={repositoryKey(repo)} value={repositoryKey(repo)} onSelect={() => choose(repo)}>

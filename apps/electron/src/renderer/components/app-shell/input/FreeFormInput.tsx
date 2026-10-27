@@ -74,7 +74,7 @@ import { useModelVisionToggle } from './useModelVisionToggle'
 import { initialRepository, setDraftRepository, clearDraftRepository } from './repository-history'
 import { ComposerRepositorySelector } from './ComposerRepositorySelector'
 import { ComposerModelMenu } from './ComposerModelMenu'
-import { ContextUsageChip } from './ContextUsageChip'
+import { ContextUsageIndicator } from './ContextUsageIndicator'
 import { FollowUpChips } from './FollowUpChips'
 import { SendButton } from './SendButton'
 
@@ -176,9 +176,6 @@ export interface FreeFormInputProps {
   disableSend?: boolean
   /** Whether the session is empty (no messages yet) - affects context badge prominence */
   isEmptySession?: boolean
-  // Coding mode (session-level, fixed once the conversation starts)
-  /** Coding mode is on: lean coding prompt and session tools */
-  codingMode?: boolean
   requireWorktree?: boolean
   worktreeConfigured?: boolean
   pendingRepository?: import('@craft-agent/shared/protocol').RepositorySelection
@@ -186,10 +183,6 @@ export interface FreeFormInputProps {
   worktreeLocked?: boolean
   worktreeRepository?: string
   worktreeBranch?: string
-  /** Toggle coding mode (only before the first message) */
-  onCodingModeChange?: (enabled: boolean) => void
-  /** Continue a started session in a new one with coding mode set to `enabled` */
-  onContinueWithCodingMode?: (enabled: boolean) => void
   /** Context status for showing compaction indicator and token usage */
   contextStatus?: ContextStatus
   /** Follow-up annotations shown as context chips above the input */
@@ -1682,6 +1675,13 @@ export function FreeFormInput({
 
           {/* Model selection truncates as needed, keeping Context and Send visible. */}
           <div className="-m-1 flex min-w-0 shrink items-center gap-1 overflow-hidden p-1">
+          <ContextUsageIndicator
+            snapshot={contextStatus?.contextUsage}
+            modelName={currentModelDisplayName}
+            modelContextWindow={getModelContextWindow(currentModel)}
+            isProcessing={isProcessing}
+            onCompact={() => onSubmit('/compact', [])}
+          />
           {/* Model/Connection selector — drawer in compact (when enabled), dropdown on desktop */}
           {compactMode ? (
             enableCompactModelPicker && (
@@ -1727,14 +1727,6 @@ export function FreeFormInput({
 
           </div>
 
-          {/* Context usage meter. Percent text is truthful and may exceed 100%; action requires explicit canCompact. */}
-          <ContextUsageChip
-            display={contextDisplay}
-            labels={contextLabels}
-            isProcessing={isProcessing}
-            showMeter={!compactMode}
-            onCompact={() => onSubmit('/compact', [])}
-          />
 
           {/* Send/Stop Button - Always show stop when processing */}
           <SendButton

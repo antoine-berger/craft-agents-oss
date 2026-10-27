@@ -1,3 +1,4 @@
+import { assertNotGenericShipRun } from '../../services/ship-workflow/tool-policy'
 /**
  * RPC handlers for the Tasks Conductor.
  *
@@ -364,6 +365,7 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
 
   // tasks:run — start a run.
   server.handle(RPC_CHANNELS.tasks.RUN, async (_ctx, workspaceId: string, req: TaskRunRequest) => {
+    assertNotGenericShipRun(req.slug, getWorkspaceByNameOrId(workspaceId)?.rootPath)
     return runnerFor(workspaceId).run(req.slug, {
       runId: req.runId,
       orchestratorSessionId: req.orchestratorSessionId,
@@ -376,6 +378,7 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
   })
 
   server.handle(RPC_CHANNELS.tasks.RESUME, async (_ctx, workspaceId: string, slug: string, runId: string) => {
+    assertNotGenericShipRun(slug, getWorkspaceByNameOrId(workspaceId)?.rootPath)
     runnerFor(workspaceId).resume(slug, runId)
   })
 

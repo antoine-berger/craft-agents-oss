@@ -44,7 +44,6 @@ interface ChatHeaderDemoProps {
   withFolder?: boolean
   compact?: boolean
   width?: number
-  codingMode?: boolean
   prScenario?: PrScenario
 }
 
@@ -59,7 +58,6 @@ function ChatHeaderDemo({
   withFolder = true,
   compact = false,
   width = 900,
-  codingMode = false,
   prScenario = 'open-passing',
 }: ChatHeaderDemoProps) {
   React.useEffect(() => {
@@ -78,7 +76,6 @@ function ChatHeaderDemo({
     sessionStatus: status,
     sharedUrl: shared ? 'https://example.com/s/abc123' : undefined,
     workingDirectory: withFolder ? DEMO_FOLDER : undefined,
-    codingMode,
   }
   const pr = useMockPrWatch(prScenario)
 
@@ -141,8 +138,7 @@ export const chatHeaderComponents: ComponentEntry[] = [
       { name: 'withFolder', description: 'Working folder set', control: { type: 'boolean' }, defaultValue: true },
       { name: 'compact', description: 'Compact shell (phone)', control: { type: 'boolean' }, defaultValue: false },
       { name: 'width', description: 'Panel width (px)', control: { type: 'number', min: 320, max: 1400, step: 10 }, defaultValue: 900 },
-      { name: 'codingMode', description: 'Coding mode: PR chip, one label chip + "+N"', control: { type: 'boolean' }, defaultValue: false },
-      { name: 'prScenario', description: 'PR watcher state (Coding mode only)', control: { type: 'select', options: PR_SCENARIO_OPTIONS }, defaultValue: 'open-passing' },
+      { name: 'prScenario', description: 'PR watcher state', control: { type: 'select', options: PR_SCENARIO_OPTIONS }, defaultValue: 'open-passing' },
     ],
     variants: [
       { name: 'No labels', props: { labelCount: 0 } },
@@ -151,13 +147,13 @@ export const chatHeaderComponents: ComponentEntry[] = [
       { name: 'Narrow panel', props: { labelCount: 6, longTitle: true, width: 480 } },
       { name: 'Shared, long title', props: { labelCount: 3, longTitle: true, shared: true } },
       { name: 'Compact', props: { labelCount: 3, compact: true, width: 390 } },
-      { name: 'Coding mode + PR', props: { codingMode: true, labelCount: 3, prScenario: 'open-failing' } },
-      { name: 'Coding mode, narrow', props: { codingMode: true, labelCount: 6, longTitle: true, width: 560, prScenario: 'long-title' } },
-      { name: 'Coding mode, 3 PRs', props: { codingMode: true, labelCount: 2, prScenario: 'carousel' } },
-      { name: 'Coding mode, 7 PRs', props: { codingMode: true, labelCount: 2, prScenario: 'carousel-many' } },
-      { name: 'Coding mode, 5-digit PRs', props: { codingMode: true, labelCount: 2, prScenario: 'carousel-long-numbers' } },
-      { name: 'Coding mode, auto-merge off for the repo', props: { codingMode: true, labelCount: 2, prScenario: 'auto-merge-blocked' } },
-      { name: 'Coding mode, auto-merge refused', props: { codingMode: true, labelCount: 2, prScenario: 'auto-merge-refused' } },
+      { name: 'PR', props: { labelCount: 3, prScenario: 'open-failing' } },
+      { name: 'PR, narrow', props: { labelCount: 6, longTitle: true, width: 560, prScenario: 'long-title' } },
+      { name: 'PR, 3 PRs', props: { labelCount: 2, prScenario: 'carousel' } },
+      { name: 'PR, 7 PRs', props: { labelCount: 2, prScenario: 'carousel-many' } },
+      { name: 'PR, 5-digit PRs', props: { labelCount: 2, prScenario: 'carousel-long-numbers' } },
+      { name: 'PR, auto-merge off for the repo', props: { labelCount: 2, prScenario: 'auto-merge-blocked' } },
+      { name: 'PR, auto-merge refused', props: { labelCount: 2, prScenario: 'auto-merge-refused' } },
     ],
   },
 ]

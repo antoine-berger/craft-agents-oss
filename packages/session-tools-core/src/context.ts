@@ -16,6 +16,7 @@ import type {
   MicrosoftService,
   McpSourceConfig,
 } from './types.ts';
+import type { SessionHistoryReadOptions, SessionHistoryReadResult, SessionHistorySearchOptions, SessionHistorySearchResult } from './session-history-types.ts';
 
 // ============================================================
 // Source Credential Types
@@ -149,6 +150,7 @@ export interface ValidatorInterface {
  * - Codex: createCodexContext() with callback IPC and limited capabilities
  */
 export interface SessionToolContext {
+  markAttention?: (request: { kind: 'question' | 'plan' | 'error'; title: string; detail?: string }) => void | Promise<void>;
   // ============================================================
   // Session Info
   // ============================================================
@@ -327,6 +329,12 @@ export interface SessionToolContext {
   /** List sessions in the workspace with pagination. Injected by backend. */
   listSessions?(options?: ListSessionsOptions): ListSessionsResult;
 
+  /** Read bounded, untrusted chat history within the invoking session's authorized workspace. */
+  readSessionHistory?(options: SessionHistoryReadOptions): Promise<SessionHistoryReadResult>;
+
+  /** Literal text search of authorized workspace chat history, with bounded snippets and a cursor. */
+  searchSessionHistory?(options: SessionHistorySearchOptions): Promise<SessionHistorySearchResult>;
+
   /**
    * List background tasks (running + recently-terminal) for a session from the
    * main-process registry. Defaults to the current session if no ID given.
@@ -401,7 +409,7 @@ export interface SessionToolContext {
   // ============================================================
 
   /**
-   * PR watcher tool callbacks for Coding mode — read a session's PRs and pin/unpin PRs to the
+   * PR watcher tool callbacks for repository sessions — read a session's PRs and pin/unpin PRs to the
    * current session. Grouped like pages; injected by the backend (SessionManager) bound to the
    * invoking session. Undefined in backends that don't run alongside it — handlers degrade
    * gracefully. Tokens never reach the agent; these go through the server-side watcher.

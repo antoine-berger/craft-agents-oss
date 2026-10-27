@@ -15,7 +15,6 @@
 import type { AgentEvent } from '@craft-agent/core/types';
 import type { FileAttachment } from '../../utils/files.ts';
 import type { ThinkingLevel } from '../thinking-levels.ts';
-import type { AgentProfile } from '@craft-agent/session-tools-core';
 import type { PermissionMode } from '../mode-manager.ts';
 import type { LoadedSource } from '../../sources/types.ts';
 import type { AuthRequest } from '../session-scoped-tools.ts';
@@ -151,6 +150,9 @@ export interface BackendHostRuntimeContext {
  * Provider-specific runtime details are resolved by backend drivers internally.
  */
 export interface CoreBackendConfig {
+  /** Host-owned hard tool constraints, independent of permission mode. Throws fail closed. */
+  toolPolicy?: (toolName: string, input: Record<string, unknown>) => string | null;
+
   /** Workspace configuration */
   workspace: Workspace;
 
@@ -180,12 +182,6 @@ export interface CoreBackendConfig {
 
   /** System prompt preset ('default' | 'mini' | custom string) */
   systemPromptPreset?: 'default' | 'mini' | string;
-
-  /**
-   * Agent profile: `coding` = coding mode (lean system prompt, coding per-message context, coding
-   * session-tool set). Undefined/`default` keeps the full Craft Agent prompt and tools unchanged.
-   */
-  agentProfile?: AgentProfile;
 
   /** Workspace-level automation system for user-defined automations (automations.json) */
   automationSystem?: AutomationSystem;
@@ -511,15 +507,6 @@ export interface AgentBackend {
 
   /** Set thinking level */
   setThinkingLevel(level: ThinkingLevel): void;
-
-  /** Get the agent profile (`default` or `coding`) */
-  getAgentProfile(): AgentProfile;
-
-  /**
-   * Set the agent profile. Read when the next query/subprocess is built, so it only takes effect
-   * before the conversation starts (SessionManager enforces that).
-   */
-  setAgentProfile(profile: AgentProfile): void;
 
   // ============================================================
   // Permission Mode

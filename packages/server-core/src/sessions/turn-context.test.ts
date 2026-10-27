@@ -30,6 +30,9 @@ describe('sendMessage turn context', () => {
     const agent = {
       getModel: () => 'claude-sonnet-4-6',
       setAllSources: () => {},
+      // No source transports in this fixture; keep the normal source synchronization boundary.
+      getSummarizeCallback: () => undefined,
+      setSourceServers: async () => {},
       getSessionId: () => 'sdk-session',
       chat: async function* (message: string, _attachments?: unknown, options?: { turnContext?: string }) {
         calls.push({ message, options })

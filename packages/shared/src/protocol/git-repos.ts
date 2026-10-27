@@ -1,8 +1,8 @@
 /**
- * Coding mode's "Create new worktree": the repositories a new session can start a worktree from,
+ * Repository session worktrees: the repositories a new session can start a worktree from,
  * and the request/result of creating one. Pure types, safe to import from the renderer.
  *
- * Server: packages/server-core/src/services/coding-repos/ (RPCs `git:listRepos`, `git:createWorktree`).
+ * Server: packages/server-core/src/services/repositories/ (RPCs `git:listRepos`, `git:createWorktree`).
  */
 
 /** A repository on the workspace server's disk; its worktrees are grouped into one entry. */

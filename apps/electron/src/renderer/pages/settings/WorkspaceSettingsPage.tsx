@@ -67,7 +67,6 @@ export default function WorkspaceSettingsPage() {
   const [permissionMode, setPermissionMode] = useState<PermissionMode>('ask')
   const [workingDirectory, setWorkingDirectory] = useState('')
   const [localMcpEnabled, setLocalMcpEnabled] = useState(true)
-  const [codingModeDefault, setCodingModeDefault] = useState(false)
   const [isLoadingWorkspace, setIsLoadingWorkspace] = useState(true)
 
   // Default sources state
@@ -98,7 +97,6 @@ export default function WorkspaceSettingsPage() {
           setPermissionMode(settings.permissionMode || 'ask')
           setWorkingDirectory(settings.workingDirectory || '')
           setLocalMcpEnabled(settings.localMcpEnabled ?? true)
-          setCodingModeDefault(settings.codingMode === true)
           // Load cyclable permission modes from workspace settings
           if (settings.cyclablePermissionModes && settings.cyclablePermissionModes.length >= 2) {
             setEnabledModes(settings.cyclablePermissionModes)
@@ -280,14 +278,6 @@ export default function WorkspaceSettingsPage() {
       setWorkingDirectory('')
     }
   }, [updateWorkspaceSetting])
-
-  const handleCodingModeDefaultChange = useCallback(
-    async (enabled: boolean) => {
-      setCodingModeDefault(enabled)
-      await updateWorkspaceSetting('codingMode', enabled)
-    },
-    [updateWorkspaceSetting]
-  )
 
   const handleLocalMcpEnabledChange = useCallback(
     async (enabled: boolean) => {
@@ -537,12 +527,6 @@ export default function WorkspaceSettingsPage() {
                 </Button>
               </div>
             }
-          />
-          <SettingsToggle
-            label={t("settings.workspace.codingModeDefault")}
-            description={t("settings.workspace.codingModeDefaultDesc")}
-            checked={codingModeDefault}
-            onCheckedChange={handleCodingModeDefaultChange}
           />
           <SettingsToggle
             label={t("settings.workspace.localMcpServers")}

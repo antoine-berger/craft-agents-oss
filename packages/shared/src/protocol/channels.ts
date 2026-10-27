@@ -4,6 +4,9 @@
  * Key paths are internal and may be reorganized freely.
  */
 export const RPC_CHANNELS = {
+  attention: { GET: 'attention:get', CHANGED: 'attention:changed' },
+  ship: { START_PLAN: 'ship:startPlan', GET: 'ship:get', ADVANCE: 'ship:advance', REFRESH: 'ship:refresh', APPROVE: 'ship:approve', STOP: 'ship:stop', CHANGED: 'ship:changed' },
+  providerQuotas: { GET: 'providerQuotas:get' },
   conductor: {
     IMPORT: 'conductor:import',
   },
@@ -378,12 +381,12 @@ export const RPC_CHANNELS = {
     GET_BRANCH: 'git:getBranch',
     GET_REPOSITORY_IDENTITY: 'git:getRepositoryIdentity',
     GET_REVIEW: 'git:getReview',
-    /** Coding mode's worktree picker: local repos + `gh repo list` (see protocol/git-repos.ts) */
+    /** Repository picker: local repos + `gh repo list` (see protocol/git-repos.ts) */
     LIST_REPOS: 'git:listRepos',
     /** Creates a worktree (cloning first for a GitHub-only repo) for a new Coding session */
     CREATE_WORKTREE: 'git:createWorktree',
   },
-  /** Coding mode PR watcher (chat header PR chip): see protocol/pr-watch.ts */
+  /** PR watcher (chat header PR chip): see protocol/pr-watch.ts */
   prWatch: {
     SUBSCRIBE: 'prWatch:subscribe',
     UNSUBSCRIBE: 'prWatch:unsubscribe',

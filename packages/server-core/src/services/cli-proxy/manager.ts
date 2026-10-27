@@ -248,6 +248,25 @@ export class CliProxyManager {
     return { id: account.id, email: account.email, name: account.name }
   }
 
+  /** Read-only quota probe. Credentials and auth indexes never leave the server. */
+  async relayQuota(accountId: string): Promise<{ status_code: number; header: Record<string, string[]>; body: string }> {
+    await this.initialize()
+    if (this.phase !== 'running') throw new Error('The integrated account service is unavailable')
+    const files = await this.management('/credentials')
+    const account = files.files?.find((file: Record<string, unknown>) => file.name === accountId && ['claude', 'codex'].includes(String(file.type)) && !file.disabled)
+    if (!account?.auth_index) throw new Error('Quota account is unavailable')
+    const header: Record<string, string> = { Authorization: 'Bearer $TOKEN$', 'Content-Type': 'application/json', 'Accept-Encoding': 'identity' }
+    if (account.type === 'claude') header['anthropic-beta'] = 'oauth-2025-04-20'
+    else {
+      // Management's id_token value is already a sanitized claims object, never a token.
+      const claims = account.id_token && typeof account.id_token === 'object' ? account.id_token as Record<string, unknown> : {}
+      const identity = account.chatgpt_account_id ?? claims.chatgpt_account_id
+      if (typeof identity === 'string' && identity.length < 300 && !/[\r\n]/.test(identity)) header['Chatgpt-Account-Id'] = identity
+    }
+    const url = account.type === 'claude' ? 'https://api.anthropic.com/api/oauth/usage' : 'https://chatgpt.com/backend-api/wham/usage'
+    return this.request('/requests/api-call', true, 'POST', { auth_index: account.auth_index, method: 'GET', url, header }, 30_000)
+  }
+
   /** Only fixed Anthropic connector endpoints can use a stored account credential. */
   async relayConnector(accountId: string, serverId: string | undefined, method: string, headers: Record<string, string> = {}, data?: string, signal?: AbortSignal): Promise<{ status_code: number; header: Record<string, string[]>; body: string }> {
     const selected = await this.connectorAccount()

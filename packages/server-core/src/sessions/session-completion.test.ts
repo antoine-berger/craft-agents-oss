@@ -48,6 +48,9 @@ describe('session completion seam', () => {
     ;(sm as any).getOrCreateAgent = async () => ({
       getModel: () => 'claude-sonnet-4-6',
       setAllSources: () => {},
+      // No source transports in this fixture; keep the normal source synchronization boundary.
+      getSummarizeCallback: () => undefined,
+      setSourceServers: async () => {},
       getSessionId: () => 'sdk-session',
       forceAbort: () => {},
       chat: async function* () { started.resolve(); await gate.promise; yield { type: 'complete' } },

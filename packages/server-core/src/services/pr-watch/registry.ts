@@ -1,5 +1,5 @@
 /**
- * PR watcher registry (Coding mode). A session tracks its branch's PR plus any PRs pinned to it
+ * PR watcher registry. A session tracks its branch's PR plus any PRs pinned to it
  * (pr_bind), and the chat-header chip shows them in a carousel. Each distinct target — a checkout's
  * branch, or a pinned `repo#number` — is one ref-counted {@link Watcher}, shared by every
  * subscription on it (several panels/windows, several sessions). A watcher polls on the adaptive
@@ -157,7 +157,7 @@ function sameSessionState(a: PrWatchSessionState, b: PrWatchSessionState): boole
   if (a.kind !== b.kind) return false
   if (a.kind === 'unavailable' && b.kind === 'unavailable') return a.reason === b.reason
   if (a.kind === 'ready' && b.kind === 'ready') {
-    if (a.prs.length !== b.prs.length) return false
+    if (a.incomplete !== b.incomplete || a.prs.length !== b.prs.length) return false
     return a.prs.every((entry, i) => {
       const other = b.prs[i]!
       return entry.id === other.id && entry.origin === other.origin
@@ -177,6 +177,29 @@ export class PrWatchRegistry {
   private readonly sessionMonitors = new Map<string, Record<string, PrMonitorState>>()
   private readonly chain: TokenChain
   private nextId = 1
+  private readonly stateListeners = new Set<(sessionId: string, state: PrWatchSessionState) => void>()
+  private activeRequests = 0
+  private readonly waitingRequests: Array<() => void> = []
+  private disposed = false
+
+  /** Server observers do not depend on any renderer subscription. */
+  onSessionState(listener: (sessionId: string, state: PrWatchSessionState) => void): () => void {
+    this.stateListeners.add(listener)
+    return () => { this.stateListeners.delete(listener) }
+  }
+
+  /** Bound concurrent GitHub requests across every session, including closed windows. */
+  private async limited<T>(request: () => Promise<T>): Promise<T> {
+    if (this.activeRequests >= 4) await new Promise<void>(resolve => this.waitingRequests.push(resolve))
+    else this.activeRequests++
+    if (this.disposed) throw new Error('PR registry disposed')
+    try { return await request() }
+    finally {
+      const resume = this.waitingRequests.shift()
+      if (resume) resume()
+      else this.activeRequests--
+    }
+  }
 
   private readonly resolveRepo: NonNullable<PrWatchDeps['resolveRepo']>
   private readonly localStatus: NonNullable<PrWatchDeps['localStatus']>
@@ -206,6 +229,7 @@ export class PrWatchRegistry {
     boundPrs?: BoundPr[]
     monitors?: Record<string, PrMonitorState>
   }): Promise<{ subscriptionId: string; state: PrWatchSessionState }> {
+    if (this.disposed) throw new Error('PR registry disposed')
     const subscription: Subscription = {
       id: `prw-${this.nextId++}`,
       clientId: input.clientId,
@@ -407,6 +431,9 @@ export class PrWatchRegistry {
   /** Stops every watcher (server shutdown). */
   dispose(): void {
     for (const watcher of this.watchers.values()) this.stopWatcher(watcher)
+    this.disposed = true
+    this.stateListeners.clear()
+    for (const resume of this.waitingRequests.splice(0)) resume()
     this.watchers.clear()
     this.subscriptions.clear()
     this.lastPushed.clear()
@@ -460,7 +487,11 @@ export class PrWatchRegistry {
       entries.push(this.withMonitor(subscription.sessionId, { id, origin: 'bound', summary: watcher.state.summary }))
     }
 
-    if (entries.length > 0) return { kind: 'ready', prs: entries }
+    if (entries.length > 0) {
+      const states = [branchState, ...subscription.boundKeys.map(key => this.watchers.get(key)?.state)]
+      const incomplete = states.some(state => !state || state.kind === 'loading' || state.kind === 'unavailable')
+      return { kind: 'ready', prs: entries, ...(incomplete ? { incomplete: true } : {}) }
+    }
 
     // Nothing resolved: mirror the branch/bound state so the chip hides exactly as before.
     const boundStates = subscription.boundKeys.map(key => this.watchers.get(key)?.state.kind)
@@ -485,6 +516,9 @@ export class PrWatchRegistry {
     if (!subs.length) return
     const state = this.aggregate(subs[0]!)
     const now = this.now()
+    for (const listener of this.stateListeners) {
+      try { listener(sessionId, state) } catch (error) { this.log(`[pr-watch] observer failed: ${String(error)}`) }
+    }
     for (const clientId of new Set(subs.map(s => s.clientId))) {
       const key = `${clientId}|${sessionId}`
       const previous = this.lastPushed.get(key)
@@ -615,7 +649,7 @@ export class PrWatchRegistry {
   // ── credentials ─────────────────────────────────────────────────────────
 
   private runWithCredential<T>(coords: RepoCoordinates, workspaceRootPath: string, attempt: (token: string) => Promise<T>): Promise<{ result: T; via: string } | null> {
-    return this.deps.candidates(coords.host, workspaceRootPath).then(candidates => this.chain.run(coordsKey(coords), candidates, attempt))
+    return this.deps.candidates(coords.host, workspaceRootPath).then(candidates => this.chain.run(coordsKey(coords), candidates, token => this.limited(() => attempt(token))))
   }
 
   private withToken<T>(watcher: Watcher, coords: RepoCoordinates, attempt: (token: string) => Promise<T>): Promise<{ result: T; via: string } | null> {
@@ -647,6 +681,10 @@ export class PrWatchRegistry {
       watcher.consecutiveErrors = 0
       watcher.retryAfterUntil = undefined
       if (resolved === 'no-token') {
+        if (watcher.state.kind === 'pr') {
+          this.setState(watcher, { ...watcher.state, summary: { ...watcher.state.summary, attentionStale: true } })
+          return
+        }
         watcher.pr = null
         this.setState(watcher, { kind: 'unavailable', reason: 'no-token' })
         return
@@ -666,6 +704,7 @@ export class PrWatchRegistry {
       if (error instanceof GitHubRequestError && error.retryAfterMs) watcher.retryAfterUntil = this.now() + error.retryAfterMs
       this.log(`[pr-watch] ${watcher.key}: ${(error as Error).message}`)
       // Keep the last good state (its fetchedAt ages in the card); a failing first fetch hides the chip
+      if (watcher.state.kind === 'pr') this.setState(watcher, { ...watcher.state, summary: { ...watcher.state.summary, attentionStale: true } })
       if (watcher.state.kind === 'loading') this.setState(watcher, { kind: 'unavailable', reason: 'error' })
     }
   }
@@ -725,7 +764,7 @@ export class PrWatchRegistry {
   private updateLocal(watcher: Watcher, local: LocalStatus): void {
     if (watcher.state.kind !== 'pr') return
     const { summary } = watcher.state
-    if (summary.localAhead === local.localAhead && summary.localDirty === local.localDirty) return
+    if (summary.localAhead === local.localAhead && summary.localDirty === local.localDirty && summary.headMatchesLocal === local.headMatchesLocal) return
     this.setState(watcher, { ...watcher.state, summary: { ...summary, ...local } })
   }
 

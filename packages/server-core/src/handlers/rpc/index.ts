@@ -1,7 +1,11 @@
+import { requestClientConfirmDialog } from '../../transport/capabilities'
+import { registerShipWorkflowHandlers } from './ship-workflow'
+import { registerSessionAttentionHandlers, getSessionAttentionService } from './session-attention'
 import type { RpcServer } from '@craft-agent/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
 
 import { registerAuthHandlers } from './auth'
+import { registerProviderQuotaHandlers } from './provider-quotas'
 import { registerCliProxyHandlers } from './cli-proxy'
 import { registerAutomationsHandlers } from './automations'
 import { registerDecisionsHandlers } from './decisions'
@@ -13,8 +17,8 @@ import { registerResourcesHandlers } from './resources'
 import { registerOnboardingHandlers } from './onboarding'
 import { cleanupSessionFileWatchForClient, registerSessionsHandlers } from './sessions'
 export { registerSessionsHandlers, cleanupSessionFileWatchForClient } from './sessions'
-import { cleanupPrWatchForClient, registerPrWatchHandlers } from './pr-watch'
-import { registerCodingReposHandlers } from './coding-repos'
+import { cleanupPrWatchForClient, registerPrWatchHandlers, getPrWatchRegistry } from './pr-watch'
+import { registerRepositoryHandlers } from './repositories'
 import { registerGitReviewHandlers } from './git-review'
 import { registerConductorImportHandlers } from './conductor-import'
 import { registerCheckpointHandlers } from './checkpoints'
@@ -41,6 +45,7 @@ export function registerCoreRpcHandlers(
 ): void {
   registerAuthHandlers(server, deps)
   registerCliProxyHandlers(server, deps)
+  registerProviderQuotaHandlers(server)
   registerAutomationsHandlers(server, deps)
   registerDecisionsHandlers(server, deps)
   registerFilesHandlers(server, deps)
@@ -54,8 +59,24 @@ export function registerCoreRpcHandlers(
   registerSettingsHandlers(server, deps)
   registerProjectsHandlers(server, deps)
   registerPagesHandlers(server, deps)
+  registerSessionAttentionHandlers(server, deps)
   registerPrWatchHandlers(server, deps)
-  registerCodingReposHandlers(server, deps)
+  const prRegistry = getPrWatchRegistry()
+  if (prRegistry) getSessionAttentionService()?.start(prRegistry)
+  const ship = registerShipWorkflowHandlers(server, deps, {
+    onChanged: () => { void getSessionAttentionService()?.sync() },
+    confirmShipApproval: async (ctx, request) => {
+      const answer = await requestClientConfirmDialog(server, ctx.clientId, {
+        type: 'question', title: `Ship ${request.ticket}`,
+        message: request.decision === 'override-g1' ? 'Approve this plan despite the unresolved plan checks?' : 'Approve this plan and authorize its implementation?',
+        detail: `${request.title}\nRevision ${request.revision} · HEAD ${request.head.slice(0, 12)}\n${request.reasons.join('\n')}`,
+        buttons: ['Approve', 'Cancel'], defaultId: 1, cancelId: 1,
+      })
+      return answer.response === 0
+    },
+  })
+  deps.sessionManager.setWorkflowCommandHandler?.((sessionId, command) => ship.executeUserCommand(sessionId, command))
+  registerRepositoryHandlers(server, deps)
   registerGitReviewHandlers(server, deps)
   registerCheckpointHandlers(server, deps)
   registerConductorImportHandlers(server, deps)

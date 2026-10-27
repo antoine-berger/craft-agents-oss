@@ -1,3 +1,4 @@
+import type { LocalStatus } from './local-git'
 /**
  * GitHub GraphQL responses → the PR watcher contract (`@craft-agent/shared/protocol` pr-watch).
  * Pure, so every mapping rule is unit-tested against recorded responses.
@@ -28,6 +29,50 @@ export function pickPullRequest(nodes: readonly GqlPullRequestSummary[], headOwn
   const owner = headOwner.toLowerCase()
   const ours = nodes.filter(node => !node.headRepositoryOwner || node.headRepositoryOwner.login.toLowerCase() === owner)
   return ours.find(node => node.state === 'OPEN') ?? ours[0] ?? null
+}
+
+/** A bot's explicit positive finding count, never a generic question or progress comment. */
+function botFindingCount(body: string): string | undefined {
+  const match = body.match(/actionable comments posted\s*[:* ]*([1-9]\d*)\b|(?:found|identified)\s*[:* ]*([1-9]\d*)\s+(?:potential\s+)?(?:bugs?|issues?|problems?)\b|\b([1-9]\d*)\s+(?:potential\s+)?(?:bugs?|issues?)\s+(?:found|identified)\b/i)
+  return match?.[1] ?? match?.[2] ?? match?.[3]
+}
+function isReviewBot(author: string): boolean {
+  return /^(?:devin(?:[-_].*)?|coderabbit(?:ai)?)(?:\[bot\])?$/i.test(author)
+}
+/** Keep current, unresolved feedback only. Bot summaries must prove the reviewed HEAD. */
+export function mapAttentionFeedback(node: GqlPullRequestSummary): NonNullable<PrSummary['attentionFeedback']> {
+  const feedback: NonNullable<PrSummary['attentionFeedback']> = []
+  for (const [index, thread] of node.reviewThreads.nodes.entries()) {
+    if (thread.isResolved || thread.isOutdated) continue
+    const comment = thread.comments?.nodes[0]
+    feedback.push({ id: `thread:${thread.id ?? index}`, author: comment?.author?.login ?? 'Review', title: 'Unresolved review thread', url: comment?.url ?? `${node.url}/files` })
+  }
+  const latest = node.latestOpinionatedReviews?.nodes ?? []
+  const botComments = (node.reviews?.nodes ?? []).filter(review => review.state === 'COMMENTED' && isReviewBot(review.author?.login ?? ''))
+  const seenReviews = new Set<string>()
+  for (const review of [...latest, ...botComments]) {
+    if (seenReviews.has(review.id)) continue
+    seenReviews.add(review.id)
+    if (review.commit?.oid !== node.headRefOid) continue
+    const author = review.author?.login ?? 'Reviewer'
+    const hasThreadHistory = node.reviewThreads.nodes.some(thread => thread.comments?.nodes[0]?.author?.login === author)
+    const count = isReviewBot(author) && !hasThreadHistory ? botFindingCount(review.body) : undefined
+    if (review.state !== 'CHANGES_REQUESTED' && !count) continue
+    feedback.push({ id: `review:${review.id}`, author, title: count ? `${count} reported review findings` : 'Changes requested on the current commit', url: review.url })
+  }
+  const committedAt = Date.parse(node.commits.nodes[0]?.commit.committedDate ?? '')
+  for (const comment of node.comments?.nodes ?? []) {
+    const author = comment.author?.login ?? ''
+    if (!isReviewBot(author)) continue
+    if (!Number.isFinite(committedAt) || Date.parse(comment.createdAt) < committedAt) continue
+    // An issue-comment has no commit field. Require an explicit exact SHA (full or standard short).
+    // A delayed bot comment about an old commit must not be attributed to the latest push by date alone.
+    if (!comment.body.includes(node.headRefOid) && !new RegExp(`\\b${node.headRefOid.slice(0, 7)}\\b`).test(comment.body)) continue
+    const count = botFindingCount(comment.body)
+    if (!count) continue
+    feedback.push({ id: `comment:${comment.id}`, author, title: `${count} reported review findings`, url: comment.url })
+  }
+  return feedback
 }
 
 export function mapPrState(node: Pick<GqlPullRequestSummary, 'state' | 'isDraft'>): PrState {
@@ -128,15 +173,15 @@ export function pickMergeMethod(repo: GqlRepoMergeSettings | null, requested?: P
   return allowed.includes(preferred) ? preferred : allowed[0] ?? null
 }
 
-export interface LocalStatus {
-  localAhead: number
-  localDirty: boolean
-}
+export type { LocalStatus } from './local-git'
 
 export function mapSummary(node: GqlPullRequestSummary, local: LocalStatus, meta: { fetchedAt: number; via: string }): PrSummary {
   const autoMergeBlocked = mapAutoMergeBlock(node)
   return {
     number: node.number,
+    headOid: node.headRefOid,
+    ...(node.reviewThreads.pageInfo?.hasNextPage ? { attentionStale: true } : {}),
+    attentionFeedback: mapAttentionFeedback(node),
     title: node.title,
     url: node.url,
     state: mapPrState(node),
@@ -145,7 +190,8 @@ export function mapSummary(node: GqlPullRequestSummary, local: LocalStatus, meta
     checks: mapRollup(node.commits.nodes[0]?.commit.statusCheckRollup?.state),
     reviewDecision: mapReviewDecision(node.reviewDecision),
     mergeState: mapMergeState(node),
-    unresolvedThreads: node.reviewThreads.nodes.filter(thread => !thread.isResolved).length,
+    unresolvedThreads: node.reviewThreads.nodes.filter(thread => !thread.isResolved && !thread.isOutdated).length,
+    ...(local.headMatchesLocal !== undefined ? { headMatchesLocal: local.headMatchesLocal } : {}),
     localAhead: local.localAhead,
     localDirty: local.localDirty,
     fetchedAt: meta.fetchedAt,

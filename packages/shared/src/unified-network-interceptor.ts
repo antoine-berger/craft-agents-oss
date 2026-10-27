@@ -371,8 +371,8 @@ function stripPromptCacheTtl(body: Record<string, unknown>): number {
  *
  * Exported for focused unit tests.
  */
-export function upgradePromptCacheTtl(body: Record<string, unknown>): number {
-  if (!isExtendedPromptCacheEnabled()) return stripPromptCacheTtl(body);
+export function upgradePromptCacheTtl(body: Record<string, unknown>, extendedCacheEnabled = isExtendedPromptCacheEnabled()): number {
+  if (!extendedCacheEnabled) return stripPromptCacheTtl(body);
 
   let upgraded = 0;
 

@@ -1,14 +1,12 @@
 /**
  * Layout rules for the chat header's label chips (design spec §7.3): whole chips only, at most
- * {@link CHAT_HEADER_MAX_LABELS} (one in Coding mode), then a "+N" counter. Never an overlapping stack.
+ * {@link CHAT_HEADER_MAX_LABELS}, then a "+N" counter. Never an overlapping stack.
  */
 
 import { fitLabelCount } from '../fit-labels'
 
 /** The header shows at most this many chips before "+N". */
 export const CHAT_HEADER_MAX_LABELS = 3
-/** Coding mode keeps the title row for the PR chip: one label chip, then "+N". */
-export const CHAT_HEADER_CODING_MAX_LABELS = 1
 
 /** Share of the header's title row the chips may take, and its cap. */
 const BUDGET_SHARE = 0.45
@@ -18,7 +16,7 @@ const TITLE_RESERVE = 160
 
 /**
  * Width the label strip may use in a title row of `rowWidth` px. `reserved` is taken by other items
- * in the row (the Coding-mode PR chip) before the share is computed, so they never squeeze the title.
+ * in the row (the PR chip) before the share is computed, so they never squeeze the title.
  */
 export function labelStripBudget(rowWidth: number, reserved = 0): number {
   const available = Math.max(0, rowWidth - reserved)

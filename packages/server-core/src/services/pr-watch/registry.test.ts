@@ -246,7 +246,8 @@ describe('PrWatchRegistry fetching and pushing', () => {
     const count = t.pushes.length
     t.failNextWith(new GitHubRequestError('offline'))
     await t.registry.nudge('s1')
-    expect(t.pushes.length).toBe(count)
+    expect(t.pushes.length).toBe(count + 1)
+    expect(firstPr(t.pushes.at(-1)?.state)?.summary.attentionStale).toBe(true)
     expect(t.nextDelay()).toBe(POLL.errorBase)
   })
 
@@ -450,5 +451,51 @@ describe('PrWatchRegistry auto-fix support', () => {
     const t = setup()
     const signature = await t.registry.fetchReviewSignature({ coords: { host: 'github.com', owner: 'acme', repo: 'app' }, number: 7, workspaceRootPath: '/ws' })
     expect(signature).toEqual(['r:R1', 't:T1:C1'])
+  })
+})
+
+describe('server attention observers', () => {
+  it('observes background sessions with no renderer and retains stale evidence on network failure', async () => {
+    const t = setup()
+    const states: PrWatchSessionState[] = []
+    const off = t.registry.onSessionState((id, state) => { if (id === 'background') states.push(state) })
+    await t.registry.subscribe(sub('background', '__session_attention__'))
+    await t.flush()
+    expect(firstPr(states.at(-1))?.summary.number).toBe(7)
+    t.failNextWith(new GitHubRequestError('offline'))
+    await t.registry.nudge('background')
+    expect(firstPr(states.at(-1))?.summary.attentionStale).toBe(true)
+    off(); const count = states.length
+    await t.registry.nudge('background')
+    expect(states).toHaveLength(count)
+    t.registry.dispose()
+    expect(t.timers.size).toBe(0)
+  })
+  it('caps concurrent GraphQL requests across all sessions at four and releases queued work', async () => {
+    let active = 0; let peak = 0
+    const release: Array<() => void> = []
+    const registry = new PrWatchRegistry({
+      graphql: async <T,>() => {
+        active++; peak = Math.max(active, peak)
+        await new Promise<void>(resolve => release.push(resolve))
+        active--
+        return { rateLimit: null, repository: { pullRequests: { nodes: [PR] } } } as T
+      },
+      candidates: async () => [{ id: 'gh', label: 'gh', getToken: async () => 'token' }],
+      push: () => {}, resolveRepo: async dir => ({ ...REPO, root: dir }),
+      localStatus: async () => ({ localAhead: 0, localDirty: false, headMatchesLocal: true }),
+      watchRefs: () => () => {}, setTimer: () => 0, clearTimer: () => {},
+    })
+    try {
+      for (let i = 0; i < 9; i++) await registry.subscribe(sub(`s${i}`, '__session_attention__', `/repo/${i}`))
+      await new Promise(resolve => setTimeout(resolve, 0))
+      expect(active).toBe(4)
+      for (let i = 0; i < 9; i++) {
+        release.shift()?.()
+        await new Promise(resolve => setTimeout(resolve, 0))
+      }
+      expect(active).toBe(0)
+      expect(peak).toBe(4)
+    } finally { registry.dispose(); for (const resolve of release) resolve() }
   })
 })

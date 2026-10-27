@@ -1,4 +1,7 @@
 import { describe, it, expect, afterEach } from 'bun:test'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { CliRpcClient } from './client.ts'
 import {
   serializeEnvelope,
@@ -358,11 +361,6 @@ describe('CliRpcClient', () => {
 
   it('connects over wss:// with TLS', async () => {
     const tls = generateSelfSignedCert()
-    if (!tls) {
-      // openssl not available — skip TLS test
-      console.log('  (skipped: openssl not available)')
-      return
-    }
     server = createMockServer({ tls })
 
     const prev = process.env.NODE_TLS_REJECT_UNAUTHORIZED
@@ -387,23 +385,21 @@ describe('CliRpcClient', () => {
 // TLS cert helper — generates a real self-signed cert via openssl
 // ---------------------------------------------------------------------------
 
-function generateSelfSignedCert(): { cert: string; key: string } | null {
+function generateSelfSignedCert(): { cert: string; key: string } {
+  const directory = mkdtempSync(join(tmpdir(), 'craft-cli-tls-'))
   try {
-    const keyResult = Bun.spawnSync({
-      cmd: ['openssl', 'req', '-x509', '-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:prime256v1',
-        '-keyout', '/dev/stdout', '-out', '/dev/stdout',
+    const keyPath = join(directory, 'key.pem')
+    const certPath = join(directory, 'cert.pem')
+    const result = Bun.spawnSync({
+      cmd: ['openssl', 'req', '-x509', '-newkey', 'rsa:2048',
+        '-keyout', keyPath, '-out', certPath,
         '-days', '1', '-nodes', '-subj', '/CN=localhost', '-batch'],
       stderr: 'pipe',
     })
-    if (keyResult.exitCode !== 0) return null
-
-    const pem = keyResult.stdout.toString()
-    const certMatch = pem.match(/(-----BEGIN CERTIFICATE-----[\s\S]+?-----END CERTIFICATE-----)/)
-    const keyMatch = pem.match(/(-----BEGIN (?:EC )?PRIVATE KEY-----[\s\S]+?-----END (?:EC )?PRIVATE KEY-----)/)
-    if (!certMatch || !keyMatch) return null
-
-    return { cert: certMatch[1], key: keyMatch[1] }
-  } catch {
-    return null
+    if (result.exitCode !== 0) throw new Error(`TLS fixture generation failed: ${result.stderr.toString()}`)
+    // Separate files preserve complete PEM data; two /dev/stdout streams can interleave or truncate.
+    return { cert: readFileSync(certPath, 'utf8'), key: readFileSync(keyPath, 'utf8') }
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
   }
 }

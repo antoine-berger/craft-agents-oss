@@ -354,13 +354,23 @@ export const CHANNEL_MAP = {
   // Git
   getGitBranch: invoke(RPC_CHANNELS.git.GET_BRANCH),
   getRepositoryIdentity: invoke(RPC_CHANNELS.git.GET_REPOSITORY_IDENTITY),
+  getSessionAttention: invoke(RPC_CHANNELS.attention.GET),
+  onSessionAttentionChanged: listener(RPC_CHANNELS.attention.CHANGED),
+  startShipPlan: invoke(RPC_CHANNELS.ship.START_PLAN),
+  getShipWorkflow: invoke(RPC_CHANNELS.ship.GET),
+  advanceShipWorkflow: invoke(RPC_CHANNELS.ship.ADVANCE),
+  refreshShipWorkflow: invoke(RPC_CHANNELS.ship.REFRESH),
+  approveShipWorkflow: invoke(RPC_CHANNELS.ship.APPROVE),
+  stopShipWorkflow: invoke(RPC_CHANNELS.ship.STOP),
+  onShipWorkflowChanged: listener(RPC_CHANNELS.ship.CHANGED),
+  getProviderQuotas: invoke(RPC_CHANNELS.providerQuotas.GET),
   getGitReview: invoke(RPC_CHANNELS.git.GET_REVIEW),
   listSessionCheckpoints: invoke(RPC_CHANNELS.sessions.LIST_CHECKPOINTS),
   restoreSessionCheckpoint: invoke(RPC_CHANNELS.sessions.RESTORE_CHECKPOINT),
-  listCodingRepos: invoke(RPC_CHANNELS.git.LIST_REPOS),
-  createCodingWorktree: invoke(RPC_CHANNELS.git.CREATE_WORKTREE),
+  listRepositories: invoke(RPC_CHANNELS.git.LIST_REPOS),
+  createSessionWorktree: invoke(RPC_CHANNELS.git.CREATE_WORKTREE),
 
-  // PR watcher (Coding mode chat-header chip)
+  // PR watcher (Chat-header chip)
   prWatchSubscribe: invoke(RPC_CHANNELS.prWatch.SUBSCRIBE),
   prWatchUnsubscribe: invoke(RPC_CHANNELS.prWatch.UNSUBSCRIBE),
   prWatchRefresh: invoke(RPC_CHANNELS.prWatch.REFRESH),

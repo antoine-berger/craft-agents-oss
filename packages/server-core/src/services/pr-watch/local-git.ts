@@ -4,7 +4,7 @@
  * or push. Async `execFile` (no shell), short timeouts; failures read as "unknown", never throw.
  */
 
-import { watch, type FSWatcher } from 'node:fs'
+import { watch, watchFile, unwatchFile, type FSWatcher, type Stats } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { runGit } from '../git'
 import { parseRemoteUrl, type RepoCoordinates } from './remote-url'
@@ -69,6 +69,7 @@ export async function resolveRepo(dir: string): Promise<RepoInfo | null> {
 }
 
 export interface LocalStatus {
+  headMatchesLocal?: boolean | null
   /** Commits on HEAD that the PR head doesn't have */
   localAhead: number
   /** Uncommitted changes, untracked files included (ignored files are not) */
@@ -85,7 +86,8 @@ export async function localStatus(dir: string, prHeadOid: string | null): Promis
     ahead = await runGit(dir, ['rev-list', '--count', `${base}..HEAD`])
     if (ahead !== null) break
   }
-  return { localAhead: Number(ahead ?? 0) || 0, localDirty: porcelain !== null }
+  const head = await runGit(dir, ['rev-parse', 'HEAD'])
+  return { localAhead: Number(ahead ?? 0) || 0, localDirty: porcelain !== null, headMatchesLocal: head && prHeadOid ? head === prHeadOid : null }
 }
 
 /**
@@ -93,10 +95,13 @@ export async function localStatus(dir: string, prHeadOid: string | null): Promis
  * commit, checkout, reset, fetch or push. The index and worktree are not watched (every `git status`
  * touches the index). Returns a disposer; watch errors just mean no instant refresh (polling remains).
  */
-export function watchRefs(repo: RepoInfo, onChange: () => void, debounceMs = 1_000): () => void {
+export function watchRefs(repo: RepoInfo, onChange: () => void, debounceMs = 1_000, statIntervalMs = 2_000): () => void {
   const watchers: FSWatcher[] = []
   let timer: ReturnType<typeof setTimeout> | null = null
+  let disposed = false
+  const statDisposers: Array<() => void> = []
   const fire = () => {
+    if (disposed) return
     if (timer) clearTimeout(timer)
     timer = setTimeout(() => {
       timer = null
@@ -110,7 +115,7 @@ export function watchRefs(repo: RepoInfo, onChange: () => void, debounceMs = 1_0
   const tryWatch = (path: string, recursive: boolean, filter: (name: string) => boolean) => {
     try {
       const watcher = watch(path, { recursive, persistent: false }, (_event, name) => {
-        if (name && filter(name.toString())) fire()
+        if (!name || filter(name.toString())) fire()
       })
       watcher.on('error', () => watcher.close())
       watchers.push(watcher)
@@ -119,12 +124,26 @@ export function watchRefs(repo: RepoInfo, onChange: () => void, debounceMs = 1_0
     }
   }
 
+  // A small stat safety net also covers runtimes which silently lose fs.watch notifications
+  // (Bun on macOS with exhausted FSEvent descriptors). Exact refs only: no directory scans/Git subprocesses.
+  const statPaths = new Set([join(repo.gitDir, 'HEAD'), join(repo.commonDir, 'packed-refs'),
+    ...[...relevantRefs].map(ref => join(repo.commonDir, 'refs', ref))])
+  for (const path of statPaths) {
+    const changed = (current: Stats, previous: Stats) => {
+      if (current.mtimeMs !== previous.mtimeMs || current.ino !== previous.ino || current.size !== previous.size) fire()
+    }
+    watchFile(path, { persistent: false, interval: statIntervalMs }, changed)
+    statDisposers.push(() => unwatchFile(path, changed))
+  }
+
   tryWatch(repo.gitDir, false, name => name === 'HEAD')
   tryWatch(repo.commonDir, false, name => name === 'packed-refs' || (repo.commonDir === repo.gitDir && name === 'HEAD'))
   tryWatch(join(repo.commonDir, 'refs'), true, name => relevantRefs.has(name.replace(/\.lock$/, '')))
 
   return () => {
+    disposed = true
     if (timer) clearTimeout(timer)
+    for (const stop of statDisposers) stop()
     for (const watcher of watchers) watcher.close()
   }
 }

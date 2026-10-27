@@ -217,7 +217,7 @@ const LIVE_THINKING_UPDATE_TIMEOUT_MS = 2_000;
 /**
  * ClaudeAgent's config is the backend config (the provider is implied). The constructor passes it to
  * BaseAgent whole, so every BackendConfig field reaches `this.config`: a hand-copied field list here
- * once dropped each field added later (agentProfile, enable1MContext, autoCompactWindow, onImageResize).
+ * once dropped each field added later (enable1MContext, autoCompactWindow, onImageResize).
  */
 export type ClaudeAgentConfig = Omit<BackendConfig, 'provider'>;
 
@@ -1136,9 +1136,6 @@ export class ClaudeAgent extends BaseAgent {
       const fullMcpServers: Options['mcpServers'] = {
         // Session-scoped tools (SubmitPlan, source_test, update_user_preferences, transform_data, etc.)
         session: getSessionScopedTools(sessionId, this.workspaceRootPath, undefined, {
-          profile: this._agentProfile,
-          hasEnabledSources: this.sourceManager.getIntendedSlugs().size > 0,
-          hasProject: !!this.config.session?.projectId,
           mcpManagement: this.usesClaudeAccountConnectors() ? 'claudeai' : undefined,
         }),
         // Per-source proxy servers from centralized MCP pool (MCP + API sources)
@@ -1288,7 +1285,6 @@ export class ClaudeAgent extends BaseAgent {
                 undefined, // backendName
                 this.pinnedIncludeCoAuthoredBy ?? undefined,
                 this.pinnedProjectContext ?? undefined,
-                this._agentProfile,
                 this.usesClaudeAccountConnectors(),
               ),
             },
@@ -1414,6 +1410,7 @@ export class ClaudeAgent extends BaseAgent {
                 hasSourceActivation: !!this.onSourceActivationRequest,
                 permissionManager: this.permissionManager,
                 prerequisiteManager: this.prerequisiteManager,
+                toolPolicy: this.getToolPolicy(),
                 keepSourceToolIntent: true,
                 rtkContext,
                 onDebug: (msg) => this.onDebug?.(msg),
@@ -1597,7 +1594,7 @@ export class ClaudeAgent extends BaseAgent {
           // mid-turn. Craft never sees a detached call's late result (it reaches the model as a
           // queued task notification), so keep every tool attached. The event adapter still
           // renders a detached placeholder sensibly (`isDetachedToolCallResult`).
-          // Coding mode: a Bash `gh pr create` pins the PR it opened (pinCreatedPrHook). Hooks
+          // A Bash `gh pr create` pins the PR it opened (pinCreatedPrHook). Hooks
           // run in parallel on the original output; the two act on different tools.
           PostToolUse: [{
             hooks: [
@@ -2552,7 +2549,7 @@ This is a branched conversation. All prior messages in this conversation are par
         plansFolderPath: getSessionPlansPath(this.workspaceRootPath, this.modeSessionId),
         claudeAccountConnectors: this.usesClaudeAccountConnectors(),
       },
-      this.sourceManager.formatSourceState({ activeOnly: this._agentProfile === 'coding' })
+      this.sourceManager.formatSourceState()
     );
 
     parts.push(...contextParts);
@@ -2601,7 +2598,7 @@ This is a branched conversation. All prior messages in this conversation are par
         plansFolderPath: getSessionPlansPath(this.workspaceRootPath, this.modeSessionId),
         claudeAccountConnectors: this.usesClaudeAccountConnectors(),
       },
-      this.sourceManager.formatSourceState({ activeOnly: this._agentProfile === 'coding' })
+      this.sourceManager.formatSourceState()
     );
 
     for (const part of contextParts) {
@@ -2913,7 +2910,7 @@ This is a branched conversation. All prior messages in this conversation are par
   }
 
   /**
-   * PostToolUse, Coding mode: pin the PR a Bash `gh pr create` printed (`BaseAgent.pinCreatedPr`)
+   * PostToolUse: pin the PR a Bash `gh pr create` printed (`BaseAgent.pinCreatedPr`)
    * and tell the model through `additionalContext`, so it doesn't pin it again with pr_bind.
    */
   private async pinCreatedPrHook(input: SdkAutomationInput): Promise<{

@@ -20,6 +20,7 @@ import { debug } from '../utils/debug.ts';
  * Callbacks that can be registered per-session
  */
 export interface SessionScopedToolCallbacks {
+  markAttentionFn?: (request: { kind: 'question' | 'plan' | 'error'; title: string; detail?: string }) => void | Promise<void>;
   /**
    * Called when a plan is submitted via SubmitPlan tool.
    * Receives the path to the plan markdown file.
@@ -61,6 +62,10 @@ export interface SessionScopedToolCallbacks {
   getSessionInfoFn?: (sessionId?: string) => import('@craft-agent/session-tools-core').SessionInfo | null;
   /** List sessions in the workspace with pagination. */
   listSessionsFn?: (options?: import('@craft-agent/session-tools-core').ListSessionsOptions) => import('@craft-agent/session-tools-core').ListSessionsResult;
+  /** Read bounded historical messages; authorization is bound to the invoking workspace. */
+  readSessionHistoryFn?: (options: import('@craft-agent/session-tools-core').SessionHistoryReadOptions) => Promise<import('@craft-agent/session-tools-core').SessionHistoryReadResult>;
+  /** Search literal historical text without inserting every chat into the prompt. */
+  searchSessionHistoryFn?: (options: import('@craft-agent/session-tools-core').SessionHistorySearchOptions) => Promise<import('@craft-agent/session-tools-core').SessionHistorySearchResult>;
   /** List background tasks (running + terminal) for a session from the main-process registry. */
   listBackgroundTasksFn?: (sessionId?: string) => import('@craft-agent/session-tools-core').BackgroundTaskInfo[];
   /** Resolve label display names to IDs. */
@@ -110,7 +115,7 @@ export interface SessionScopedToolCallbacks {
    */
   decide?: import('@craft-agent/session-tools-core').DecisionToolCallbacks;
   /**
-   * PR watcher tools (pr_status / pr_bind / pr_unbind / pr_set_auto_merge) for Coding mode. Wired by
+   * PR watcher tools (pr_status / pr_bind / pr_unbind / pr_set_auto_merge) for all sessions. Wired by
    * SessionManager bound to the invoking session; the server-side watcher holds the credentials.
    */
   prWatch?: import('@craft-agent/session-tools-core').PrWatchToolCallbacks;

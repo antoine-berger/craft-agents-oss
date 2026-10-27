@@ -49,7 +49,7 @@ function summary(overrides: Partial<PrSummary> = {}): PrSummary {
   const number = overrides.number ?? 481
   return {
     number,
-    title: 'Coding mode: PR watcher in the chat header',
+    title: 'PR watcher in the chat header',
     url: `${REPO}/pull/${number}`,
     state: 'open',
     headRef: 'feat/coding-mode',

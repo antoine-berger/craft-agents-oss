@@ -1,18 +1,13 @@
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
-import { writeFileSync, unlinkSync, mkdirSync } from 'node:fs';
-import { join } from 'node:path';
-import { homedir } from 'node:os';
+import { beforeAll, describe, expect, it } from 'bun:test';
 
 let injectMetadataIntoToolSchema: typeof import('../unified-network-interceptor.ts').injectMetadataIntoToolSchema;
 let sanitizeEmptyTextCacheControl: typeof import('../unified-network-interceptor.ts').sanitizeEmptyTextCacheControl;
 let upgradePromptCacheTtl: typeof import('../unified-network-interceptor.ts').upgradePromptCacheTtl;
-let _resetConfigCacheForTesting: typeof import('../interceptor-common.ts')._resetConfigCacheForTesting;
 
 describe('unified-network-interceptor schema metadata injection', () => {
   beforeAll(async () => {
     process.env.CRAFT_INTERCEPTOR_DISABLE_AUTO_INSTALL = '1';
     ({ injectMetadataIntoToolSchema, sanitizeEmptyTextCacheControl, upgradePromptCacheTtl } = await import('../unified-network-interceptor.ts'));
-    ({ _resetConfigCacheForTesting } = await import('../interceptor-common.ts'));
   });
 
   it('injects metadata fields into empty/zero-arg schemas', () => {
@@ -123,43 +118,11 @@ describe('sanitizeEmptyTextCacheControl', () => {
 });
 
 describe('upgradePromptCacheTtl', () => {
-  const configFile = join(homedir(), '.craft-agent', 'config.json');
-  let originalConfig: string | null = null;
-
-  beforeEach(() => {
-    // Save original config if it exists
-    try {
-      originalConfig = require('node:fs').readFileSync(configFile, 'utf-8');
-    } catch {
-      originalConfig = null;
-    }
-  });
-
-  afterEach(() => {
-    // Restore original config
-    if (originalConfig !== null) {
-      writeFileSync(configFile, originalConfig);
-    } else {
-      try { unlinkSync(configFile); } catch { /* ignore */ }
-    }
-    _resetConfigCacheForTesting();
-  });
-
-  function enableExtendedCache() {
-    const dir = join(homedir(), '.craft-agent');
-    mkdirSync(dir, { recursive: true });
-    const existing = originalConfig ? JSON.parse(originalConfig) : {};
-    writeFileSync(configFile, JSON.stringify({ ...existing, extendedPromptCache: true }));
-    _resetConfigCacheForTesting();
-  }
-
-  function disableExtendedCache() {
-    const dir = join(homedir(), '.craft-agent');
-    mkdirSync(dir, { recursive: true });
-    const existing = originalConfig ? JSON.parse(originalConfig) : {};
-    writeFileSync(configFile, JSON.stringify({ ...existing, extendedPromptCache: false }));
-    _resetConfigCacheForTesting();
-  }
+  // Exercise the actual transform without touching the user's config or depending
+  // on whichever CRAFT_CONFIG_DIR another suite imported first.
+  let extendedCacheEnabled = false;
+  function enableExtendedCache() { extendedCacheEnabled = true; }
+  function disableExtendedCache() { extendedCacheEnabled = false; }
 
   it('leaves blocks without ttl untouched when disabled', () => {
     disableExtendedCache();
@@ -172,7 +135,7 @@ describe('upgradePromptCacheTtl', () => {
       }],
     };
 
-    const result = upgradePromptCacheTtl(body);
+    const result = upgradePromptCacheTtl(body, extendedCacheEnabled);
 
     expect(result).toBe(0);
     expect((body.messages[0]!.content as any[])[0].cache_control).toEqual({ type: 'ephemeral' });
@@ -190,7 +153,7 @@ describe('upgradePromptCacheTtl', () => {
       }],
     };
 
-    const stripped = upgradePromptCacheTtl(body);
+    const stripped = upgradePromptCacheTtl(body, extendedCacheEnabled);
 
     expect(stripped).toBe(2);
     expect((body.messages[0]!.content as any[])[0].cache_control).toEqual({ type: 'ephemeral' });
@@ -206,7 +169,7 @@ describe('upgradePromptCacheTtl', () => {
       messages: [],
     };
 
-    const stripped = upgradePromptCacheTtl(body);
+    const stripped = upgradePromptCacheTtl(body, extendedCacheEnabled);
 
     expect(stripped).toBe(1);
     expect((body.system as any[])[0].cache_control).toEqual({ type: 'ephemeral' });
@@ -219,7 +182,7 @@ describe('upgradePromptCacheTtl', () => {
       messages: [],
     };
 
-    const stripped = upgradePromptCacheTtl(body);
+    const stripped = upgradePromptCacheTtl(body, extendedCacheEnabled);
 
     expect(stripped).toBe(1);
     expect(body.cache_control as any).toEqual({ type: 'ephemeral' });
@@ -237,7 +200,7 @@ describe('upgradePromptCacheTtl', () => {
       }],
     };
 
-    const upgraded = upgradePromptCacheTtl(body);
+    const upgraded = upgradePromptCacheTtl(body, extendedCacheEnabled);
 
     expect(upgraded).toBe(2);
     expect((body.messages[0]!.content as any[])[0].cache_control).toEqual({ type: 'ephemeral', ttl: '1h' });
@@ -253,7 +216,7 @@ describe('upgradePromptCacheTtl', () => {
       messages: [],
     };
 
-    const upgraded = upgradePromptCacheTtl(body);
+    const upgraded = upgradePromptCacheTtl(body, extendedCacheEnabled);
 
     expect(upgraded).toBe(1);
     expect((body.system as any[])[0].cache_control).toEqual({ type: 'ephemeral', ttl: '1h' });
@@ -266,7 +229,7 @@ describe('upgradePromptCacheTtl', () => {
       messages: [],
     };
 
-    const upgraded = upgradePromptCacheTtl(body);
+    const upgraded = upgradePromptCacheTtl(body, extendedCacheEnabled);
 
     expect(upgraded).toBe(1);
     expect(body.cache_control as any).toEqual({ type: 'ephemeral', ttl: '1h' });
@@ -283,7 +246,7 @@ describe('upgradePromptCacheTtl', () => {
       }],
     };
 
-    const upgraded = upgradePromptCacheTtl(body);
+    const upgraded = upgradePromptCacheTtl(body, extendedCacheEnabled);
 
     expect(upgraded).toBe(0);
     expect((body.messages[0]!.content as any[])[0].cache_control).toBeUndefined();
@@ -300,7 +263,7 @@ describe('upgradePromptCacheTtl', () => {
       }],
     };
 
-    const upgraded = upgradePromptCacheTtl(body);
+    const upgraded = upgradePromptCacheTtl(body, extendedCacheEnabled);
 
     // Still counts as upgraded (idempotent set), but that's fine
     expect(upgraded).toBe(1);
@@ -309,7 +272,7 @@ describe('upgradePromptCacheTtl', () => {
 
   it('returns 0 when no messages or system prompt', () => {
     enableExtendedCache();
-    expect(upgradePromptCacheTtl({})).toBe(0);
+    expect(upgradePromptCacheTtl({}, extendedCacheEnabled)).toBe(0);
   });
 
   // Regression for the screenshot bug: when extendedPromptCache is enabled,
@@ -329,7 +292,7 @@ describe('upgradePromptCacheTtl', () => {
       messages: [],
     };
 
-    const upgraded = upgradePromptCacheTtl(body);
+    const upgraded = upgradePromptCacheTtl(body, extendedCacheEnabled);
 
     expect(upgraded).toBe(3);
     expect((body.tools as any[])[0].cache_control).toEqual({ type: 'ephemeral', ttl: '1h' });
@@ -346,7 +309,7 @@ describe('upgradePromptCacheTtl', () => {
       messages: [],
     };
 
-    const stripped = upgradePromptCacheTtl(body);
+    const stripped = upgradePromptCacheTtl(body, extendedCacheEnabled);
 
     expect(stripped).toBe(1);
     expect((body.tools as any[])[0].cache_control).toEqual({ type: 'ephemeral' });

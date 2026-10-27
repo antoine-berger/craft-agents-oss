@@ -7,7 +7,7 @@
  * - LLM connection type mapping
  * - Available providers list
  */
-import { describe, it, expect, beforeEach } from 'bun:test';
+import { afterAll, beforeAll, describe, it, expect, spyOn } from 'bun:test';
 import { join } from 'node:path';
 import {
   detectProvider,
@@ -26,12 +26,23 @@ import {
   testBackendConnection,
   validateStoredBackendConnection,
 } from '../factory.ts';
+import { readFileSync } from 'node:fs';
+import * as configStorage from '../../../config/storage.ts';
 import type { BackendConfig } from '../types.ts';
 import type { Workspace, LlmConnection } from '../../../config/storage.ts';
 import type { SessionConfig as Session } from '../../../sessions/storage.ts';
 import { ClaudeAgent } from '../../claude-agent.ts';
 import { PiAgent } from '../../pi-agent.ts';
 import { isValidProviderAuthCombination } from '../../../config/llm-connections.ts';
+
+// App startup normally installs this bundled file. Constructor-only fixtures have no app startup.
+let restoreDefaults = () => {};
+beforeAll(() => {
+  const defaults = JSON.parse(readFileSync(new URL('../../../../../../apps/electron/resources/config-defaults.json', import.meta.url), 'utf8'));
+  const stub = spyOn(configStorage, 'loadConfigDefaults').mockReturnValue(defaults);
+  restoreDefaults = () => stub.mockRestore();
+});
+afterAll(() => restoreDefaults());
 
 // Test helpers
 function createTestWorkspace(): Workspace {
@@ -367,11 +378,10 @@ describe('ClaudeAgent model switching', () => {
 
 describe('createBackend hands the whole config to the agent', () => {
   // Regression: ClaudeAgent rebuilt its config from a hand-copied field list, which dropped every
-  // field added to BackendConfig later. Coding mode (agentProfile), the 1M-context toggle, the
+  // field added to BackendConfig later. The 1M-context toggle, the
   // compaction window and oversized-image resizing never reached Claude sessions.
   const onImageResize = async () => null;
   const fields: Partial<BackendConfig> = {
-    agentProfile: 'coding',
     enable1MContext: false,
     autoCompactWindow: 200_000,
     onImageResize,
@@ -380,7 +390,6 @@ describe('createBackend hands the whole config to the agent', () => {
   for (const provider of ['anthropic', 'pi'] as const) {
     it(`${provider}: every field reaches the agent`, () => {
       const agent = createBackend(createTestConfig({ provider, ...fields }));
-      expect(agent.getAgentProfile()).toBe('coding');
       const { config } = agent as unknown as { config: BackendConfig };
       for (const [key, value] of Object.entries(fields)) {
         expect(config[key as keyof BackendConfig]).toBe(value);

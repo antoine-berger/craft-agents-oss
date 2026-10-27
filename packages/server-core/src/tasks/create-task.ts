@@ -72,7 +72,7 @@ export async function createTaskFromSpec(
   workspaceId: string,
   workspaceRoot: string,
   spec: TaskSpec,
-  opts?: { save?: boolean },
+  opts?: { save?: boolean; worktree?: 'none' },
 ): Promise<CreateTaskFromSpecResult> {
   if (opts?.save !== false) saveTaskSpec(workspaceRoot, spec)
 
@@ -82,6 +82,7 @@ export async function createTaskFromSpec(
     sessionStatus: 'todo',
     // Stable linkage: this session orchestrates task `spec.id` across all of its runs.
     taskSlug: spec.id,
+    ...(opts?.worktree ? { worktree: opts.worktree } : {}),
     // Explicit cwd from the spec seeds the orchestrator; children inherit it at dispatch.
     // Omitted → orchestrator falls back to the project/workspace default working directory.
     ...(spec.cwd ? { workingDirectory: spec.cwd } : {}),

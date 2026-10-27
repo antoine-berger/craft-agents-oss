@@ -6,6 +6,7 @@ import { rendererPerf } from "@/lib/perf"
 import { Spinner } from "@craft-agent/ui"
 import { EntityRow } from "@/components/ui/entity-row"
 import { EntityListBadge } from "@/components/ui/entity-list-badge"
+import { SessionAttentionBadge } from "./SessionAttentionBadge"
 import { SessionMenu } from "./SessionMenu"
 import { BatchSessionMenu } from "./BatchSessionMenu"
 import { CompactSessionMenu } from "./CompactSessionMenu"
@@ -84,6 +85,8 @@ export function SessionItem({
     const labelId = extractLabelId(entry)
     return ctx.flatLabels.some(l => l.id === labelId)
   }))
+  const attention = ctx.attention?.[item.id]
+  const hasServerAttention = attention?.status === 'needs-human'
   const hasPendingPrompt = ctx.hasPendingPrompt?.(item.id) ?? false
   const isUnread = hasUnreadMeta(item)
   const messagingBindingsBySession = useAtomValue(messagingBindingsBySessionAtom)
@@ -91,9 +94,9 @@ export function SessionItem({
   const hasMessagingBinding = sessionBindings.length > 0
 
   // Run state owns the subtitle line; attention states win (spec §2.4).
-  const runState: 'needs-you' | 'working' | 'failed' | 'plan' | null = hasPendingPrompt
+  const runState: 'needs-you' | 'working' | 'failed' | 'plan' | null = (hasPendingPrompt || hasServerAttention)
     ? 'needs-you'
-    : item.isProcessing
+    : (item.isProcessing || attention?.status === 'working')
       ? 'working'
       : item.lastMessageRole === 'error'
         ? 'failed'
@@ -145,7 +148,7 @@ export function SessionItem({
   const subtitle = runState === 'needs-you' ? (
     <span className="flex items-center gap-1.5 min-w-0 text-info">
       <Hand className="size-3.5 shrink-0" aria-hidden="true" />
-      <span className="truncate">{t("session.runState.needsYou")}</span>
+      <span className="truncate">{attention?.reasons[0]?.title ?? t("session.runState.needsYou")}</span>
     </span>
   ) : runState === 'working' ? (
     <span className="flex items-center gap-1.5 min-w-0">
@@ -266,7 +269,7 @@ export function SessionItem({
           </div>
         ) : undefined
       }
-      titleTrailing={isUnread && !hasMatch ? (
+      titleTrailing={hasServerAttention && attention ? <SessionAttentionBadge attention={attention} onOpen={onSelect} /> : isUnread && !hasMatch ? (
         // Unread: an accent dot leads the meta and the age turns accent, so the signal sits on the
         // row's own grid (the trailing slot) instead of floating in the bleed past the gutter.
         <span className="inline-flex items-center gap-1.5 text-accent">

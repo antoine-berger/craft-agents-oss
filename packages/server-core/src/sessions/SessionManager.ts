@@ -1,11 +1,15 @@
+import { parseShipCommand, type ShipWorkflowState } from '@craft-agent/shared/protocol'
+import { getSessionAttentionService, disposeSessionAttention } from '../handlers/rpc/session-attention'
+import { readSessionHistory, searchSessionHistory } from '../services/session-history'
+import { shipSessionToolDenial } from '../services/ship-workflow/tool-policy'
 import { captureSessionCheckpoint, listSessionCheckpoints as listWorktreeCheckpoints, restoreSessionCheckpoint as restoreWorktreeCheckpoint, assertCheckpointRestoreComplete, SessionCheckpointError, type CheckpointRecord } from '../services/checkpoints/session-checkpoints'
 import type { SessionCheckpointList, SessionCheckpointRestoreResult } from '@craft-agent/shared/protocol'
 import { availableSessionSourceSlugs } from './automatic-session-sources'
-import { resolveRepositoryStart } from '../services/coding-repos/start-context'
+import { resolveRepositoryStart } from '../services/repositories/start-context'
 import { resolveLinearStartIssue } from '../sources/linear-start-context'
 import { parsePrReference } from '../services/pr-watch/pr-ref'
-import { resolveWorktreeRepository } from '../services/coding-repos/worktree'
-import { cloneRootFor, commonGitDir, discoverLocalRepos, repoCommandDir } from '../services/coding-repos/discover'
+import { resolveWorktreeRepository } from '../services/repositories/worktree'
+import { cloneRootFor, commonGitDir, discoverLocalRepos, repoCommandDir } from '../services/repositories/discover'
 import { loadProxyConnectorSources } from '../services/cli-proxy/connectors'
 import type { EventSink, RpcServer } from '@craft-agent/server-core/transport'
 import { CLIENT_BROWSER_INVOKE } from '@craft-agent/server-core/transport'
@@ -104,6 +108,7 @@ import { redactBrowserPasswordFills } from '@craft-agent/shared/agent'
 import { restoreFiles } from '@craft-agent/shared/utils/bundle-files'
 import { getCredentialManager } from '@craft-agent/shared/credentials'
 import { CraftMcpClient, McpClientPool, McpPoolServer } from '@craft-agent/shared/mcp'
+import type { SpawnSessionRequest, SpawnSessionResult } from '../../../shared/src/agent/base-agent'
 import { type Session, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, type BackgroundTaskOutput, type StopBackgroundTaskResult, type BoundPr, type PrMonitorState, RPC_CHANNELS, generateMessageId } from '@craft-agent/shared/protocol'
 import { launchOutputFile, readBackgroundTaskOutput } from './background-task-output'
 import { messageToStored, storedToMessage, type Message, type StoredAttachment, type ToolDisplayMeta, type TokenUsage } from '@craft-agent/core/types'
@@ -136,8 +141,8 @@ import { AutomationSystem, createPromptHistoryEntry, appendAutomationHistoryEntr
 import { buildBackendRuntimeSignature, buildRestartRequiredSignature, filterAttachmentsForModelInput } from './runtime-config'
 import { validateArchiveTarget } from './archive-guards'
 import { resolveSessionWorktreePolicy, defaultSessionWorktreePolicy, isSessionDirectoryInWorktree } from './session-worktree'
-import { getGitHubBranchPrefix } from '../services/coding-repos/github'
-import { planOwnedWorktree, ensureOwnedWorktree, removeOwnedWorktree, ownedWorktreeWorkingDirectory } from '../services/coding-repos/owned-worktree'
+import { getGitHubBranchPrefix } from '../services/repositories/github'
+import { planOwnedWorktree, ensureOwnedWorktree, removeOwnedWorktree, ownedWorktreeWorkingDirectory } from '../services/repositories/owned-worktree'
 import { addTurnUsage, branchStartTotals, type BranchParent } from './turn-usage'
 
 // Import from server-core domain utilities
@@ -847,11 +852,9 @@ interface ManagedSession {
   connectionLocked?: boolean
   // Thinking level for this session ('off', 'think', 'max')
   thinkingLevel?: ThinkingLevel
-  // Coding mode: lean coding prompt + session-tool profile (fixed once the session has messages)
-  codingMode?: boolean
-  // Coding mode: PRs pinned to this session (chat-header PR carousel; see pr_bind / pr_unbind)
+  // PRs pinned to this session (chat-header PR carousel; see pr_bind / pr_unbind)
   boundPrs?: BoundPr[]
-  // Coding mode: per-PR monitor state (auto-fix toggle + what it last acted on), keyed by PR id
+  // Per-PR monitor state (auto-fix toggle + what it last acted on), keyed by PR id
   prMonitors?: Record<string, PrMonitorState>
   // System prompt preset for mini agents ('default' | 'mini')
   systemPromptPreset?: 'default' | 'mini' | string
@@ -1100,7 +1103,7 @@ export function isAttendedSession(managed: ManagedSession): boolean {
 /**
  * Whether the session's conversation has started. The agent's system prompt and tool set are fixed
  * from then on (Claude pins the prompt per SDK session; the keep-alive query fixes its tools), so
- * per-session settings that shape them, like coding mode, can only change before this.
+ * session context is pinned after this.
  */
 export function hasConversationStarted(managed: Pick<ManagedSession, 'sdkSessionId' | 'messageCount' | 'messages'>): boolean {
   return !!managed.sdkSessionId
@@ -1229,7 +1232,7 @@ function managedToSession(m: ManagedSession, overrides?: Partial<Session>): Sess
 const DELTA_BATCH_INTERVAL_MS = 50  // Flush batched deltas every 50ms
 
 /**
- * How long the first turn of a session continued from another one (Coding mode switch) waits for
+ * How long the first turn of a session continued from another one (handoff) waits for
  * the earlier conversation's summary, which is generated in the background (a few seconds).
  */
 const HANDOFF_SUMMARY_WAIT_MS = 30_000
@@ -1863,6 +1866,7 @@ export class SessionManager implements ISessionManager {
   private setProcessing(managed: ManagedSession, processing: boolean): void {
     const was = managed.isProcessing
     managed.isProcessing = processing
+    getSessionAttentionService()?.setWorking(managed.id, processing)
     if (!was && processing) {
       sessionRuntimeHooks.onSessionStarted()
     } else if (was && !processing) {
@@ -1894,6 +1898,11 @@ export class SessionManager implements ISessionManager {
   /** Pinned desktop client per session for `client:browser:invoke` routing. */
   private browserHostByCanvas = new Map<string, string>()
   private eventSink: EventSink | null = null
+  private workflowCommandHandler?: (sessionId: string, command: NonNullable<ReturnType<typeof parseShipCommand>>) => Promise<ShipWorkflowState>
+
+  setWorkflowCommandHandler(handler: (sessionId: string, command: NonNullable<ReturnType<typeof parseShipCommand>>) => Promise<ShipWorkflowState>): void {
+    this.workflowCommandHandler = handler
+  }
 
   setEventSink(sink: EventSink): void {
     this.eventSink = sink
@@ -3409,8 +3418,6 @@ export class SessionManager implements ISessionManager {
 
     // Validate branch request up-front so branch metadata is only set for valid branches.
     // This prevents creating sessions that claim to be branched but don't have copied history.
-    // A branch keeps its parent's coding mode: an SDK fork carries the parent's pinned system prompt.
-    let branchSourceCodingMode: boolean | undefined
     let validatedBranch: {
       sourceSessionId: string
       sourceMessageId: string
@@ -3452,7 +3459,6 @@ export class SessionManager implements ISessionManager {
       }
 
       const sourceSession = loadStoredSession(workspaceRootPath, options.branchFromSessionId)
-      branchSourceCodingMode = sourceManaged?.codingMode ?? sourceSession?.codingMode
       if (!sourceSession) {
         sessionLog.warn('Branch validation failed: source session not found on disk', {
           workspaceId,
@@ -3703,8 +3709,6 @@ export class SessionManager implements ISessionManager {
       model: resolvedModel,
       llmConnection: options?.llmConnection,
       thinkingLevel: defaultThinkingLevel,
-      // Coding mode: branch source → caller → workspace default. Stored only when on, so default sessions stay unchanged.
-      codingMode: (validatedBranch ? branchSourceCodingMode : options?.codingMode ?? wsConfig?.defaults?.codingMode) || undefined,
       systemPromptPreset: options?.systemPromptPreset,
       enabledSourceSlugs: defaultEnabledSourceSlugs,
       branchFromMessageId: validatedBranch?.sourceMessageId,
@@ -3808,6 +3812,92 @@ export class SessionManager implements ISessionManager {
     }
 
     return managedToSession(managed, isBranch ? { messages: managed.messages } : undefined)
+  }
+
+  /** Agent-created chats use the same creation/first-send pipeline as the composer. */
+  async spawnIndependentSession(sourceSessionId: string, request: SpawnSessionRequest): Promise<SpawnSessionResult> {
+    const managed = this.sessions.get(sourceSessionId)
+    if (!managed || managed.isDeleting) throw new Error('The invoking session is no longer available')
+    if (!request.prompt?.trim()) throw new Error('A prompt is required for the new chat')
+    sessionLog.info(`Independent session request from session ${managed.id}:`, request.name || '(unnamed)')
+
+    // The model picks the child's mode; it may be as strict as it likes but never looser
+    // than this session's effective mode, or an Ask session could spawn an Execute child
+    // without a prompt.
+    const parentMode = getPermissionMode(managed.id)
+    const permissionMode = clampPermissionMode(request.permissionMode, parentMode)
+    if (request.permissionMode && permissionMode !== request.permissionMode) {
+      sessionLog.warn(`Spawn session: lowered requested mode ${request.permissionMode} to ${permissionMode} (parent ${managed.id} runs in ${parentMode})`)
+    }
+
+    const projectId = request.projectId === undefined ? managed.projectId : request.projectId ?? undefined
+    const sameProject = projectId === managed.projectId
+    // Inherit repository identity, never the parent's checkout ownership or task reference.
+    // A different project resolves its own normal project/workspace defaults.
+    let repository = request.repository
+    const inheritedDirectory = managed.worktree?.repositoryPath || managed.workingDirectory
+    if (!repository && sameProject && !request.workingDirectory) {
+      if (managed.worktree?.pendingRepository) {
+        const { start: _previousTask, ...choice } = managed.worktree.pendingRepository
+        repository = choice
+      } else if (inheritedDirectory) {
+        const gitDir = await commonGitDir(inheritedDirectory)
+        if (gitDir) repository = { kind: 'local', gitDir, name: basename(inheritedDirectory) }
+      }
+    }
+    const workingDirectory = request.workingDirectory ?? (sameProject && !projectId ? inheritedDirectory : undefined)
+    const session = await this.createSession(managed.workspace.id, {
+      name: request.name,
+      llmConnection: request.llmConnection ?? managed.llmConnection,
+      model: request.model ?? managed.model,
+      enabledSourceSlugs: request.enabledSourceSlugs ?? managed.enabledSourceSlugs,
+      permissionMode,
+      thinkingLevel: request.thinkingLevel ?? managed.thinkingLevel,
+      labels: request.labels ?? managed.labels,
+      workingDirectory,
+      projectId,
+      // Nobody watches a session an automation, task or CLI run spawns either.
+      unattended: !isAttendedSession(managed) || undefined,
+    })
+
+    // Build FileAttachment[] from paths (if any)
+    let fileAttachments: FileAttachment[] | undefined
+    if (request.attachments?.length) {
+      const attachments: FileAttachment[] = []
+      for (const a of request.attachments) {
+        try {
+          const extraDirs = getWorkspaceAllowedDirs(managed.workspace.id)
+          if (session.workingDirectory) extraDirs.push(session.workingDirectory)
+          const safePath = await validateFilePath(a.path, extraDirs)
+          const attachment = readFileAttachment(safePath)
+          if (attachment) {
+            if (a.name) attachment.name = a.name
+            attachments.push(attachment)
+          } else {
+            sessionLog.warn(`Spawn session: attachment not found: ${a.path}`)
+          }
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error)
+          sessionLog.warn(`Spawn session: blocked attachment path ${a.path}: ${message}`)
+        }
+      }
+      if (attachments.length > 0) fileAttachments = attachments
+    }
+
+    // (session_created is emitted by createSession above.)
+
+    // Fire and forget — send the message but don't await completion
+    this.sendMessage(session.id, request.prompt, fileAttachments, undefined, { repository }).catch(err => {
+      sessionLog.error(`Failed to send message to spawned session ${session.id}:`, err)
+    })
+
+    return {
+      sessionId: session.id,
+      name: session.name || request.name || session.id,
+      status: 'started' as const,
+      connection: session.llmConnection,
+      model: session.model,
+    }
   }
 
   /**
@@ -4572,6 +4662,8 @@ export class SessionManager implements ISessionManager {
         id: managed.id,
         workspaceRootPath: managed.workspace.rootPath,
         sdkSessionId: managed.sdkSessionId,
+        // Historical SDK prompt compatibility only; never selects tools or an agent profile.
+        codingMode: (managed as unknown as { codingMode?: boolean }).codingMode,
         branchFromSdkSessionId: managed.branchContextStrategy === 'sdk-fork' ? managed.branchFromSdkSessionId : undefined,
         branchFromSessionPath: managed.branchContextStrategy === 'sdk-fork' ? managed.branchFromSessionPath : undefined,
         branchFromSdkCwd: managed.branchContextStrategy === 'sdk-fork' ? managed.branchFromSdkCwd : undefined,
@@ -4707,12 +4799,12 @@ export class SessionManager implements ISessionManager {
         mcpPool: managed.mcpPool,
         poolServerUrl,
         envOverrides,
+        toolPolicy: (name: string, input: unknown) => shipSessionToolDenial(managed.workspace.rootPath, managed, name, input),
         // Claude-specific
         isHeadless: !AGENT_FLAGS.defaultModesEnabled,
         skipConfigWatcher: true, // Server owns workspace-level ConfigWatcher — don't duplicate in agents
         automationSystem: this.automationSystems.get(managed.workspace.rootPath),
         systemPromptPreset: managed.systemPromptPreset,
-        agentProfile: managed.codingMode ? 'coding' : undefined,
         debugMode: _platform?.isDebugMode ? { enabled: true, logFilePath: _platform.getLogFilePath?.() } : undefined,
         enable1MContext: await (async () => { const { getEnable1MContext } = await import('@craft-agent/shared/config/storage'); return getEnable1MContext(); })(),
         autoCompactWindow: await (async () => { const { getAutoCompactWindow } = await import('@craft-agent/shared/config/storage'); return getAutoCompactWindow(); })(),
@@ -5406,74 +5498,8 @@ export class SessionManager implements ISessionManager {
         // The UI calls window.electronAPI.performOAuth() when user clicks "Sign in".
       }
 
-      // Wire up onSpawnSession to create independent sessions from agent tool calls
-      managed.agent.onSpawnSession = async (request) => {
-        sessionLog.info(`Spawn session request from session ${managed.id}:`, request.name || '(unnamed)')
-
-        // The model picks the child's mode; it may be as strict as it likes but never looser
-        // than this session's effective mode, or an Ask session could spawn an Execute child
-        // without a prompt.
-        const parentMode = getPermissionMode(managed.id)
-        const permissionMode = clampPermissionMode(request.permissionMode, parentMode)
-        if (request.permissionMode && permissionMode !== request.permissionMode) {
-          sessionLog.warn(`Spawn session: lowered requested mode ${request.permissionMode} to ${permissionMode} (parent ${managed.id} runs in ${parentMode})`)
-        }
-
-        const session = await this.createSession(managed.workspace.id, {
-          name: request.name,
-          llmConnection: request.llmConnection ?? managed.llmConnection,
-          model: request.model ?? managed.model,
-          enabledSourceSlugs: request.enabledSourceSlugs ?? managed.enabledSourceSlugs,
-          permissionMode,
-          thinkingLevel: request.thinkingLevel ?? managed.thinkingLevel,
-          labels: request.labels ?? managed.labels,
-          workingDirectory: request.workingDirectory,
-          projectId: request.projectId ?? managed.projectId,
-          // Spawned sessions become subtasks of the spawning session.
-          parentSessionId: managed.id,
-          // Nobody watches a session an automation, task or CLI run spawns either.
-          unattended: !isAttendedSession(managed) || undefined,
-        })
-
-        // Build FileAttachment[] from paths (if any)
-        let fileAttachments: FileAttachment[] | undefined
-        if (request.attachments?.length) {
-          const attachments: FileAttachment[] = []
-          for (const a of request.attachments) {
-            try {
-              const extraDirs = getWorkspaceAllowedDirs(managed.workspace.id)
-              if (session.workingDirectory) extraDirs.push(session.workingDirectory)
-              const safePath = await validateFilePath(a.path, extraDirs)
-              const attachment = readFileAttachment(safePath)
-              if (attachment) {
-                if (a.name) attachment.name = a.name
-                attachments.push(attachment)
-              } else {
-                sessionLog.warn(`Spawn session: attachment not found: ${a.path}`)
-              }
-            } catch (error) {
-              const message = error instanceof Error ? error.message : String(error)
-              sessionLog.warn(`Spawn session: blocked attachment path ${a.path}: ${message}`)
-            }
-          }
-          if (attachments.length > 0) fileAttachments = attachments
-        }
-
-        // (session_created is emitted by createSession above.)
-
-        // Fire and forget — send the message but don't await completion
-        this.sendMessage(session.id, request.prompt, fileAttachments).catch(err => {
-          sessionLog.error(`Failed to send message to spawned session ${session.id}:`, err)
-        })
-
-        return {
-          sessionId: session.id,
-          name: session.name || request.name || session.id,
-          status: 'started' as const,
-          connection: session.llmConnection,
-          model: session.model,
-        }
-      }
+      // Native SDK subagents remain separate; this tool always creates a real, independent chat.
+      managed.agent.onSpawnSession = request => this.spawnIndependentSession(managed.id, request)
 
       // Wire up session self-management tools (set_session_labels, set_session_status, etc.)
       mergeSessionScopedToolCallbacks(managed.id, {
@@ -5598,7 +5624,7 @@ export class SessionManager implements ISessionManager {
           sessionId: managed.id,
           log: (message: string) => sessionLog.info(message),
         }),
-        // PR watcher tools (pr_status/pr_bind/pr_unbind/pr_set_auto_merge) — Coding mode. Bound to the
+        // PR watcher tools (pr_status/pr_bind/pr_unbind/pr_set_auto_merge) — bound to the
         // invoking session; the registry (handlers/rpc/pr-watch) owns the GitHub credentials and the
         // watcher, so tokens never reach the agent. getRegistry resolves the current instance at call
         // time (it is recreated when the RPC handlers re-register).
@@ -5608,10 +5634,37 @@ export class SessionManager implements ISessionManager {
           getRegistry: getPrWatchRegistry,
           getAutoFixMonitor: getPrAutoFixMonitor,
         }),
+        readSessionHistoryFn: async options => {
+          const target = this.sessions.get(options.sessionId)
+          if (!target || target.workspace.rootPath !== managed.workspace.rootPath || target.hidden) throw new Error('Session is not available in this workspace')
+          if (!options.cursor) await this.flushSession(target.id)
+          return readSessionHistory({ workspaceId: managed.workspace.id, workspaceRootPath: managed.workspace.rootPath,
+            sessions: this.getSessions(managed.workspace.id).filter(session => !session.hidden) }, options)
+        },
+        searchSessionHistoryFn: async options => {
+          if (!options.cursor) await Promise.all(Array.from(this.sessions.values())
+            .filter(session => session.workspace.rootPath === managed.workspace.rootPath && session.messagesLoaded && !session.hidden)
+            .map(session => this.flushSession(session.id)))
+          return searchSessionHistory({ workspaceId: managed.workspace.id, workspaceRootPath: managed.workspace.rootPath,
+            sessions: this.getSessions(managed.workspace.id).filter(session => !session.hidden) }, options)
+        },
+        markAttentionFn: async request => {
+          const service = getSessionAttentionService()
+          if (!service) throw new Error('Human attention is unavailable on this server')
+          service.setReasons(managed.id, 'agent', [{ id: `agent:${request.kind}`, source: 'agent', kind: request.kind,
+            title: request.title, detail: request.detail, createdAt: Date.now(), action: { type: 'session' } }])
+          if (managed.isProcessing && managed.agent) {
+            managed.agent.interruptForHandoff(AbortReason.PlanSubmitted)
+            this.recoverPendingSteers(managed)
+            this.setProcessing(managed, false)
+            this.persistSession(managed)
+            this.sendEvent({ type: 'complete', sessionId: managed.id, tokenUsage: managed.tokenUsage }, managed.workspace.id)
+          }
+        },
         getSessionInfoFn: (sessionId?: string) => {
           const targetId = sessionId ?? managed.id
           const session = this.sessions.get(targetId)
-          if (!session) return null
+          if (!session || session.workspace.rootPath !== managed.workspace.rootPath) return null
           return {
             id: session.id,
             name: session.name ?? session.id,
@@ -7185,7 +7238,7 @@ export class SessionManager implements ISessionManager {
           throw new Error('The repository is fixed after the chat starts')
         }
         managed.worktree = { repositoryPath: choice.kind === 'local' ? choice.gitDir : '',
-          pendingRepository: choice, needsRepository: false, cleanupOnArchive: managed.worktree?.cleanupOnArchive ?? false }
+          pendingRepository: choice, needsRepository: false, baseBranch: managed.worktree?.baseBranch, cleanupOnArchive: managed.worktree?.cleanupOnArchive ?? false }
         await this.persistWorktreeState(managed)
       })
     }
@@ -7508,6 +7561,23 @@ export class SessionManager implements ISessionManager {
       // ensureFreshToken mirrors the disk write to source.config in-memory).
       const agent = await this.getOrCreateAgent(managed, !userMessage.hidden && !options?.hidden && !_isAuthRetry ? userMessage.id : undefined)
       sendSpan.mark('agent.ready')
+      // User-visible slash commands use the same accepted-message, repository and checkpoint
+      // path as chat, but dispatch a native workflow instead of asking a model to run a Mac CLI.
+      if (!options?.hidden && !userMessage.hidden && !_isAuthRetry && /^\/ship(?:-plan)?(?:\s|$)/i.test(message.trim())) {
+        const command = parseShipCommand(message)
+        if (!command) throw new Error('Use /ship-plan ISSUE-123 to plan, or /ship to continue this workflow.')
+        if (!this.workflowCommandHandler) throw new Error('The native Ship workflow is unavailable on this server.')
+        const state = await this.workflowCommandHandler(sessionId, command)
+        const note: Message = { id: generateMessageId(), role: 'info', content: `Ship ${state.ticket}: ${state.phase} (${state.status}).`, timestamp: this.monotonic() }
+        managed.messages.push(note)
+        this.persistSession(managed)
+        this.sendEvent({ type: 'info', sessionId, message: note.content }, managed.workspace.id)
+        sendSpan.end()
+        await this.onProcessingStopped(sessionId, 'complete')
+        this.sendEvent({ type: 'complete', sessionId, tokenUsage: managed.tokenUsage }, managed.workspace.id)
+        return
+      }
+
 
       // Always set all sources for context (even if none are enabled), including built-ins
       const allSources = await this.loadSessionSources(managed)
@@ -8119,6 +8189,8 @@ export class SessionManager implements ISessionManager {
     if (!managed || managed.isDeleting) return
 
     sessionLog.info(`Processing stopped for session ${sessionId}: ${reason}`)
+    getSessionAttentionService()?.setAutoFixActive(sessionId, null)
+    if (reason === 'error' || reason === 'timeout') getSessionAttentionService()?.setReasons(sessionId, 'agent', [{ id: 'runtime-error', source: 'agent', kind: 'error', title: reason === 'timeout' ? 'The agent timed out' : 'The agent encountered an error', createdAt: Date.now(), action: { type: 'session' } }])
 
     // Backend recovery events precede complete; discard payloads already delivered.
     managed.acceptedSteers?.clear()
@@ -8515,6 +8587,7 @@ export class SessionManager implements ISessionManager {
     alwaysAllow: boolean,
     options?: import('@craft-agent/shared/protocol').PermissionResponseOptions,
   ): boolean {
+    getSessionAttentionService()?.resolve(sessionId, 'permission', requestId)
     const managed = this.sessions.get(sessionId)
     if (managed?.agent) {
       const requestMeta = this.pendingPermissionRequests.get(requestId)
@@ -8568,6 +8641,7 @@ export class SessionManager implements ISessionManager {
       sessionLog.info(`Credential response (legacy flow) for ${requestId}: cancelled=${response.cancelled}`)
       resolver(response)
       this.pendingCredentialResolvers.delete(requestId)
+      getSessionAttentionService()?.resolve(sessionId, 'auth', requestId)
       return true
     } else {
       sessionLog.warn(`Cannot respond to credential - no pending request for ${requestId}`)
@@ -9027,30 +9101,8 @@ export class SessionManager implements ISessionManager {
   }
 
   /**
-   * Turn coding mode on or off: the lean coding system prompt and session-tool profile.
-   * Only before the conversation starts (see {@link hasConversationStarted}); after that the UI
-   * offers to continue in a new session instead, so this throws.
-   */
-  setSessionCodingMode(sessionId: string, enabled: boolean): void {
-    const managed = this.sessions.get(sessionId)
-    if (!managed || !!managed.codingMode === enabled) return
-    if (hasConversationStarted(managed)) {
-      throw new Error('Coding mode is fixed once a session has messages. Continue in a new session to switch it.')
-    }
-
-    // Stored only when on, so sessions that never use it keep an unchanged header
-    managed.codingMode = enabled || undefined
-    managed.agent?.setAgentProfile(enabled ? 'coding' : 'default')
-
-    sessionLog.info(`Session ${sessionId}: coding mode ${enabled ? 'on' : 'off'}`)
-    this.persistSession(managed)
-    this.sendEvent({ type: 'coding_mode_changed', sessionId, codingMode: enabled }, managed.workspace.id)
-  }
-
-  /**
-   * Continue a started session in a new one with coding mode set to `codingMode` (coding mode is
-   * fixed once a conversation starts, see {@link setSessionCodingMode}). The new session keeps the
-   * working directory, model, connection, thinking level, permission mode, sources and project, and
+   * Continue a started session in a new one. The new session keeps the
+   * repository, model, connection, thinking level, permission mode, sources and project, and
    * gets a summary of this conversation as one-shot hidden context on its first turn (the same
    * handoff remote transfers use). The source session is left untouched.
    *
@@ -9058,19 +9110,18 @@ export class SessionManager implements ISessionManager {
    * summary is attached in the background (`attachHandoffSummary`); a first message sent before it
    * is ready waits for it in `sendMessage`.
    */
-  async continueSessionInNewSession(sessionId: string, codingMode: boolean): Promise<{ sessionId: string }> {
+  async continueSessionInNewSession(sessionId: string): Promise<{ sessionId: string }> {
     const managed = this.sessions.get(sessionId)
     if (!managed) throw new Error(`Session ${sessionId} not found`)
 
     const session = await this.createSession(managed.workspace.id, {
       permissionMode: managed.permissionMode,
       thinkingLevel: managed.thinkingLevel,
-      workingDirectory: managed.workingDirectory ?? 'none',
+      workingDirectory: managed.worktree?.repositoryPath || managed.workingDirectory || 'none',
       model: managed.model,
       llmConnection: managed.llmConnection,
       enabledSourceSlugs: managed.enabledSourceSlugs,
       projectId: managed.projectId,
-      codingMode,
     })
 
     const created = this.sessions.get(session.id)
@@ -9080,7 +9131,7 @@ export class SessionManager implements ISessionManager {
       })
       created.pendingHandoffSummary = pending
     }
-    sessionLog.info(`Session ${sessionId}: continued in ${session.id} with coding mode ${codingMode ? 'on' : 'off'}; summarizing the conversation in the background`)
+    sessionLog.info(`Session ${sessionId}: continued in ${session.id} and summarizing the conversation in the background`)
     return { sessionId: session.id }
   }
 
@@ -9121,7 +9172,7 @@ export class SessionManager implements ISessionManager {
     }
   }
 
-  /** Coding mode: PRs pinned to a session (chat-header PR carousel), in addedAt order. */
+  /** PRs pinned to a session (chat-header PR carousel), in addedAt order. */
   getSessionBoundPrs(sessionId: string): BoundPr[] {
     return this.sessions.get(sessionId)?.boundPrs ?? []
   }
@@ -9145,7 +9196,7 @@ export class SessionManager implements ISessionManager {
     const managed = this.sessions.get(sessionId)
     if (!managed) throw new Error(`Session ${sessionId} not found`)
     const next = (managed.boundPrs ?? []).filter(p => !sameBoundPr(p, pr))
-    // Stored only when non-empty, so sessions that never bind keep an unchanged header (like codingMode)
+    // Stored only when non-empty, so sessions that never bind keep an unchanged header
     managed.boundPrs = next.length ? next : undefined
     // An unbound PR's auto-fix goes with it
     const monitorId = prEntryId(pr)
@@ -9158,7 +9209,7 @@ export class SessionManager implements ISessionManager {
     return next
   }
 
-  /** Coding mode: per-PR monitor state (auto-fix), keyed by PR id. */
+  /** Per-PR monitor state (auto-fix), keyed by PR id. */
   getSessionPrMonitors(sessionId: string): Record<string, PrMonitorState> {
     return this.sessions.get(sessionId)?.prMonitors ?? {}
   }
@@ -9183,6 +9234,7 @@ export class SessionManager implements ISessionManager {
 
   /** Record an auto-fix run: when, and the review feedback (signature) it acted on. */
   recordPrAutoFixRun(sessionId: string, prId: string, signature: string[], at: number): void {
+    getSessionAttentionService()?.setAutoFixActive(sessionId, prId)
     const managed = this.sessions.get(sessionId)
     if (!managed) return
     managed.prMonitors = { ...(managed.prMonitors ?? {}), [prId]: { ...(managed.prMonitors?.[prId] ?? {}), lastFixAt: at, lastFixSignature: signature } }
@@ -10255,6 +10307,19 @@ export class SessionManager implements ISessionManager {
   }
 
   private sendEvent(event: SessionEvent, workspaceId?: string): void {
+    // UI attention is derived from real runtime events; opening a conversation never clears it.
+    const attention = getSessionAttentionService()
+    if (attention && 'sessionId' in event) {
+      const id = event.sessionId
+      if (event.type === 'permission_request') attention.upsertReason(id, { id: event.request.requestId, source: 'permission', kind: 'permission', title: 'Permission required', detail: event.request.description, createdAt: Date.now(), action: { type: 'session' } })
+      if (event.type === 'auth_request') attention.upsertReason(id, { id: event.request.requestId, source: 'auth', kind: 'authentication', title: 'Connection required', createdAt: Date.now(), action: { type: 'session' } })
+      if (event.type === 'credential_request') attention.upsertReason(id, { id: event.request.requestId, source: 'auth', kind: 'authentication', title: 'Credentials required', createdAt: Date.now(), action: { type: 'session' } })
+      if (event.type === 'auth_completed' && event.success) attention.resolve(id, 'auth', event.requestId)
+      if (event.type === 'plan_submitted') attention.setReasons(id, 'agent', [{ id: event.message.id, source: 'agent', kind: 'plan', title: 'Plan ready for your approval', createdAt: Date.now(), action: { type: 'session' } }])
+      if (event.type === 'user_message' && !event.message.hidden && !event.message.content.startsWith('[Message from session')) attention.resolve(id, 'agent')
+      if (event.type === 'session_deleted') void attention.sync()
+    }
+
     if (event.type === 'complete') {
       for (const listener of this.turnCompleteListeners) {
         try {
@@ -10387,6 +10452,7 @@ export class SessionManager implements ISessionManager {
 
     // Create a new session for this automation
     const session = await this.createSession(workspaceId, {
+      worktree: input.worktree,
       name: sessionName,
       labels: resolvedLabels,
       permissionMode: permissionMode || 'safe',
@@ -10480,7 +10546,7 @@ export class SessionManager implements ISessionManager {
 
   /**
    * Summarize a session's conversation for a handoff into a fresh session: remote transfer and
-   * "continue in a new session" (coding mode switch). Null when there is nothing to summarize.
+   * "continue in a new session" (handoff). Null when there is nothing to summarize.
    */
   private async generateSessionHandoffSummary(managed: ManagedSession): Promise<string | null> {
     await this.ensureMessagesLoaded(managed)
@@ -10711,6 +10777,8 @@ export class SessionManager implements ISessionManager {
       // which doesn't exist here (cross-server transfer).
       sdkCwd: getSessionStoragePath(workspaceRootPath, sessionId),
       name: header.name,
+      // Historical prompt migration marker only; this is never a runtime mode.
+      codingMode: header.sdkSessionId ? header.codingMode : undefined,
       importedFrom: header.importedFrom,
       projectId: header.projectId && (await import('@craft-agent/shared/projects')).loadProjectById(workspaceRootPath, header.projectId) ? header.projectId : undefined,
       isArchived: header.isArchived,
@@ -10735,8 +10803,6 @@ export class SessionManager implements ISessionManager {
       llmConnection: header.llmConnection,
       connectionLocked: header.connectionLocked,
       thinkingLevel: header.thinkingLevel,
-      // Keeps the SDK session (and its pinned prompt/tool profile) when not forked, so the mode travels with it
-      codingMode: header.codingMode,
       hidden: header.hidden,
       transferredSessionSummary: header.transferredSessionSummary,
       transferredSessionSummaryApplied: header.transferredSessionSummaryApplied,
@@ -10887,6 +10953,8 @@ export class SessionManager implements ISessionManager {
    * Should be called on app shutdown to prevent resource leaks.
    */
   cleanup(): void {
+    disposeSessionAttention()
+    this.workflowCommandHandler = undefined
     sessionLog.info('Cleaning up resources...')
 
     // Stop all ConfigWatchers (file system watchers)

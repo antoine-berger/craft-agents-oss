@@ -1,5 +1,7 @@
-import { describe, expect, it } from 'bun:test'
-import { handleDeepLink } from '../deep-link'
+import { describe, expect, it, mock } from 'bun:test'
+// Routing is independent of Electron's native logging runtime.
+mock.module('../logger', () => ({ mainLog: { info() {}, warn() {}, error() {}, debug() {} } }))
+const { handleDeepLink } = await import('../deep-link')
 import { RPC_CHANNELS } from '../../shared/types'
 import type { EventSink } from '@craft-agent/server-core/transport'
 import type { WindowManager } from '../window-manager'

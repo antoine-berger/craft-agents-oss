@@ -1,6 +1,6 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, mock } from 'bun:test'
 import { execFileSync } from 'node:child_process'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -8,6 +8,7 @@ import type { CreateSessionOptions } from '@craft-agent/shared/protocol'
 import { setupI18n } from '@craft-agent/shared/i18n'
 import { getSessionFilePath, loadSession, readSessionHeader, sessionPersistenceQueue } from '@craft-agent/shared/sessions'
 import { createManagedSession, SessionManager } from './SessionManager.ts'
+import { getGitHubBranchPrefix } from '../services/repositories/github'
 import { resolveSessionWorktreePolicy, defaultSessionWorktreePolicy } from './session-worktree.ts'
 
 type ManagedSession = ReturnType<typeof createManagedSession>
@@ -160,7 +161,7 @@ describe('SessionManager worktree lifecycle', () => {
     const second = await manager.prepareNewSessionWorktree(workspace.id, b.id, repository)
     expect(first.path).not.toBe(second.path)
     expect(first.branch).not.toBe(second.branch)
-    expect(first.branch).toStartWith('test-developer/')
+    expect(first.branch).toStartWith(`${await getGitHubBranchPrefix()}/`)
     expect(first.path).not.toBe(repository)
     expect(readFileSync(join(repository, 'code.txt'), 'utf8')).toBe('main checkout\n')
     expect(restoreChat(a.id).worktree?.owned?.path).toBe(first.path)
@@ -440,7 +441,7 @@ describe('SessionManager worktree lifecycle', () => {
     expect(worktreeCount()).toBe(2)
   })
 
-  it('requires ownership to reach disk before creating any Git checkout or reservation', async () => {
+  it('requires durable session ownership before creating Git refs or checkouts and retains a recoverable name reservation', async () => {
     const { manager, createChat } = harness()
     const managed = createChat()
     // A file in place of the workspace directory makes the real persistence
@@ -452,7 +453,13 @@ describe('SessionManager worktree lifecycle', () => {
     const pending = managed.worktree!.owned!
     expect(pending.status).toBe('pending')
     expect(existsSync(pending.path)).toBe(false)
-    expect(existsSync(join(pending.gitDir, 'craft-session-worktrees'))).toBe(false)
+    // Human-readable names are reserved atomically in private metadata before the
+    // session header commits. A failed header write retains that recoverable lease,
+    // but must not create a branch ref or checkout.
+    const ownerKey = createHash('sha256').update(pending.ownerId).digest('hex')
+    const journal = JSON.parse(readFileSync(join(pending.gitDir, 'craft-session-worktrees', `${ownerKey}.json`), 'utf8'))
+    expect(journal).toMatchObject({ ownerId: pending.ownerId, token: pending.token, branch: pending.branch, status: 'pending' })
+    expect(journal.checkoutStarted).not.toBe(true)
     expect(git(repository, 'branch', '--list', pending.branch)).toBe('')
     expect(manager.getOrCreatePreparedAgent).not.toHaveBeenCalled()
     expect(worktreeCount()).toBe(1)

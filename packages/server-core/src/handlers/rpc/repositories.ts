@@ -1,5 +1,5 @@
 /**
- * Coding mode's worktree picker RPCs: list the repositories a new session can start from (local +
+ * Repository picker RPCs: list the repositories a new session can start from (local +
  * `gh repo list`) and create the session's worktree. They run on the workspace server, where the
  * repositories and the `gh` login live.
  */
@@ -10,11 +10,11 @@ import { expandPath } from '@craft-agent/shared/utils'
 import { loadWorkspaceConfig } from '@craft-agent/shared/workspaces'
 import type { RpcServer } from '@craft-agent/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
-import { cloneRootFor, discoverLocalRepos, repoCommandDir } from '../../services/coding-repos/discover'
+import { cloneRootFor, discoverLocalRepos, repoCommandDir } from '../../services/repositories/discover'
 import { runGit } from '../../services/git'
 import { isGitHubDotCom, parseRemoteUrl } from '../../services/pr-watch/remote-url'
-import { listGitHubRepos } from '../../services/coding-repos/github'
-import { createWorktree, resolveWorktreeRepository } from '../../services/coding-repos/worktree'
+import { listGitHubRepos } from '../../services/repositories/github'
+import { createWorktree, resolveWorktreeRepository } from '../../services/repositories/worktree'
 
 export const HANDLED_CHANNELS = [
   RPC_CHANNELS.git.LIST_REPOS,
@@ -52,7 +52,7 @@ async function listing(workspaceId: string, recentDirs: unknown, refreshGitHub: 
   }
 }
 
-export function registerCodingReposHandlers(server: RpcServer, deps: HandlerDeps): void {
+export function registerRepositoryHandlers(server: RpcServer, deps: HandlerDeps): void {
   server.handle(RPC_CHANNELS.git.GET_REPOSITORY_IDENTITY, async (_ctx, dirPath: string): Promise<string | null> => {
     if (typeof dirPath !== 'string' || !dirPath.trim()) return null
     const origin = await runGit(repoCommandDir(dirPath), ['config', '--get', 'remote.origin.url'])

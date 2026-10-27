@@ -20,6 +20,8 @@
  * The runner depends on a minimal `ConductorSessionHost` interface (which
  * SessionManager structurally satisfies) so it is unit-testable with a mock.
  */
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import type { CreateSessionOptions } from '@craft-agent/shared/protocol';
 import type { SessionCompletionEvent } from '../sessions/SessionManager';
 import {
@@ -403,10 +405,12 @@ class ActiveRun {
       // Children run where the parent runs: inherit the orchestrator's resolved working directory,
       // falling back to the spec's declared `cwd`. Without this they default to the workspace cwd
       // rather than the parent session's (project) directory.
-      const cwd =
+      const parentCwd =
         (this.opts.orchestratorSessionId
           ? this.deps.host.getSessionWorkingDirectory(this.opts.orchestratorSessionId)
-          : undefined) ?? this.spec.cwd;
+          : undefined);
+      const nativeShip = this.slug.startsWith('ship-') && existsSync(join(this.deps.workspaceRoot, 'tasks', this.slug, 'ship', 'state.json'));
+      const cwd = nativeShip ? this.spec.cwd ?? parentCwd : parentCwd ?? this.spec.cwd;
       const options: CreateSessionOptions = {
         parentSessionId: this.opts.orchestratorSessionId,
         // Link the child back to the task / run / node so the manual subtask composer can
@@ -429,6 +433,8 @@ class ActiveRun {
         ...(this.spec.sources?.length ? { enabledSourceSlugs: this.spec.sources } : {}),
         projectId: this.spec.project,
         ...(cwd ? { workingDirectory: cwd } : {}),
+        // Ship roles inspect/build the owner's exact diff, never a fresh per-reviewer checkout.
+        ...(nativeShip ? { worktree: 'none' as const } : {}),
         sessionStatus: RUNNING_STATUS,
       };
       // createSession announces the child to the renderer by default, so it nests under the task
@@ -1080,18 +1086,18 @@ export class TaskRunner {
     this.runs.get(this.key(slug, runId))?.pause();
   }
 
-  resume(slug: string, runId: string): void {
+  resume(slug: string, runId: string, opts: Pick<RunOptions, 'verifyOnComplete'> = {}): void {
     const existing = this.runs.get(this.key(slug, runId));
     if (existing) {
       existing.resume();
       return;
     }
     // Not in memory (e.g. after an app restart): reconstruct from the persisted run-log.
-    this.rehydrate(slug, runId);
+    this.rehydrate(slug, runId, opts);
   }
 
   /** Reconstruct an in-memory run from its persisted run-log + node outputs, then resume it. */
-  private rehydrate(slug: string, runId: string): RunSnapshot {
+  private rehydrate(slug: string, runId: string, opts: Pick<RunOptions, 'verifyOnComplete'> = {}): RunSnapshot {
     const loaded = loadTaskSpec(this.deps.workspaceRoot, slug);
     if (!loaded?.spec || !loaded.valid) {
       throw new Error(`Cannot resume "${slug}:${runId}": task.yaml is missing or invalid`);
@@ -1104,7 +1110,7 @@ export class TaskRunner {
       loaded.spec,
       slug,
       runId,
-      { orchestratorSessionId, params: resolveParams(loaded.spec), verifyOnComplete: true },
+      { orchestratorSessionId, params: resolveParams(loaded.spec), verifyOnComplete: opts.verifyOnComplete ?? true },
       this.deps,
     );
     run.hydrate(log, (nodeId) => readNodeOutput(this.deps.workspaceRoot, slug, runId, nodeId));

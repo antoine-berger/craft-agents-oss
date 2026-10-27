@@ -106,7 +106,8 @@ import {
 } from './system-prompt-override.ts';
 import { readContextUsage, deferContextUsage } from './context-usage.ts';
 import { waitForCompaction, MANUAL_COMPACT_WAIT_MS, PROMPT_COMPACT_WAIT_MS } from './compaction-wait.ts';
-import type { PiCompactResult, PiContextUsagePayload, PiLargeResultGateRequest, PiLargeResultGateResponse } from '../../shared/src/agent/backend/pi/protocol.ts';
+import type { PiCompactResult, PiContextUsagePayload, PiLargeResultGateRequest, PiLargeResultGateResponse, PiProxyToolResult } from '../../shared/src/agent/backend/pi/protocol.ts';
+import { recordHostToolContext, getHostToolContext } from './host-tool-context.ts';
 import { createLargeResultGateClient } from './large-result-gate.ts';
 import { adaptCredentialForPiSdk, type PiCredential } from './adapt-credential.ts';
 import { resolveCraftAgentDir } from './agent-dir.ts';
@@ -161,7 +162,7 @@ type InboundMessage =
   | InitMessage
   | { type: 'prompt'; id: string; message: string; systemPrompt: string; images?: Array<{ type: 'image'; data: string; mimeType: string }> }
   | { type: 'register_tools'; tools: ProxyToolDef[] }
-  | { type: 'tool_execute_response'; requestId: string; result: { content: string; isError: boolean } }
+  | { type: 'tool_execute_response'; requestId: string; result: PiProxyToolResult }
   | { type: 'pre_tool_use_response'; requestId: string; action: 'allow' | 'block' | 'modify'; input?: Record<string, unknown>; reason?: string }
   | PiLargeResultGateResponse
   | { type: 'abort' }
@@ -300,7 +301,7 @@ let currentUserMessage = '';
 
 // Pending promises for async handshakes
 const pendingPreToolUse = new Map<string, { resolve: (response: { action: string; input?: Record<string, unknown>; reason?: string }) => void }>();
-const pendingToolExecutions = new Map<string, { resolve: (result: { content: string; isError: boolean }) => void }>();
+const pendingToolExecutions = new Map<string, { resolve: (result: PiProxyToolResult) => void }>();
 
 // Pending session MCP tool calls for completion detection
 const pendingSessionToolCalls = new Map<string, { toolName: string; arguments: Record<string, unknown> }>();
@@ -313,7 +314,7 @@ let proxyToolDefs: ProxyToolDef[] = [];
 // to the main process in parallel on message_end (before executeToolCalls iterates sequentially).
 // Each proxy tool's execute() then hits the cache instead of sending a new request.
 const PREFETCHABLE_TOOLS = new Set(['call_llm']);
-const prefetchCache = new Map<string, Promise<{ content: string; isError: boolean }>>();
+const prefetchCache = new Map<string, Promise<PiProxyToolResult>>();
 
 function isPrefetchableTool(toolName: string): boolean {
   const stripped = toolName.replace(/^(mcp__session__|session__)/, '');
@@ -864,6 +865,7 @@ function wrapSingleTool(tool: ToolDefinition<any, any>): ToolDefinition<any, any
 
     // Execute original tool with (potentially modified) input
     const result = await originalExecute(toolCallId, inputObj, signal, onUpdate, ctx);
+    const hostTool = getHostToolContext(result);
 
     // --- Post-execute: large response summarization ---
 
@@ -887,8 +889,8 @@ function wrapSingleTool(tool: ToolDefinition<any, any>): ToolDefinition<any, any
           text: resultText,
           sessionPath,
           context: {
-            toolName: sdkToolName,
-            input: inputObj,
+            toolName: hostTool?.name ?? sdkToolName,
+            input: hostTool?.input ?? inputObj,
             intent,
             userRequest: currentUserMessage,
           },
@@ -930,12 +932,14 @@ function wrapSingleTool(tool: ToolDefinition<any, any>): ToolDefinition<any, any
  * `tool_execution_end.isError` marks the call failed in Craft, as a thrown error
  * would; before, they reached both as successes.
  */
-function proxyToolResult(result: { content: string; isError: boolean }): AgentToolResult<undefined> {
-  return {
+function proxyToolResult(result: PiProxyToolResult): AgentToolResult<undefined> {
+  const output: AgentToolResult<undefined> = {
     content: [{ type: 'text', text: result.content }],
     details: undefined,
     ...(result.isError ? { isError: true } : {}),
   };
+  recordHostToolContext(output, result.canonicalTool);
+  return output;
 }
 
 function buildProxyTools(): ToolDefinition<any, any>[] {
@@ -986,7 +990,7 @@ function buildProxyTools(): ToolDefinition<any, any>[] {
         args: approvedInput,
       });
 
-      const result = await new Promise<{ content: string; isError: boolean }>((resolve) => {
+      const result = await new Promise<PiProxyToolResult>((resolve) => {
         pendingToolExecutions.set(requestId, { resolve });
       });
 
@@ -1296,7 +1300,7 @@ function handleSessionEvent(event: AgentSessionEvent): void {
           debugLog(`Prefetching ${prefetchableToolCalls.length} parallel ${prefetchableToolCalls[0].name} calls`);
           for (const tc of prefetchableToolCalls) {
             const requestId = `prefetch-${tc.id}`;
-            const promise = new Promise<{ content: string; isError: boolean }>((resolve) => {
+            const promise = new Promise<PiProxyToolResult>((resolve) => {
               pendingToolExecutions.set(requestId, { resolve });
             });
             send({

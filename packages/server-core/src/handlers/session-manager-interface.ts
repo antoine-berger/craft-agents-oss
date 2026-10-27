@@ -39,6 +39,7 @@ export interface ISessionManager {
   initialize(): Promise<void>
   cleanup(): void
   setEventSink(sink: EventSink): void
+  setWorkflowCommandHandler?(handler: (sessionId: string, command: NonNullable<ReturnType<typeof import('@craft-agent/shared/protocol').parseShipCommand>>) => Promise<import('@craft-agent/shared/protocol').ShipWorkflowState>): void
   flushAllSessions(): Promise<void>
 
   // ---------------------------------------------------------------------------
@@ -86,15 +87,14 @@ export interface ISessionManager {
 
   setSessionPermissionMode(sessionId: string, mode: PermissionMode): void
   setSessionThinkingLevel(sessionId: string, level: ThinkingLevel): void
-  setSessionCodingMode(sessionId: string, enabled: boolean): void
-  continueSessionInNewSession(sessionId: string, codingMode: boolean): Promise<{ sessionId: string }>
-  /** Coding mode: PRs pinned to a session (chat-header PR carousel, in addedAt order). */
+  continueSessionInNewSession(sessionId: string): Promise<{ sessionId: string }>
+  /** PRs pinned to a session (chat-header PR carousel, in addedAt order). */
   getSessionBoundPrs(sessionId: string): BoundPr[]
   /** Pin a PR to a session (deduped by host/owner/repo#number); persists and returns the new list. */
   bindPrToSession(sessionId: string, pr: BoundPr): BoundPr[]
   /** Remove a pinned PR from a session (and its auto-fix state); persists and returns the new list. */
   unbindPrFromSession(sessionId: string, pr: { host: string; owner: string; repo: string; number: number }): BoundPr[]
-  /** Coding mode: per-PR monitor state (auto-fix), keyed by PR id. */
+  /** Per-PR monitor state (auto-fix), keyed by PR id. */
   getSessionPrMonitors(sessionId: string): Record<string, PrMonitorState>
   /** Turn auto-fix on/off for one PR of a session; persists and returns the monitors. */
   setSessionPrAutoFix(sessionId: string, prId: string, enabled: boolean): Record<string, PrMonitorState>
@@ -340,6 +340,9 @@ export interface ISessionManager {
  * overrides) can be added without churn at every call site.
  */
 export interface ExecutePromptAutomationInput {
+  /** Explicitly share a prepared cwd instead of creating another checkout (native Ship stages). */
+  worktree?: 'project-default' | 'none'
+
   workspaceId: string
   workspaceRootPath: string
   prompt: string

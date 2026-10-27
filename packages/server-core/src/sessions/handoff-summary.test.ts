@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { saveSession } from '../../../shared/src/sessions/storage.ts'
 import { SessionManager, createManagedSession } from './SessionManager.ts'
 
-// "Continue in a new session" (Coding mode switch): the summary of the earlier conversation is a
+// "Continue in a new session" (handoff): the summary of the earlier conversation is a
 // model call that takes seconds, so the new session opens at once and gets the summary in the
 // background; its first turn waits for it (bounded).
 describe('handoff summary in the background', () => {
@@ -42,6 +42,9 @@ describe('handoff summary in the background', () => {
     ;(sm as any).getOrCreateAgent = async () => ({
       getModel: () => 'claude-sonnet-4-6',
       setAllSources: () => {},
+      // No source transports in this fixture; keep the normal source synchronization boundary.
+      getSummarizeCallback: () => undefined,
+      setSourceServers: async () => {},
       getSessionId: () => 'sdk-session',
       // BaseAgent.chat reads the summary through getTransferredSessionSummary while the turn runs
       chat: async function* (message: string) {
@@ -60,7 +63,7 @@ describe('handoff summary in the background', () => {
     const summary = deferred<string | null>()
     ;(sm as any).generateSessionHandoffSummary = () => summary.promise
 
-    expect(await sm.continueSessionInNewSession('source', true)).toEqual({ sessionId: 'target' })
+    expect(await sm.continueSessionInNewSession('source')).toEqual({ sessionId: 'target' })
     const pending = target.pendingHandoffSummary
     expect(pending).toBeDefined()
     expect(target.transferredSessionSummary).toBeUndefined()
@@ -79,7 +82,7 @@ describe('handoff summary in the background', () => {
     ;(sm as any).createSession = async () => { sessions().set('target', target); return { id: 'target' } }
     ;(sm as any).generateSessionHandoffSummary = async () => { throw new Error('mini model unavailable') }
 
-    await sm.continueSessionInNewSession('source', true)
+    await sm.continueSessionInNewSession('source')
     await target.pendingHandoffSummary
     expect(target.transferredSessionSummary).toBeUndefined()
     expect(target.pendingHandoffSummary).toBeUndefined()

@@ -15,8 +15,11 @@ const PR_SUMMARY_FIELDS = `
   autoMergeRequest { mergeMethod }
   viewerCanEnableAutoMerge
   baseRepository { autoMergeAllowed viewerDefaultMergeMethod mergeCommitAllowed squashMergeAllowed rebaseMergeAllowed }
-  commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
-  reviewThreads(first: 100) { nodes { isResolved } }`
+  commits(last: 1) { nodes { commit { committedDate statusCheckRollup { state } } } }
+  reviewThreads(first: 100) { pageInfo { hasNextPage } nodes { id isResolved isOutdated comments(first: 1) { nodes { author { login } url } } } }
+  latestOpinionatedReviews(first: 20) { nodes { id state body url author { login } commit { oid } } }
+  reviews(last: 20) { nodes { id state body url author { login } commit { oid } } }
+  comments(last: 20) { nodes { id body url createdAt author { login } } }`
 
 /**
  * The poll: everything the chip's status and the card's action depend on, for the branch's most
@@ -134,8 +137,11 @@ export interface GqlPullRequestSummary {
   /** GitHub would queue auto-merge for this PR now (false while it's already on) */
   viewerCanEnableAutoMerge: boolean
   baseRepository: GqlRepoMergeSettings | null
-  commits: { nodes: Array<{ commit: { statusCheckRollup: { state: GqlRollupState } | null } }> }
-  reviewThreads: { nodes: Array<{ isResolved: boolean }> }
+  commits: { nodes: Array<{ commit: { committedDate?: string; statusCheckRollup: { state: GqlRollupState } | null } }> }
+  reviewThreads: { pageInfo?: { hasNextPage: boolean }; nodes: Array<{ isResolved: boolean; id?: string; isOutdated?: boolean; comments?: { nodes: Array<{ author: { login: string } | null; url: string }> } }> }
+  latestOpinionatedReviews?: { nodes: Array<{ id: string; state: string; body: string; url: string; author: { login: string } | null; commit: { oid: string } | null }> }
+  reviews?: GqlPullRequestSummary['latestOpinionatedReviews']
+  comments?: { nodes: Array<{ id: string; body: string; url: string; createdAt: string; author: { login: string } | null }> }
 }
 
 export type GqlRollupState = 'EXPECTED' | 'ERROR' | 'FAILURE' | 'PENDING' | 'SUCCESS'

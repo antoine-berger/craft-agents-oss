@@ -215,6 +215,16 @@ export const LOCAL_ONLY_CHANNELS = new Set<string>([
 // ---------------------------------------------------------------------------
 
 export const REMOTE_ELIGIBLE_CHANNELS = new Set<string>([
+  RPC_CHANNELS.attention.GET,
+  RPC_CHANNELS.attention.CHANGED,
+  RPC_CHANNELS.ship.START_PLAN,
+  RPC_CHANNELS.ship.GET,
+  RPC_CHANNELS.ship.ADVANCE,
+  RPC_CHANNELS.ship.REFRESH,
+  RPC_CHANNELS.ship.APPROVE,
+  RPC_CHANNELS.ship.STOP,
+  RPC_CHANNELS.ship.CHANGED,
+  RPC_CHANNELS.providerQuotas.GET,
   RPC_CHANNELS.conductor.IMPORT,
   // server — server-level operations (no workspace context needed)
   RPC_CHANNELS.server.GET_WORKSPACES,

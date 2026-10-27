@@ -202,6 +202,9 @@ export type {
 } from './context.ts';
 
 export { createNodeFileSystem } from './context.ts';
+export { SESSION_HISTORY_WARNING } from './session-history-types.ts';
+export type { SessionHistoryRole, SessionHistoryMessage, SessionHistoryReadOptions, SessionHistoryReadResult, SessionHistorySearchOptions, SessionHistorySearchResult } from './session-history-types.ts';
+export { handleReadSession, handleSearchSessions } from './handlers/session-history.ts';
 
 // Handlers
 export {
@@ -281,6 +284,8 @@ export type {
 export {
   // Individual Zod schemas
   SubmitPlanSchema,
+  ReadSessionSchema,
+  SearchSessionsSchema,
   ConfigValidateSchema,
   SkillValidateSchema,
   MermaidValidateSchema,
@@ -319,8 +324,6 @@ export {
   SESSION_SAFE_ALLOWED_TOOL_NAMES,
   SESSION_SAFE_BLOCKED_TOOL_NAMES,
   SESSION_TOOL_REGISTRY,
-  CODING_PROFILE_TOOLS,
-  CODING_ONLY_TOOLS,
   // Filtered helper views
   getSessionToolDefs,
   getSessionToolNames,
@@ -343,7 +346,6 @@ export type {
   JsonSchemaToolDef,
   SessionToolFilterOptions,
   SessionToolNameOptions,
-  AgentProfile,
 } from './tool-defs.ts';
 
 // Script runtime resolution + path containment (also used by the shared

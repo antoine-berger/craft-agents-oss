@@ -1,3 +1,6 @@
+import { SessionAttentionBanner } from '@/components/app-shell/SessionAttentionBanner'
+import { useSessionAttention } from '@/hooks/useSessionAttention'
+import { ShipWorkflowPanel } from '@/components/settings/ShipWorkflowPanel'
 /**
  * ChatPage
  *
@@ -318,6 +321,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     return connection?.defaultModel ?? ''
   }, [session?.id, session?.model, session?.llmConnection, workspaceDefaultLlmConnection, llmConnections, connectionUnavailable])
 
+  const sessionAttention = useSessionAttention(activeWorkspaceId ?? undefined)
   const [gitReviewOpen, setGitReviewOpen] = React.useState(false)
   const openGitReview = React.useCallback(() => setGitReviewOpen(true), [])
   React.useEffect(() => { setGitReviewOpen(false) }, [sessionId])
@@ -327,7 +331,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
 
   // Working directory for this session
   const workingDirectory = session?.workingDirectory
-  // Coding mode's header PR chip: desktop only, with a folder. The chip itself renders only once that
+  // The header PR chip: desktop only, with a folder. The chip itself renders only once that
   // folder is a git repo whose branch has a PR (see ChatHeaderPrChip).
   const prWatch = usePrWatch(sessionId, !!workingDirectory && !isCompactMode, workingDirectory)
   const activeWorkspace = React.useMemo(
@@ -469,8 +473,6 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
               onRespondToCredential={onRespondToCredential}
               thinkingLevel={sessionOpts.thinkingLevel}
               onThinkingLevelChange={(level) => setOption('thinkingLevel', level)}
-              codingMode={sessionOpts.codingMode}
-              onCodingModeChange={(enabled) => setOption('codingMode', enabled)}
               permissionMode={sessionOpts.permissionMode}
               previousPermissionMode={sessionOpts.previousPermissionMode}
               onPermissionModeChange={setPermissionMode}
@@ -536,6 +538,8 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
         onSetPrAutoFix={prWatch.setAutoFix}
         onPrCardOpenChange={prWatch.onCardOpenChange}
       />
+      <SessionAttentionBanner attention={sessionAttention?.sessions[sessionId]} onOpenUrl={handleOpenUrl} />
+      <div className="max-h-[35%] shrink-0 overflow-auto"><ShipWorkflowPanel workspaceId={session.workspaceId} sessionId={sessionId} api={window.electronAPI} hideWhenEmpty /></div>
       <GitReviewDialog key={sessionId} sessionId={sessionId} open={gitReviewOpen} onOpenChange={setGitReviewOpen} onAddToChat={addGitReviewComments} />
       <div className="flex-1 flex flex-col min-h-0">
         <ChatDisplay
@@ -557,8 +561,6 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
           onRespondToCredential={onRespondToCredential}
           thinkingLevel={sessionOpts.thinkingLevel}
           onThinkingLevelChange={(level) => setOption('thinkingLevel', level)}
-          codingMode={sessionOpts.codingMode}
-          onCodingModeChange={(enabled) => setOption('codingMode', enabled)}
           permissionMode={sessionOpts.permissionMode}
           previousPermissionMode={sessionOpts.previousPermissionMode}
           onPermissionModeChange={setPermissionMode}

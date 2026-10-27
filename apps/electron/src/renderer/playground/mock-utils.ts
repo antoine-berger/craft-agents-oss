@@ -231,12 +231,12 @@ export const mockElectronAPI = {
     return null
   },
 
-  // Coding mode worktree picker: a bare-layout repo from a recent folder, a plain clone in the
+  // Repository picker: a bare-layout repo from a recent folder, a plain clone in the
   // workspace folder, and two GitHub-only repos. Creating fails for a branch named "taken".
   getRepositoryIdentity: async () => 'craft-ai-agents/craft-agents',
 
-  listCodingRepos: async (workspaceId: string, recentDirs: string[]) => {
-    console.log('[Playground] listCodingRepos called:', workspaceId, recentDirs)
+  listRepositories: async (workspaceId: string, recentDirs: string[]) => {
+    console.log('[Playground] listRepositories called:', workspaceId, recentDirs)
     await new Promise(resolve => setTimeout(resolve, 500))
     return {
       local: [
@@ -251,8 +251,8 @@ export const mockElectronAPI = {
     }
   },
 
-  createCodingWorktree: async (workspaceId: string, request: { gitDir?: string; cloneNameWithOwner?: string; branch: string }) => {
-    console.log('[Playground] createCodingWorktree called:', workspaceId, request)
+  createSessionWorktree: async (workspaceId: string, request: { gitDir?: string; cloneNameWithOwner?: string; branch: string }) => {
+    console.log('[Playground] createSessionWorktree called:', workspaceId, request)
     await new Promise(resolve => setTimeout(resolve, request.cloneNameWithOwner ? 1800 : 900))
     if (request.branch.endsWith('taken')) throw new Error(`a branch named '${request.branch}' already exists`)
     const slug = request.branch.split('/').pop()

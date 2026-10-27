@@ -12,7 +12,6 @@ import type {
   ErrorEvent,
   TypedErrorEvent,
   SourcesChangedEvent,
-  CodingModeChangedEvent,
   LabelsChangedEvent,
   ProjectIdChangedEvent,
   SessionStatusChangedEvent,
@@ -676,27 +675,6 @@ export function handleSourcesChanged(
       streaming,
     },
     effects: [],
-  }
-}
-
-/**
- * Handle coding_mode_changed - update the session and let the parent sync its session options
- */
-export function handleCodingModeChanged(
-  state: SessionState,
-  event: CodingModeChangedEvent
-): ProcessResult {
-  const { session, streaming } = state
-
-  return {
-    state: {
-      session: {
-        ...session,
-        codingMode: event.codingMode || undefined,
-      },
-      streaming,
-    },
-    effects: [{ type: 'coding_mode_changed', sessionId: event.sessionId, codingMode: event.codingMode }],
   }
 }
 

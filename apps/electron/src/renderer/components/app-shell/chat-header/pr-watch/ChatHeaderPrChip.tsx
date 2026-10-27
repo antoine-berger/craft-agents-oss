@@ -1,5 +1,5 @@
 /**
- * Coding mode's PR chip in the chat header's title row, after the working folder. A session tracks its
+ * PR chip in the chat header's title row, after the working folder. A session tracks its
  * branch's PR plus any PRs pinned with pr_bind; the chip shows the ACTIVE one (its state glyph, number,
  * status glyph and, on wide panels, its title) and, when there are more, "+N" with the most urgent status
  * among the others. Hover opens the details card, a click pins it (see useHoverPopover); with more than

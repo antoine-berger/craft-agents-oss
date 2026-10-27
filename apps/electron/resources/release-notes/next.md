@@ -4,6 +4,12 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Features
 
+- **Independent agent-created chats** — Agents can create a new chat in the same or another project, with its own worktree and runtime. Session tools share a single normal interface; the former Coding system is removed while older conversations retain their history and SDK resume state.
+- **Read other chats when needed** — Agents can search and read bounded pages of conversations in their workspace, with project filters and source references instead of loading every history upfront.
+- **A native Ship workflow** — Plan, independent checks, explicit human approval, implementation, review, E2E and GitHub feedback run as persistent server tasks. Portable skills replace Mac-specific commands and hooks.
+- **Needs you** — Session badges, a workspace-wide filter and an inline banner show blocking questions, plan decisions, errors and current GitHub review/CI feedback, including while the app is closed.
+- **Quota and context indicators** — A compact sidebar control shows separate five-hour and weekly account quotas with manual refresh. The composer shows current context occupancy before the model, with detailed information on demand. Missing and stale provider data remain explicit.
+
 - **Review and restore coding sessions** — Review committed and uncommitted changes against the base branch, attach inline comments to your next message, and restore files plus conversation to a saved turn after creating a recovery backup. PR and CI controls no longer depend on a hidden Coding mode. (#4)
 - **Start from existing work** — Choose a branch, GitHub pull request, GitHub issue or connected Linear issue before sending. New branches use your GitHub login and a descriptive task name; occupied branches require an explicit copy. (#4)
 - **Browser on the server** — Linux sessions, including existing coding sessions, can browse with a private Chromium profile without a connected Mac. Challenges pause for human intervention; existing desktop cookies stay separate. (#4)

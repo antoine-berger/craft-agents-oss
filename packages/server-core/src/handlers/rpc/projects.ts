@@ -2,7 +2,7 @@ import { RPC_CHANNELS } from '@craft-agent/shared/protocol'
 import { getWorkspaceByNameOrId } from '@craft-agent/shared/config'
 import { pushTyped, type RpcServer } from '@craft-agent/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
-import { validateProjectWorktreeSettings } from '../../services/coding-repos/project-settings'
+import { validateProjectWorktreeSettings } from '../../services/repositories/project-settings'
 
 export const HANDLED_CHANNELS = [
   RPC_CHANNELS.projects.GET,

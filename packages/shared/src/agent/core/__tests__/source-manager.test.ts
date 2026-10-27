@@ -374,33 +374,15 @@ describe('SourceManager', () => {
     });
   });
 
-  describe('formatSourceState activeOnly (coding mode)', () => {
-    it('returns nothing while no source is active', () => {
+  describe('complete source discovery', () => {
+    it('introduces available inactive sources even before any is enabled', () => {
       sourceManager.setAllSources([createMockSource('github'), createMockSource('slack')]);
       sourceManager.updateActiveState([], [], []);
-      expect(sourceManager.formatSourceState({ activeOnly: true })).toBe('');
-    });
-
-    it('lists and introduces only active sources', () => {
-      sourceManager.setAllSources([createMockSource('github'), createMockSource('slack')]);
-      sourceManager.updateActiveState(['github'], [], ['github']);
-      const block = sourceManager.formatSourceState({ activeOnly: true });
-      expect(block).toContain('Active: github');
+      const block = sourceManager.formatSourceState();
+      expect(block).toContain('Active: none');
+      expect(block).toContain('Inactive:');
       expect(block).toContain('github tagline');
-      expect(block).not.toContain('Inactive:');
-      expect(block).not.toContain('slack');
-    });
-
-    it('still introduces a source that becomes active later', () => {
-      sourceManager.setAllSources([createMockSource('github'), createMockSource('slack')]);
-      sourceManager.updateActiveState(['github'], [], ['github']);
-      sourceManager.formatSourceState({ activeOnly: true });
-
-      sourceManager.updateActiveState(['github', 'slack'], [], ['github', 'slack']);
-      const block = sourceManager.formatSourceState({ activeOnly: true });
-      expect(block).toContain('New:');
       expect(block).toContain('slack tagline');
-      expect(block).not.toContain('github tagline');
     });
   });
 });

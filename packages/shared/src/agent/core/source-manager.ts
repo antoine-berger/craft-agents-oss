@@ -182,28 +182,20 @@ export class SourceManager {
    * Format source state as XML block for injection into user messages.
    * Shows active sources, inactive sources, and introduces new sources with taglines.
    *
-   * @param options.activeOnly - Coding mode: list and introduce only active sources (no inactive
-   *   list, no taglines for sources the session doesn't use); returns '' when none are active.
    * @returns Formatted XML string for context injection
    */
-  formatSourceState(options?: { activeOnly?: boolean }): string {
-    const activeOnly = options?.activeOnly === true;
-
+  formatSourceState(): string {
     // Use intended active slugs (what UI shows) rather than just what built successfully
     const activeSlugs = [...this.intendedSlugs].sort();
 
-    // Only active sources get introduced when activeOnly, so only they become "known": a source
-    // enabled later is still introduced with its tagline and guide.
-    if (activeOnly && activeSlugs.length === 0) return '';
-
     // Find inactive sources (in allSources but not intended-active)
-    const inactiveSources = activeOnly ? [] : this.allSources.filter(
+    const inactiveSources = this.allSources.filter(
       (s) => !this.intendedSlugs.has(s.config.slug)
     );
 
     // Find sources not yet seen this session
     const unseenSources = this.allSources.filter(
-      (s) => !this.knownSlugs.has(s.config.slug) && (!activeOnly || this.intendedSlugs.has(s.config.slug))
+      (s) => !this.knownSlugs.has(s.config.slug)
     );
 
     // Find active sources that need attention (needs_auth or failed status)
@@ -218,7 +210,7 @@ export class SourceManager {
     const isFirstMessage = this.knownSlugs.size === 0;
 
     // Mark the introduced sources as known for next message
-    (activeOnly ? activeSources : this.allSources).forEach((s) => this.knownSlugs.add(s.config.slug));
+    this.allSources.forEach((s) => this.knownSlugs.add(s.config.slug));
 
     // Build output parts
     const parts: string[] = [];

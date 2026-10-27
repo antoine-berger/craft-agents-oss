@@ -64,6 +64,8 @@ const pr = (overrides: Partial<GqlPullRequestSummary>): GqlPullRequestSummary =>
 describe('mapSummary', () => {
   it('maps the live #479 response', () => {
     expect(mapSummary(PR_479, { localAhead: 2, localDirty: true }, { fetchedAt: 1000, via: 'gh' })).toEqual({
+      headOid: PR_479.headRefOid,
+      attentionFeedback: [],
       number: 479,
       title: 'Add Coding mode + uplift Claude Agent SDK to 0.3.302',
       url: 'https://github.com/craft-ai-agents/craft-agents/pull/479',

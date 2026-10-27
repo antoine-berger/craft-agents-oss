@@ -5,7 +5,7 @@ type Fields = { sdkSessionId?: string; messageCount?: number; messages?: Array<{
 
 const started = ({ messages = [], ...rest }: Fields) => hasConversationStarted({ messages, ...rest } as never)
 
-// Coding mode (and anything else that shapes the agent's prompt/tools) can only change before this
+// Repository and SDK context become fixed when the conversation starts.
 describe('hasConversationStarted', () => {
   it('is false for a fresh session', () => {
     expect(started({})).toBe(false)

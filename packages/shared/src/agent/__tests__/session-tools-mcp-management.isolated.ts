@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import type { SessionToolProfileOptions } from '../session-scoped-tools.ts';
+import type { SessionToolOptions } from '../session-scoped-tools.ts';
 
 const originalConfigDir = process.env.CRAFT_CONFIG_DIR;
 const configRoot = mkdtempSync(join(tmpdir(), 'session-tools-mcp-config-'));
@@ -54,7 +54,7 @@ afterEach(() => {
   rmSync(workspacePath, { recursive: true, force: true });
 });
 
-async function requestCredential(sourceSlug: string, options?: SessionToolProfileOptions) {
+async function requestCredential(sourceSlug: string, options?: SessionToolOptions) {
   const server = getSessionScopedTools(SESSION, workspacePath, undefined, options);
   const client = new Client({ name: 'mcp-management-test', version: '1.0.0' });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -67,9 +67,8 @@ async function requestCredential(sourceSlug: string, options?: SessionToolProfil
 }
 
 describe('Session tool adapter MCP ownership policy', () => {
-  for (const profile of [undefined, 'coding'] as const) {
-    it(`isolates cached policies when switching connections (${profile ?? 'default'} profile)`, async () => {
-      const options = { profile, hasEnabledSources: true };
+    it('isolates cached policies when switching connections', async () => {
+      const options = {};
       const before = await requestCredential('mcp-source', options);
       expect(before.isError).not.toBe(true);
       expect(authRequests).toHaveLength(1);
@@ -83,7 +82,6 @@ describe('Session tool adapter MCP ownership policy', () => {
       expect(after.isError).not.toBe(true);
       expect(authRequests).toHaveLength(2);
     });
-  }
 
   it('preserves API credential tools for Claude account connections', async () => {
     const result = await requestCredential('api-source', { mcpManagement: 'claudeai' });

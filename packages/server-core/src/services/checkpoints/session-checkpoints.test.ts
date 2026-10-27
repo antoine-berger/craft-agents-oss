@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync,
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { OwnedWorktree } from '@craft-agent/shared/sessions'
-import { ensureOwnedWorktree, planOwnedWorktree } from '../coding-repos/owned-worktree'
+import { ensureOwnedWorktree, planOwnedWorktree } from '../repositories/owned-worktree'
 import { captureSessionCheckpoint, checkpointConversationPath, listSessionCheckpoints, restoreSessionCheckpoint, assertCheckpointRestoreComplete, SessionCheckpointError } from './session-checkpoints'
 
 let root: string, repo: string, sessionDir: string, plan: OwnedWorktree

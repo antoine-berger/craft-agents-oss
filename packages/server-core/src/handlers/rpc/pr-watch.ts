@@ -1,5 +1,5 @@
 /**
- * PR watcher RPCs (Coding mode's chat-header PR carousel). The registry runs here, on the workspace
+ * PR watcher RPCs (chat-header PR carousel). The registry runs here, on the workspace
  * server: it has the session's folder, the source credentials and `gh`, so tokens never reach a
  * client. Clients subscribe per session and receive `prWatch:changed` pushes carrying the session's
  * whole PR set. Bind / unbind / auto-merge / auto-fix go through the shared ops so the agent tools and

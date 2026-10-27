@@ -1,3 +1,4 @@
+import { SidebarQuotaIndicator } from './SidebarQuotaIndicator'
 import * as React from "react"
 import { useTranslation, Trans } from "react-i18next"
 import { useRef, useState, useEffect, useCallback, useMemo } from "react"
@@ -2406,6 +2407,7 @@ function AppShellContent({
               onKeyDown={handleSidebarKeyDown}
               links={sidebarLinks}
               footerLinks={sidebarFooterLinks}
+              footerTop={<SidebarQuotaIndicator getQuotas={window.electronAPI.getProviderQuotas} className="mx-2 mt-1.5" />}
               getItemProps={getSidebarItemProps}
               focusedItemId={focusedSidebarItemId}
               onNewSession={(openInNewWindow) => handleNewChat(openInNewWindow)}

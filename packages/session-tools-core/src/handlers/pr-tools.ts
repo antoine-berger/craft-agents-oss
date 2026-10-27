@@ -1,5 +1,5 @@
 /**
- * PR tool handlers — pr_status / pr_bind / pr_unbind / pr_set_auto_merge (Coding mode).
+ * PR tool handlers — pr_status / pr_bind / pr_unbind / pr_set_auto_merge.
  *
  * All credential resolution and GitHub access happen behind the injected ctx.prWatch callbacks on the
  * workspace server (where the token chain + `gh` live) — this package stays dependency-free of
@@ -11,7 +11,7 @@ import type { ToolResult } from '../types.ts';
 import { successResponse, errorResponse } from '../response.ts';
 
 const PR_UNAVAILABLE =
-  'PR tools are unavailable here — they need Coding mode on the workspace server. If this is a coding session, there is nothing to do.';
+  'PR tools are unavailable here because this session has no workspace-server PR watcher connection.';
 
 function toError(error: unknown): string {
   return error instanceof Error ? error.message : 'Unknown error';

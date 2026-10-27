@@ -1,3 +1,4 @@
+import type { ShipWorkflowAPI } from '@craft-agent/shared/protocol'
 // =============================================================================
 // Protocol re-exports (channels, DTOs, events, wire types)
 // =============================================================================
@@ -241,7 +242,10 @@ import type {
 /** Native window material the renderer may paint translucently over (see ThemeContext data-vibrancy). */
 export type WindowVibrancy = 'under-window' | 'mica'
 
-export interface ElectronAPI {
+export interface ElectronAPI extends ShipWorkflowAPI {
+  getSessionAttention(workspaceId: string): Promise<import('@craft-agent/shared/protocol').WorkspaceAttention>
+  onSessionAttentionChanged(callback: (snapshot: import('@craft-agent/shared/protocol').WorkspaceAttention) => void): () => void
+  getProviderQuotas(request?: import('@craft-agent/shared/protocol').ProviderQuotasRequest): Promise<import('@craft-agent/shared/protocol').ProviderQuotasSnapshot>
   // Session management
   getSessions(): Promise<Session[]>
   getUnreadSummary(): Promise<UnreadSummary>
@@ -660,12 +664,12 @@ export interface ElectronAPI {
   listSessionCheckpoints(sessionId: string): Promise<import('@craft-agent/shared/protocol').SessionCheckpointList>
   restoreSessionCheckpoint(sessionId: string, checkpointId: string): Promise<import('@craft-agent/shared/protocol').SessionCheckpointRestoreResult>
   getGitReview(sessionId: string): Promise<import('@craft-agent/shared/protocol').GitReviewSnapshot>
-  /** Coding mode worktree picker: local repos (workspace folder + these recent folders) and `gh repo list` */
-  listCodingRepos(workspaceId: string, recentDirs: string[], options?: { refreshGitHub?: boolean; query?: string }): Promise<import('@craft-agent/shared/protocol').RepoListing>
+  /** Repository picker: local repos (workspace folder + these recent folders) and `gh repo list` */
+  listRepositories(workspaceId: string, recentDirs: string[], options?: { refreshGitHub?: boolean; query?: string }): Promise<import('@craft-agent/shared/protocol').RepoListing>
   /** Creates a new session's worktree (cloning a GitHub-only repo first); rejects with git's reason */
-  createCodingWorktree(workspaceId: string, request: import('@craft-agent/shared/protocol').CreateWorktreeRequest, recentDirs: string[]): Promise<import('@craft-agent/shared/protocol').CreateWorktreeResult>
+  createSessionWorktree(workspaceId: string, request: import('@craft-agent/shared/protocol').CreateWorktreeRequest, recentDirs: string[]): Promise<import('@craft-agent/shared/protocol').CreateWorktreeResult>
 
-  // PR watcher (Coding mode): subscribe per session, then receive pushes; see protocol/pr-watch.ts
+  // PR watcher (PRs): subscribe per session, then receive pushes; see protocol/pr-watch.ts
   prWatchSubscribe(sessionId: string): Promise<{ subscriptionId: string | null; state: import('@craft-agent/shared/protocol').PrWatchSessionState }>
   prWatchUnsubscribe(subscriptionId: string): Promise<void>
   prWatchRefresh(sessionId: string): Promise<void>

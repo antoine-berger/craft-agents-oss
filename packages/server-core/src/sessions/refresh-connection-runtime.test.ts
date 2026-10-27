@@ -198,33 +198,30 @@ describe('refreshConnectionRuntime', () => {
   })
 
   it('records customModels with the per-model supportsImages flag in the IPC payload', async () => {
-    // End-to-end shape check: when the session's connection resolves to a
-    // pi_compat connection with explicit per-model `supportsImages`, the
-    // helper must forward that field on `customModels` so the Pi subprocess
-    // can re-register the model with `input: ['text', 'image']`.
+    // Test the real runtime-refresh envelope with an explicit connection. Resolving
+    // slug-A against the developer's config made this assertion machine-dependent.
     const agent = createAgentStub()
-    injectSession(sm, 'shape-check', tmpRoot, 'slug-A', agent)
-
-    await sm.refreshConnectionRuntime('slug-A')
+    const managed = injectSession(sm, 'shape-check', tmpRoot, 'slug-A', agent)
+    const connection = {
+      slug: 'slug-A', name: 'Test endpoint', createdAt: 0,
+      providerType: 'pi_compat', authType: 'api_key_with_endpoint',
+      baseUrl: 'https://endpoint.example.invalid/v1', piAuthProvider: 'openai',
+      customEndpoint: { api: 'openai-completions', maxTokens: 4096 },
+      models: ['plain-model', { id: 'text-model', supportsImages: false }, { id: 'vision-model', supportsImages: true, contextWindow: 128000 }],
+    }
+    await (sm as any).runAgentRuntimeRefresh(managed, {
+      connection, provider: 'pi', authType: 'api_key', resolvedModel: 'vision-model',
+    }, 'runtime-signature', 'restart-signature', false, 'test fixture')
 
     expect(agent.updateRuntimeConfig).toHaveBeenCalledTimes(1)
     const payload = agent.updateRuntimeConfig.mock.calls[0]?.[0]
-    expect(payload).toBeDefined()
     expect(payload).toMatchObject({
-      model: expect.any(String),
-      runtime: expect.any(Object),
+      model: 'vision-model', providerType: 'pi_compat', authType: 'api_key',
+      runtime: {
+        baseUrl: 'https://endpoint.example.invalid/v1', piAuthProvider: 'openai',
+        customEndpoint: { api: 'openai-completions', maxTokens: 4096 },
+        customModels: ['plain-model', { id: 'text-model', supportsImages: false }, { id: 'vision-model', contextWindow: 128000, supportsImages: true }],
+      },
     })
-    // The runtime envelope mirrors what `pi-agent.ts:requestRuntimeConfigUpdate`
-    // unpacks — `customModels` shape preserves `supportsImages` when set.
-    if (payload.runtime?.customModels) {
-      for (const m of payload.runtime.customModels) {
-        if (typeof m === 'object') {
-          expect(typeof m.id).toBe('string')
-          if ('supportsImages' in m) {
-            expect(typeof m.supportsImages).toBe('boolean')
-          }
-        }
-      }
-    }
   })
 })

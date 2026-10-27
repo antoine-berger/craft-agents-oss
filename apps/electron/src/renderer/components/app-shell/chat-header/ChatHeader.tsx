@@ -1,7 +1,7 @@
 /**
  * ChatHeader — the chat panel's header (design spec §7.3).
  *
- * Desktop: status glyph · title (click to rename) · "workspace · folder" · PR chip (Coding mode) ·
+ * Desktop: status glyph · title (click to rename) · "workspace · folder" · PR chip ·
  * label chips · Info · Share · ⋯ · close. Session metadata lives here rather than in a badge row
  * above the composer.
  *
@@ -31,7 +31,7 @@ import { deriveSelectionFlags } from '../input/use-working-directory-state'
 import { ChatHeaderStatusButton } from './ChatHeaderStatusButton'
 import { ChatHeaderLabels } from './ChatHeaderLabels'
 import { ChatShareMenu } from './ChatShareMenu'
-import { CHAT_HEADER_CODING_MAX_LABELS } from './label-strip-layout'
+import { CHAT_HEADER_MAX_LABELS } from './label-strip-layout'
 import { ChatHeaderPrChip } from './pr-watch/ChatHeaderPrChip'
 import { isPrWatchVisible, type PrEntry, type PrMergeMethod, type PrWatchState } from './pr-watch/pr-watch-state'
 import type { PrAutoFixView, PrAutoMergeChange, PrWatchNav } from '@/hooks/usePrWatch'
@@ -49,7 +49,7 @@ export interface ChatHeaderProps {
   onReviewChanges?: () => void
   workingDirectory?: string
   sessionFolderPath?: string
-  /** The active pull request; shown only for Coding-mode sessions, on the desktop layout */
+  /** The active pull request; shown on the desktop layout */
   prWatch?: PrWatchState
   /** The session's PRs (branch PR + pinned PRs); with more than one the chip shows "+N" and the card its tabs */
   prWatchNav?: PrWatchNav
@@ -228,7 +228,6 @@ export const ChatHeader = React.memo(function ChatHeader({
   // ("Design Audit · design-audit") was noise that competed with the title.
   const folderName = sessionFolderPath ? deriveSelectionFlags(workingDirectory, sessionFolderPath).folderName : undefined
   const meta = folderName ?? ''
-  const codingMode = !!item?.codingMode
   const showPrChip = !compact && isPrWatchVisible(prWatch)
   // The PR chip, measured by the label strip (state: it mounts after the strip's first layout)
   const [prReserveEl, setPrReserveEl] = React.useState<HTMLElement | null>(null)
@@ -288,7 +287,7 @@ export const ChatHeader = React.memo(function ChatHeader({
           labels={labels}
           onLabelsChange={handleLabelsChange}
           rowEl={titleRowEl}
-          maxLabels={codingMode ? CHAT_HEADER_CODING_MAX_LABELS : undefined}
+          maxLabels={CHAT_HEADER_MAX_LABELS}
           reserveEl={showPrChip ? prReserveEl : null}
         />
       )}

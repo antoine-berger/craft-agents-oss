@@ -4,7 +4,7 @@ import type { ProjectConfig } from '@craft-agent/shared/projects'
 import type { CreateSessionOptions } from '@craft-agent/shared/protocol'
 import type { SessionWorktreeMetadata } from '@craft-agent/shared/sessions'
 import { expandPath } from '@craft-agent/shared/utils'
-import { commonGitDir } from '../services/coding-repos/discover'
+import { commonGitDir } from '../services/repositories/discover'
 
 function isInsideDirectory(directory: string, parent: string): boolean {
   const child = relative(parent, directory)

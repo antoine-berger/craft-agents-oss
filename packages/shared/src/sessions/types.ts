@@ -38,11 +38,11 @@ export const SESSION_PERSISTENT_FIELDS = [
   'enabledSourceSlugs', 'permissionMode', 'previousPermissionMode', 'workingDirectory', 'worktree',
   // Model/Connection
   'model', 'llmConnection', 'connectionLocked', 'thinkingLevel',
-  // Coding mode (lean coding prompt + tool profile; fixed once the session has messages)
+  // Legacy header compatibility only. Never consulted by the runtime.
   'codingMode',
-  // Coding mode: PRs pinned to this session (chat-header PR carousel; see protocol/pr-watch BoundPr)
+  // PRs pinned to this session (chat-header PR carousel; see protocol/pr-watch BoundPr)
   'boundPrs',
-  // Coding mode: per-PR monitor state (auto-fix toggle + what it last acted on), keyed by PR id
+  // Per-PR monitor state (auto-fix toggle + what it last acted on), keyed by PR id
   'prMonitors',
   // Sharing
   'sharedUrl', 'sharedId',
@@ -208,11 +208,11 @@ export interface SessionConfig {
   connectionLocked?: boolean;
   /** Thinking level for this session ('off', 'think', 'max') */
   thinkingLevel?: ThinkingLevel;
-  /** Coding mode: lean coding system prompt and session-tool profile. Fixed once the session has messages. */
+  /** @deprecated Retained only when reading and preserving historical headers; ignored by the runtime. */
   codingMode?: boolean;
-  /** Coding mode: PRs pinned to this session, shown in the chat-header PR carousel (pr_bind / pr_unbind). */
+  /** PRs pinned to this session, shown in the chat-header PR carousel (pr_bind / pr_unbind). */
   boundPrs?: BoundPr[];
-  /** Coding mode: per-PR monitor state (auto-fix), keyed by PR id `host/owner/repo#number`. */
+  /** Per-PR monitor state (auto-fix), keyed by PR id `host/owner/repo#number`. */
   prMonitors?: Record<string, PrMonitorState>;
   /**
    * Pending plan execution state - tracks "Accept & Compact" flow.
@@ -356,11 +356,11 @@ export interface SessionHeader {
   connectionLocked?: boolean;
   /** Thinking level for this session ('off', 'think', 'max') */
   thinkingLevel?: ThinkingLevel;
-  /** Coding mode: lean coding system prompt and session-tool profile. Fixed once the session has messages. */
+  /** @deprecated Retained only when reading and preserving historical headers; ignored by the runtime. */
   codingMode?: boolean;
-  /** Coding mode: PRs pinned to this session, shown in the chat-header PR carousel (pr_bind / pr_unbind). */
+  /** PRs pinned to this session, shown in the chat-header PR carousel (pr_bind / pr_unbind). */
   boundPrs?: BoundPr[];
-  /** Coding mode: per-PR monitor state (auto-fix), keyed by PR id `host/owner/repo#number`. */
+  /** Per-PR monitor state (auto-fix), keyed by PR id `host/owner/repo#number`. */
   prMonitors?: Record<string, PrMonitorState>;
   /**
    * Pending plan execution state - tracks "Accept & Compact" flow.
@@ -475,11 +475,9 @@ export interface SessionMetadata {
   connectionLocked?: boolean;
   /** Thinking level for this session ('off', 'think', 'max') */
   thinkingLevel?: ThinkingLevel;
-  /** Coding mode: lean coding system prompt and session-tool profile. Fixed once the session has messages. */
-  codingMode?: boolean;
-  /** Coding mode: PRs pinned to this session, shown in the chat-header PR carousel (pr_bind / pr_unbind). */
+  /** PRs pinned to this session, shown in the chat-header PR carousel (pr_bind / pr_unbind). */
   boundPrs?: BoundPr[];
-  /** Coding mode: per-PR monitor state (auto-fix), keyed by PR id `host/owner/repo#number`. */
+  /** Per-PR monitor state (auto-fix), keyed by PR id `host/owner/repo#number`. */
   prMonitors?: Record<string, PrMonitorState>;
   /** ID of last message user has read - for unread detection */
   lastReadMessageId?: string;
