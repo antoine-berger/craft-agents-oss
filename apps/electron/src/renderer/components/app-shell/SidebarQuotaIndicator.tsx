@@ -107,20 +107,21 @@ export function SidebarQuotaIndicator({ getQuotas, className }: SidebarQuotaIndi
           <div className="mt-2.5 space-y-2">
             {(['five_hour', 'weekly'] as const).map(period => {
               const window = selectedWindow(account, period)
+              if (!window || window.usedPercent === null) return null
               return <div key={period}>
-                <div className="flex items-center justify-between text-xs"><span className="text-secondary">{period === 'five_hour' ? '5 hours' : 'Weekly'}</span><span className="tabular-nums text-secondary">{formatPercent(window?.usedPercent)} used{account.freshness === 'stale' && window ? ' · stale' : ''}</span></div>
-                <div className="mt-1 h-1 rounded-full bg-foreground/5 overflow-hidden"><div className={cn('h-full rounded-full bg-foreground/40', account.freshness !== 'fresh' && 'opacity-40')} style={{ width: `${window?.usedPercent ?? 0}%` }} /></div>
-                <div className="mt-1 text-[11px] text-tertiary">{window ? `Resets ${dateLabel(window.resetsAt)}` : 'Window not provided by provider'}</div>
+                <div className="flex items-center justify-between text-xs"><span className="text-secondary">{period === 'five_hour' ? '5 hours' : 'Weekly'}</span><span className="tabular-nums text-secondary">{formatPercent(window.usedPercent)} used{account.freshness === 'stale' ? ' · stale' : ''}</span></div>
+                <div className="mt-1 h-1 rounded-full bg-foreground/5 overflow-hidden"><div className={cn('h-full rounded-full bg-foreground/40', account.freshness !== 'fresh' && 'opacity-40')} style={{ width: `${window.usedPercent}%` }} /></div>
+                <div className="mt-1 text-[11px] text-tertiary">Resets {dateLabel(window.resetsAt)}</div>
               </div>
             })}
-            {account.windows.filter(window => window.scope || window.period === 'other').map(window => <div key={window.id} className="flex justify-between gap-3 text-xs text-tertiary"><span>{window.label}</span><span className="tabular-nums" title={`Resets ${dateLabel(window.resetsAt)}`}>{formatPercent(window.usedPercent)}</span></div>)}
+            {account.windows.filter(window => (window.scope || window.period === 'other') && window.usedPercent !== null).map(window => <div key={window.id} className="flex justify-between gap-3 text-xs text-tertiary"><span>{window.label}</span><span className="tabular-nums" title={`Resets ${dateLabel(window.resetsAt)}`}>{formatPercent(window.usedPercent)}</span></div>)}
           </div>
           <div className="mt-2.5 flex justify-between gap-2 text-[11px] text-tertiary"><span>{availabilityLabel(account)}</span><span>{account.observedAt ? `Updated ${new Date(account.observedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : 'Refresh to check'}</span></div>
           {account.nextRefreshAt !== null && account.nextRefreshAt > snapshot!.generatedAt && account.state !== 'ready' && <div className="mt-1 text-[11px] text-tertiary">Retry after {new Date(account.nextRefreshAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' })}</div>}
         </div>)}
         {!accounts.length && <div className="px-4 py-5 text-xs text-tertiary">{failed ? 'Unable to read account usage.' : snapshot?.serviceAvailable === false ? 'Account service unavailable.' : 'No connected account available.'}</div>}
       </div>
-      <div className="border-t border-foreground/5 px-4 py-2.5 text-[11px] leading-relaxed text-tertiary">{failed && 'Refresh unavailable. ' }Monitoring {selected ? monitoredName : 'one account'} only. Choosing an account here changes the display, not routing. Refresh manually with ↻.</div>
+      {failed && accounts.length > 0 && <div role="alert" className="border-t border-foreground/5 px-4 py-2.5 text-[11px] text-tertiary">Refresh unavailable.</div>}
     </PopoverContent>
   </Popover></div>
 }
