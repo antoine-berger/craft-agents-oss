@@ -27,9 +27,8 @@ export function ContextUsageIndicator({ snapshot, modelName, modelContextWindow,
   const circle = 2 * Math.PI * 5.5
   return <Popover>
     <PopoverTrigger asChild>
-      <button type="button" className={cn('input-toolbar-btn inline-flex h-control shrink-0 items-center gap-1.5 rounded-full px-2 text-xs tabular-nums text-tertiary hover:bg-foreground/5 hover:text-foreground', known && value.percent! >= 90 && 'text-info', className)} aria-label={`Context usage ${known ? `${value.percent}%` : 'unknown'}`}>
+      <button type="button" className={cn('input-toolbar-btn inline-flex h-control w-control shrink-0 items-center justify-center rounded-full p-0 text-tertiary hover:bg-foreground/5 hover:text-foreground', known && value.percent! >= 90 && 'text-info', className)} aria-label={`Context usage ${known ? `${value.percent}%` : 'unknown'}`}>
         <svg viewBox="0 0 16 16" className="size-4 -rotate-90" aria-hidden="true"><circle cx="8" cy="8" r="5.5" fill="none" stroke="currentColor" strokeWidth="1.8" opacity="0.2" strokeDasharray={known ? undefined : '2 3'} />{known && <circle cx="8" cy="8" r="5.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeDasharray={`${circle * Math.min(100, value.percent!) / 100} ${circle}`} />}</svg>
-        <span>{known ? `${value.percent}%` : '—'}</span>
       </button>
     </PopoverTrigger>
     <PopoverContent side="top" align="end" sideOffset={8} className="w-[280px] p-3.5 text-xs">
