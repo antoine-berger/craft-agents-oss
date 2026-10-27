@@ -222,6 +222,7 @@ export class CliProxyManager {
         slug, name: provider === 'claude' ? 'Claude · Account pool' : 'GPT · Account pool',
         createdAt: existing?.createdAt ?? Date.now(),
         providerType: provider === 'claude' ? 'anthropic' : 'pi_compat', authType: 'api_key_with_endpoint',
+        piAuthProvider: provider === 'codex' ? 'openai' : undefined,
         baseUrl: `${this.baseUrl}${provider === 'codex' ? '/v1' : ''}`,
         customEndpoint: provider === 'codex' ? { api: 'openai-completions', supportsImages: true, maxTokens: 32768 } : undefined,
         models, defaultModel: existing?.defaultModel && models.includes(existing.defaultModel) ? existing.defaultModel : models[0],
