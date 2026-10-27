@@ -8,6 +8,7 @@
 import { describe, test, expect } from 'bun:test'
 import type { LlmConnection } from '@craft-agent/shared/config/llm-connections'
 import {
+  connectionPickerModels,
   formatTokenCount,
   getPickerModelName,
   sortPickerModels,
@@ -187,4 +188,14 @@ describe('readable model options', () => {
    ['Anthropic',['claude']],['OpenAI',['cli-proxy-codex','chatgpt']],['Local',['ollama']],
   ])
  })
+})
+
+
+test('a mixed proxy catalogue keeps chat models in their real account pool', () => {
+  const models = ['claude-opus-5-5', 'gpt-6.1-sol', 'gpt-image-2', 'codex-auto-review', 'o3']
+  expect(connectionPickerModels('cli-proxy-claude', models)).toEqual(['claude-opus-5-5'])
+  expect(connectionPickerModels('cli-proxy-codex', models)).toEqual(['gpt-6.1-sol', 'o3'])
+  expect(connectionPickerModels('custom-aggregator', models)).toEqual(models)
+  const definition = { id: 'claude-sonnet-4-6', name: 'Sonnet', supportsImages: true }
+  expect(connectionPickerModels('cli-proxy-claude', [definition, { id: 'gpt-image-2' }])[0]).toBe(definition)
 })

@@ -30,7 +30,7 @@ import { RichTextInput, type RichTextInputHandle } from '@/components/ui/rich-te
 import { useInputAvailableHeight } from '@/hooks/useInputAvailableHeight'
 import { useTransportConnectionState } from '@/hooks/useTransportConnectionState'
 import { getComposerMaxHeight } from './composer-height'
-import { getContextDisplay, getContextDisplayLabels, type ContextStatus } from './context-display'
+import type { ContextStatus } from './context-display'
 import { createPendingPlanDispatcher } from './pending-plan-dispatch'
 import { scrollFocusedCaretIntoView } from '@/lib/scroll-focused-caret'
 import { cn } from '@/lib/utils'
@@ -316,14 +316,14 @@ export function FreeFormInput({
     return conn.defaultModel ?? null
   }, [currentConnection, workspaceDefaultConnection, llmConnections])
 
-  // Decide which of the four picker UIs to render. The `switcher` branch
-  // wins over `locked-single` so users with a single-model pi_compat default
-  // can still reach the connection list on a fresh session (#727).
+  // Keep the desktop picker compact on existing chats too; model selection
+  // still respects the session connection lock.
   const pickerMode = derivePickerMode({
     connectionUnavailable,
     connectionDefaultModel,
     isEmptySession,
     connectionCount: llmConnections.length,
+    keepHierarchy: true,
   })
 
   // Compute available models from the effective connection.
@@ -1430,8 +1430,6 @@ export function FreeFormInput({
     && !!effectiveConnectionDetails
     && isCompatProvider(effectiveConnectionDetails.providerType)
     && !modelSupportsImages(effectiveConnectionDetails, currentModel)
-  const contextDisplay = getContextDisplay(contextStatus, getModelContextWindow(currentModel))
-  const contextLabels = getContextDisplayLabels(contextDisplay, t)
 
   React.useLayoutEffect(() => {
     if (contentScrollRef.current) scrollFocusedCaretIntoView(contentScrollRef.current)
@@ -1720,9 +1718,6 @@ export function FreeFormInput({
               thinkingLevel={thinkingLevel}
               thinkingDisabled={thinkingDisabled}
               onThinkingLevelChange={onThinkingLevelChange}
-              contextDisplay={contextDisplay}
-              contextLabels={contextLabels}
-              isCompacting={contextStatus?.isCompacting}
             />
           )}
 

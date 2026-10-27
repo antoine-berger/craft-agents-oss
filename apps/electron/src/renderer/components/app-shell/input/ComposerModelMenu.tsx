@@ -1,7 +1,7 @@
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 import { AlertCircle, Check, ChevronDown, Image as ImageIcon } from 'lucide-react'
-import { Spinner, Tooltip, TooltipContent, TooltipTrigger } from '@craft-agent/ui'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@craft-agent/ui'
 import * as storage from '@/lib/local-storage'
 import { cn } from '@/lib/utils'
 import {
@@ -20,10 +20,9 @@ import { ConnectionIcon } from '@/components/icons/ConnectionIcon'
 import { ANTHROPIC_MODELS, type ModelDefinition } from '@config/models'
 import { isCompatProvider, modelSupportsImages, type LlmConnectionWithStatus } from '@config/llm-connections'
 import { THINKING_LEVELS, getThinkingLevelNameKey, type ThinkingLevel } from '@craft-agent/shared/agent/thinking-levels'
-import { getPickerModelName, getPickerModelFamily, sortPickerModels } from './model-picker-helpers'
+import { getPickerModelName, getPickerModelFamily, sortPickerModels, connectionPickerModels } from './model-picker-helpers'
 import type { PickerMode } from './picker-mode'
 import type { ToggleModelVision } from './useModelVisionToggle'
-import type { getContextDisplay, getContextDisplayLabels } from './context-display'
 import { COMPOSER_CHIP } from './composer-styles'
 
 const MENU_GROUP_LABEL = 'px-2 pt-2 pb-1 text-label-sm font-medium text-tertiary select-none'
@@ -51,9 +50,6 @@ interface ComposerModelMenuProps {
   thinkingLevel: ThinkingLevel
   thinkingDisabled: boolean
   onThinkingLevelChange?: (level: ThinkingLevel) => void
-  contextDisplay: ReturnType<typeof getContextDisplay>
-  contextLabels: ReturnType<typeof getContextDisplayLabels>
-  isCompacting?: boolean
 }
 
 /** Per-model image-input toggle (pi_compat connections only). */
@@ -89,11 +85,7 @@ function VisionToggle({ visionOn, onToggle }: { visionOn: boolean; onToggle: () 
   )
 }
 
-/**
- * Desktop model picker (mockup "Opus 5.5 ⌄" chip). Moved out of FreeFormInput unchanged in
- * behavior: the four picker modes, vision toggles, thinking level and context footer are the
- * same; only the trigger and menu rows use the toolbar-chip and menu materials.
- */
+/** Compact desktop provider/model menu shared by new and existing sessions. */
 export function ComposerModelMenu({
   open,
   onOpenChange,
@@ -115,9 +107,6 @@ export function ComposerModelMenu({
   thinkingLevel,
   thinkingDisabled,
   onThinkingLevelChange,
-  contextDisplay,
-  contextLabels,
-  isCompacting,
 }: ComposerModelMenuProps) {
   const { t } = useTranslation()
   const availableThinkingLevels = THINKING_LEVELS
@@ -198,7 +187,7 @@ export function ComposerModelMenu({
             )
           })()
         ) : pickerMode === 'switcher' ? (
-          /* Hierarchical view: Provider → Connection → Models (empty session with multiple connections — lets the user switch BEFORE the first message locks the connection) */
+          /* Same compact provider/connection hierarchy before and after the first message. */
           connectionsByProvider.map(([providerName, connections], index) => (
             <React.Fragment key={providerName}>
               {/* Provider group label */}
@@ -208,6 +197,7 @@ export function ComposerModelMenu({
               {connections.map((conn) => {
                 const isCurrentConnection = effectiveConnection === conn.slug
                 const isAuthenticated = conn.isAuthenticated
+                const canSelectConnection = isEmptySession || isCurrentConnection
                 return (
                   <DropdownMenuSub key={conn.slug}>
                     <StyledDropdownMenuSubTrigger
@@ -232,7 +222,7 @@ export function ComposerModelMenu({
                     {isAuthenticated && (
                       <StyledDropdownMenuSubContent className="min-w-[240px] max-h-[min(65vh,480px)] overflow-y-auto">
                         {/* Show models for this connection - use provider-specific models as fallback */}
-                        {sortPickerModels(conn.models || ANTHROPIC_MODELS).map((model, modelIndex, models) => {
+                        {sortPickerModels(connectionPickerModels(conn.slug, conn.models || ANTHROPIC_MODELS)).map((model, modelIndex, models) => {
                           const modelId = typeof model === 'string' ? model : model.id
                           const modelName = getPickerModelName(model)
                           const isSelectedModel = isCurrentConnection && currentModel === modelId
@@ -242,7 +232,10 @@ export function ComposerModelMenu({
                             <React.Fragment key={modelId}>
                               {modelIndex > 0 && getPickerModelFamily(models[modelIndex - 1]) !== getPickerModelFamily(model) && <StyledDropdownMenuSeparator className="my-1" />}
                               <StyledDropdownMenuItem
+                                disabled={!canSelectConnection}
                                 onSelect={() => {
+                                  // Existing SDK sessions retain their connection and history.
+                                  if (!canSelectConnection) return
                                   // If selecting a different connection, update both connection and model
                                   if (!isCurrentConnection && onConnectionChange) {
                                     onConnectionChange(conn.slug)
@@ -368,28 +361,6 @@ export function ComposerModelMenu({
           </>
         )}
 
-        {/* Context usage footer - snapshot-aware occupancy, not cumulative billing. */}
-        {contextDisplay.visible && (
-          <>
-            <StyledDropdownMenuSeparator className="my-1" />
-            <div className="px-2 py-1.5 select-none">
-              <div className="flex items-center justify-between gap-3 text-label-sm text-tertiary">
-                <span>{contextLabels.window}</span>
-                <span className="flex min-w-0 items-center gap-1.5 text-right tabular-nums">
-                  {isCompacting && (
-                    <Spinner className="h-3 w-3 shrink-0" />
-                  )}
-                  <span>{contextLabels.usage}</span>
-                </span>
-              </div>
-              {(contextLabels.percent || contextLabels.qualifier) && (
-                <div className="mt-0.5 text-caption font-normal text-tertiary">
-                  {[contextLabels.percent, contextLabels.qualifier].filter(Boolean).join(' · ')}
-                </div>
-              )}
-            </div>
-          </>
-        )}
       </StyledDropdownMenuContent>
     </DropdownMenu>
   )

@@ -99,3 +99,11 @@ export function sortPickerModels<T extends PickerModel>(models: readonly T[]): T
     return versionB.localeCompare(versionA, undefined, { numeric: true }) || nameA.localeCompare(nameB, undefined, { numeric: true })
   })
 }
+
+/** Keep a shared proxy catalogue inside its actual account-pool provider. */
+export function connectionPickerModels<T extends PickerModel>(slug: string, models: readonly T[]): T[] {
+  const id = (model: T) => stripPiPrefixForDisplay(typeof model === 'string' ? model : model.id)
+  if (slug === 'cli-proxy-claude') return models.filter(model => id(model).startsWith('claude-'))
+  if (slug === 'cli-proxy-codex') return models.filter(model => /^(gpt-|o[134](?:-|$))/.test(id(model)) && !id(model).startsWith('gpt-image-'))
+  return [...models]
+}
