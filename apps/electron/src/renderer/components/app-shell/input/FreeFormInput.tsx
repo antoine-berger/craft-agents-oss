@@ -202,6 +202,7 @@ export interface FreeFormInputProps {
   worktreeConfigured?: boolean
   worktreeLocked?: boolean
   worktreeRepository?: string
+  worktreeBranch?: string
   /** Toggle coding mode (only before the first message) */
   onCodingModeChange?: (enabled: boolean) => void
   /** Continue a started session in a new one with coding mode set to `enabled` */
@@ -297,6 +298,7 @@ export function FreeFormInput({
   worktreeConfigured = false,
   worktreeLocked = false,
   worktreeRepository,
+  worktreeBranch,
   contextStatus,
   followUpItems = [],
   onFollowUpClick,
@@ -1674,9 +1676,8 @@ export function FreeFormInput({
             onChange={handleFileInputChange}
           />
 
-          {/* Left: attach, sources, working folder. Compact, and desktop panels under 32rem, show
-              the chips icon-only (their names stay in tooltips/aria-labels) so the model keeps its
-              name. Desktop keeps the three icons (96px) while the row still leaves 11rem for mode ·
+          {/* Left: attachments and repository context. Compact folder badges can collapse to
+              icons while repository labels stay short. The row leaves 11rem for mode ·
               model · context · Send; in a narrower row that floor gives way so Send is never pushed
               out. overflow-hidden is safe — popovers/drawers portal. */}
           <div className={cn(
@@ -1698,10 +1699,10 @@ export function FreeFormInput({
           />
 
           {/* Working directory chip */}
-          {requireWorktree && isEmptySession ? (
+          {(requireWorktree && (isEmptySession || !!worktreeRepository)) || worktreeLocked ? (
             <ComposerRepositorySelector key={sessionId} workspaceId={workspaceId} sessionId={sessionId}
               repository={worktreeLocked ? undefined : selectedRepository}
-              repositoryPath={worktreeRepository} locked={worktreeLocked} disabled={disabled}
+              repositoryPath={worktreeRepository} worktreePath={workingDirectory} branch={worktreeBranch} locked={worktreeLocked || !isEmptySession} disabled={disabled}
               onChoose={setSelectedRepository} />
           ) : onWorkingDirectoryChange && (compactMode ? (
             <CompactWorkingDirectorySelector

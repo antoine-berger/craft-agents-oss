@@ -4174,7 +4174,7 @@ export class SessionManager implements ISessionManager {
     if (directoryChanged) {
       invalidateContextFileCache(workingDirectory)
       invalidateSkillsCache()
-      this.sendEvent({ type: 'working_directory_changed', sessionId: managed.id, workingDirectory }, managed.workspace.id)
+      this.sendEvent({ type: 'working_directory_changed', sessionId: managed.id, workingDirectory, worktree: { ...metadata, owned: { ...ready } } }, managed.workspace.id)
     }
   }
 
@@ -6514,7 +6514,7 @@ export class SessionManager implements ISessionManager {
 
       this.persistSession(managed)
       // Notify renderer of the working directory change
-      this.sendEvent({ type: 'working_directory_changed', sessionId, workingDirectory: path }, managed.workspace.id)
+      this.sendEvent({ type: 'working_directory_changed', sessionId, workingDirectory: path, worktree: managed.worktree ? { ...managed.worktree } : null }, managed.workspace.id)
     }
   }
 

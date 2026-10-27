@@ -462,7 +462,7 @@ export function handleAsyncOperation(
 }
 
 /**
- * Handle working_directory_changed - update session working directory (user-initiated via UI)
+ * Update the working directory and worktree metadata together before the next composer render
  */
 export function handleWorkingDirectoryChanged(
   state: SessionState,
@@ -472,7 +472,9 @@ export function handleWorkingDirectoryChanged(
 
   return {
     state: {
-      session: { ...session, workingDirectory: event.workingDirectory },
+      session: { ...session, workingDirectory: event.workingDirectory,
+        ...(event.worktree !== undefined ? { worktree: event.worktree ?? undefined } : {}),
+      },
       streaming,
     },
     effects: [],

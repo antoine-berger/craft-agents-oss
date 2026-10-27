@@ -452,7 +452,7 @@ export type SessionEvent =
   | { type: 'title_generated'; sessionId: string; title: string }
   | { type: 'title_regenerating'; sessionId: string; isRegenerating: boolean }
   | { type: 'async_operation'; sessionId: string; isOngoing: boolean }
-  | { type: 'working_directory_changed'; sessionId: string; workingDirectory: string }
+  | { type: 'working_directory_changed'; sessionId: string; workingDirectory: string; worktree?: SessionWorktreeMetadata | null }
   | { type: 'permission_request'; sessionId: string; request: PermissionRequest }
   | { type: 'credential_request'; sessionId: string; request: CredentialRequest }
   | { type: 'permission_mode_changed'; sessionId: string; permissionMode: PermissionMode; previousPermissionMode?: PermissionMode; transitionDisplay?: string; modeVersion?: number; changedAt?: string; changedBy?: PermissionModeState['changedBy'] }

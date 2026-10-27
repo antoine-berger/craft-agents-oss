@@ -189,7 +189,7 @@ describe('SessionManager worktree lifecycle', () => {
     expect(backendStarts[0]?.persisted?.llmConnection).toBe('claude-account-a')
     expect(backendStarts[0]?.persisted?.messages[0]?.content).toBe('Implement this feature')
     expect(manager.sendEvent).toHaveBeenCalledWith({
-      type: 'working_directory_changed', sessionId: managed.id, workingDirectory: owned.path,
+      type: 'working_directory_changed', sessionId: managed.id, workingDirectory: owned.path, worktree: managed.worktree,
     }, workspace.id)
     expect(git(repository, 'symbolic-ref', '--short', 'HEAD')).toBe('main')
     expect(git(repository, 'status', '--porcelain')).toBe('')
@@ -240,7 +240,7 @@ describe('SessionManager worktree lifecycle', () => {
     expect(first.backendStarts[0]?.persisted?.workingDirectory).toBe(expectedCwd)
     expect(first.backendStarts[0]?.persisted?.sdkCwd).toBe(expectedCwd)
     expect(first.manager.sendEvent).toHaveBeenCalledWith({
-      type: 'working_directory_changed', sessionId: original.id, workingDirectory: expectedCwd,
+      type: 'working_directory_changed', sessionId: original.id, workingDirectory: expectedCwd, worktree: original.worktree,
     }, workspace.id)
     original.sdkSessionId = 'sdk-project-subdirectory'
     first.manager.persistSession(original)

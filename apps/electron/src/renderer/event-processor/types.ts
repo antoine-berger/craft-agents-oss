@@ -313,12 +313,13 @@ export interface AsyncOperationEvent {
 }
 
 /**
- * Working directory changed event (user-initiated via UI)
+ * Working directory changed by the user or by first-message worktree preparation
  */
 export interface WorkingDirectoryChangedEvent {
   type: 'working_directory_changed'
   sessionId: string
   workingDirectory: string
+  worktree?: Session['worktree'] | null
 }
 
 /**

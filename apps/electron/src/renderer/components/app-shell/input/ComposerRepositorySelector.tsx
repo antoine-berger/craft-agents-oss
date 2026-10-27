@@ -15,13 +15,18 @@ interface ComposerRepositorySelectorProps {
   sessionId?: string
   repository?: RepositorySelection
   repositoryPath?: string
+  worktreePath?: string
+  branch?: string
   disabled: boolean
   locked?: boolean
   onChoose: (repository: RepositorySelection) => void
 }
 
-export function ComposerRepositorySelector({ workspaceId, sessionId, repository, repositoryPath, disabled, locked, onChoose }: ComposerRepositorySelectorProps) {
+export function ComposerRepositorySelector({ workspaceId, sessionId, repository, repositoryPath, worktreePath, branch, disabled, locked, onChoose }: ComposerRepositorySelectorProps) {
   const { t } = useTranslation()
+  const label = repository
+    ? repository.kind === 'github' ? repository.nameWithOwner.split('/').pop()! : repository.name
+    : repositoryPath ? getPathBasename(repositoryPath.replace(/[\\/]\.git$/, '')) : t('chat.codingMode.repos.title')
   const [open, setOpen] = React.useState(false)
   const [query, setQuery] = React.useState('')
   const [history, setHistory] = React.useState(() => getSelectedRepositories(workspaceId))
@@ -56,13 +61,28 @@ export function ComposerRepositorySelector({ workspaceId, sessionId, repository,
   return (
     <Popover open={open && !disabled} onOpenChange={value => { setOpen(value); if (value) setHistory(getSelectedRepositories(workspaceId)); else setQuery('') }}>
       <PopoverTrigger asChild>
-        <button type="button" className={COMPOSER_CHIP} disabled={disabled} aria-label={t('chat.repository.label')}>
+        <button type="button" className={COMPOSER_CHIP} disabled={disabled} aria-label={`${t('chat.repository.label')}: ${label}`}>
           <FolderGit2 className="size-4 shrink-0" />
-          <span>{repository ? repositoryLabel(repository) : repositoryPath ? getPathBasename(repositoryPath.replace(/[\\/]\.git$/, '')) : t('chat.codingMode.repos.title')}</span>
+          <span className="min-w-0 truncate">{label}</span>
         </button>
       </PopoverTrigger>
       <PopoverContent side="top" align="start" className="w-[340px] max-w-[calc(100vw-24px)] p-0">
-        {locked ? <p className="p-3 text-label text-secondary">{repositoryPath}</p> : (
+        {locked ? (
+          <div className="space-y-3 p-3 text-label">
+            <p className="font-medium">{label}</p>
+            {branch && <p className="break-all text-secondary">{t('chat.onBranch', { branch })}</p>}
+            <dl className="space-y-2 text-label-sm">
+              <div>
+                <dt className="text-tertiary">{t('chat.repository.label')}</dt>
+                <dd className="break-all select-text text-secondary">{repositoryPath}</dd>
+              </div>
+              {worktreePath && <div>
+                <dt className="text-tertiary">{t('chat.workingDirectory')}</dt>
+                <dd className="break-all select-text text-secondary">{worktreePath}</dd>
+              </div>}
+            </dl>
+          </div>
+        ) : (
           <Command shouldFilter={false} className="bg-transparent" label={t('chat.codingMode.repos.title')}>
             <CommandInput placeholder={t('chat.repository.searchNew')} value={query} onValueChange={setQuery} autoFocus />
             <CommandList className="max-h-[300px]">
