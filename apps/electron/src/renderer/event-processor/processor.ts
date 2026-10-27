@@ -20,7 +20,6 @@ import {
   handleError,
   handleTypedError,
   handleSourcesChanged,
-  handleCodingModeChanged,
   handleLabelsChanged,
   handleProjectIdChanged,
   handleSessionStatusChanged,
@@ -68,6 +67,9 @@ export function processEvent(
   event: AgentEvent
 ): ProcessResult {
   switch (event.type) {
+    case 'session_restored':
+      return { state: { session: { ...state.session, ...event.session, isProcessing: false }, streaming: null }, effects: [] }
+
     case 'text_discard':
       return { state: handleTextDiscard(state, event), effects: [] }
 
@@ -169,8 +171,6 @@ export function processEvent(
     case 'sources_changed':
       return handleSourcesChanged(state, event)
 
-    case 'coding_mode_changed':
-      return handleCodingModeChanged(state, event)
 
     case 'labels_changed':
       return handleLabelsChanged(state, event)

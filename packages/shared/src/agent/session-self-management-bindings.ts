@@ -71,6 +71,22 @@ export function attachSessionSelfManagementBindings(
     enumerable: true,
   });
 
+  Object.defineProperty(context, 'readSessionHistory', {
+    get() {
+      return getSessionScopedToolCallbacks(sessionId)?.readSessionHistoryFn;
+    },
+    configurable: true,
+    enumerable: true,
+  });
+
+  Object.defineProperty(context, 'searchSessionHistory', {
+    get() {
+      return getSessionScopedToolCallbacks(sessionId)?.searchSessionHistoryFn;
+    },
+    configurable: true,
+    enumerable: true,
+  });
+
   // listBackgroundTasks defaults sid → sessionId (like getSessionInfo)
   Object.defineProperty(context, 'listBackgroundTasks', {
     get() {
@@ -184,6 +200,8 @@ export function attachSessionSelfManagementBindings(
   });
 
   // getSessionInfo needs wrapping to default sid → sessionId
+  Object.defineProperty(context, 'markAttention', { get: () => getSessionScopedToolCallbacks(sessionId)?.markAttentionFn, configurable: true, enumerable: true });
+
   Object.defineProperty(context, 'getSessionInfo', {
     get() {
       const fn = getSessionScopedToolCallbacks(sessionId)?.getSessionInfoFn;

@@ -20,6 +20,7 @@ export interface CompactSourceSelectorProps {
   selectedSlugs: string[]
   onToggleSlug: (slug: string) => void
   claudeAccountConnectors?: boolean
+  managedConnectors?: LoadedSource[]
 }
 
 /**
@@ -37,6 +38,7 @@ export function CompactSourceSelector({
   selectedSlugs,
   onToggleSlug,
   claudeAccountConnectors = false,
+  managedConnectors,
 }: CompactSourceSelectorProps) {
   const { t } = useTranslation()
   const [filter, setFilter] = React.useState('')
@@ -59,7 +61,7 @@ export function CompactSourceSelector({
           <DrawerTitle>{t('chat.sourcesTooltip')}</DrawerTitle>
         </DrawerHeader>
 
-        {claudeAccountConnectors && <ClaudeConnectorsNotice />}
+        {claudeAccountConnectors && <ClaudeConnectorsNotice connectors={managedConnectors} />}
 
         {sources.length > 0 && (
           <div className="px-4 pb-2">

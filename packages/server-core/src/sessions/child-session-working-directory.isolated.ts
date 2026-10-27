@@ -125,13 +125,18 @@ describe('child session working directory', () => {
     expect(git(repository, 'worktree', 'list', '--porcelain').match(/^worktree /gm)).toHaveLength(2)
   })
 
-  it('keeps a parent subdirectory when the parent has an explicit cwd', async () => {
-    const directory = join(root, 'existing-checkout', 'packages', 'api')
+  it('isolates an explicit parent repository subdirectory and lets its children inherit it', async () => {
+    const directory = join(repository, 'packages', 'api')
     mkdirSync(directory, { recursive: true })
+    writeFileSync(join(directory, 'index.ts'), 'export const value = 1\n')
+    git(repository, 'add', '.')
+    git(repository, 'commit', '-m', 'Add repository subdirectory')
     const parent = await parentSession({ workingDirectory: directory })
     const child = await manager.createSession(workspace.id, { parentSessionId: parent.id })
-    expect(child.workingDirectory).toBe(directory)
-    expect(storage.loadSession(workspace.rootPath, child.id)?.sdkCwd).toBe(directory)
+    const isolated = join(parent.worktree!.owned!.path, 'packages', 'api')
+    expect(child.workingDirectory).toBe(isolated)
+    expect(child.workingDirectory).not.toBe(directory)
+    expect(storage.loadSession(workspace.rootPath, child.id)?.sdkCwd).toBe(isolated)
     expect(internals.sessions.get(child.id)?.worktree).toBeUndefined()
   })
 
@@ -168,10 +173,17 @@ describe('child session working directory', () => {
   })
 
   it('inherits an unbound parent directory without requiring a project', async () => {
-    const parent = await parentSession({ projectId: undefined, workingDirectory: join(root, 'custom') })
+    const parent = await parentSession({ projectId: undefined, workingDirectory: repository })
     const child = await manager.createSession(workspace.id, { parentSessionId: parent.id })
     expect(child.projectId).toBeUndefined()
     expect(child.workingDirectory).toBe(parent.workingDirectory)
+    expect(child.workingDirectory).not.toBe(repository)
+  })
+
+  it('requires a repository selection before a parent in an ordinary folder can start children', async () => {
+    const parent = await parentSession({ projectId: undefined, workingDirectory: root })
+    await expect(manager.createSession(workspace.id, { parentSessionId: parent.id })).rejects.toThrow('Choose a repository')
+    expect(internals.sessions.size).toBe(1)
   })
 
   it('keeps archive cleanup waiting until the inheriting child is registered', async () => {

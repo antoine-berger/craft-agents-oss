@@ -100,6 +100,9 @@ describe('SessionManager turn usage', () => {
     const agent = {
       getModel: () => 'claude-opus-5-5',
       setAllSources: () => {},
+      // No source transports in this fixture; keep the normal source synchronization boundary.
+      getSummarizeCallback: () => undefined,
+      setSourceServers: async () => {},
       getSessionId: () => 'sdk-session',
       chat: async function* () {
         yield { type: 'complete', usage: totals.shift() }

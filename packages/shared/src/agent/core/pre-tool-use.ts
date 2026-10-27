@@ -610,6 +610,9 @@ export type PreToolUseCheckResult =
  * hook input. All fields needed for the pipeline are normalized here.
  */
 export interface PreToolUseInput {
+  /** Host policy runs before permission/source/risk checks and cannot be overridden by Execute. */
+  toolPolicy?: (toolName: string, input: Record<string, unknown>) => string | null;
+
   /** SDK-normalized tool name (PascalCase for built-in, mcp__server__tool for MCP) */
   toolName: string;
   /** Tool input object */
@@ -705,6 +708,15 @@ function withPermissionModeContext(reason: string, sessionId: string, effectiveM
 }
 
 export function runPreToolUseChecks(ctx: PreToolUseInput): PreToolUseCheckResult {
+  if (ctx.toolPolicy) {
+    try {
+      const denial = ctx.toolPolicy(ctx.toolName, ctx.input);
+      if (denial) return { type: 'block', reason: denial };
+    } catch {
+      return { type: 'block', reason: 'The host tool policy could not verify this action. Nothing was executed.' };
+    }
+  }
+
   const {
     toolName,
     input,

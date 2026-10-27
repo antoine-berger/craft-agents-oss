@@ -33,6 +33,7 @@ import {
 } from '@/components/info'
 import type { LoadedSource, McpToolWithPermission } from '../../shared/types'
 import type { PermissionsConfigFile } from '@craft-agent/shared/agent/modes'
+import { ClaudeAccountSourceInfo } from '@/components/sources/ClaudeAccountSourceInfo'
 
 interface SourceInfoPageProps {
   sourceSlug: string
@@ -222,7 +223,7 @@ export default function SourceInfoPage({ sourceSlug, workspaceId, onDelete }: So
         if (found) {
           setSource(found)
 
-          const config = await window.electronAPI.getSourcePermissionsConfig(workspaceId, sourceSlug)
+          const config = found.claudeAccount ? null : await window.electronAPI.getSourcePermissionsConfig(workspaceId, sourceSlug)
           if (isMounted) {
             setPermissionsConfig(config)
           }
@@ -246,7 +247,7 @@ export default function SourceInfoPage({ sourceSlug, workspaceId, onDelete }: So
 
   // Load MCP tools when source is loaded and is MCP type
   useEffect(() => {
-    if (!source || source.config.type !== 'mcp') {
+    if (!source || source.config.type !== 'mcp' || source.claudeAccount) {
       setMcpTools(null)
       setMcpToolsError(null)
       return
@@ -306,7 +307,7 @@ export default function SourceInfoPage({ sourceSlug, workspaceId, onDelete }: So
 
         const loadPermissionsConfig = async () => {
           try {
-            const config = await window.electronAPI.getSourcePermissionsConfig(workspaceId, sourceSlug)
+            const config = updated.claudeAccount ? null : await window.electronAPI.getSourcePermissionsConfig(workspaceId, sourceSlug)
             setPermissionsConfig(config)
           } catch (err) {
             console.error('[SourceInfoPage] Failed to reload permissions config:', err)
@@ -384,6 +385,8 @@ export default function SourceInfoPage({ sourceSlug, workspaceId, onDelete }: So
 
   const statePill = source ? getStatePill(source, localMcpEnabled, t) : null
   const typeLabelKey = source ? SOURCE_TYPE_LABEL_KEYS[source.config.type] : undefined
+
+  if (source?.claudeAccount) return <ClaudeAccountSourceInfo source={source} />
 
   return (
     <Info_Page

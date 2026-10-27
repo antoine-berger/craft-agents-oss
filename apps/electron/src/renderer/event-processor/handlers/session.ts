@@ -12,7 +12,6 @@ import type {
   ErrorEvent,
   TypedErrorEvent,
   SourcesChangedEvent,
-  CodingModeChangedEvent,
   LabelsChangedEvent,
   ProjectIdChangedEvent,
   SessionStatusChangedEvent,
@@ -462,7 +461,7 @@ export function handleAsyncOperation(
 }
 
 /**
- * Handle working_directory_changed - update session working directory (user-initiated via UI)
+ * Update the working directory and worktree metadata together before the next composer render
  */
 export function handleWorkingDirectoryChanged(
   state: SessionState,
@@ -472,7 +471,9 @@ export function handleWorkingDirectoryChanged(
 
   return {
     state: {
-      session: { ...session, workingDirectory: event.workingDirectory },
+      session: { ...session, workingDirectory: event.workingDirectory,
+        ...(event.worktree !== undefined ? { worktree: event.worktree ?? undefined } : {}),
+      },
       streaming,
     },
     effects: [],
@@ -674,27 +675,6 @@ export function handleSourcesChanged(
       streaming,
     },
     effects: [],
-  }
-}
-
-/**
- * Handle coding_mode_changed - update the session and let the parent sync its session options
- */
-export function handleCodingModeChanged(
-  state: SessionState,
-  event: CodingModeChangedEvent
-): ProcessResult {
-  const { session, streaming } = state
-
-  return {
-    state: {
-      session: {
-        ...session,
-        codingMode: event.codingMode || undefined,
-      },
-      streaming,
-    },
-    effects: [{ type: 'coding_mode_changed', sessionId: event.sessionId, codingMode: event.codingMode }],
   }
 }
 

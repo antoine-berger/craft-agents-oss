@@ -65,6 +65,7 @@ import { getModelsForProviderType, resolveMidStreamBehavior, type CustomEndpoint
 import { toast } from 'sonner'
 import { Skeleton } from '@/components/ui/skeleton'
 import { loadAiSettings } from './ai-settings-loader'
+import { AccountPoolSection } from '@/components/settings/AccountPoolSection'
 
 /** Checks with an outcome after which a feature that changed nothing is pointed out. */
 const DECISION_NO_CHANGE_MIN_CHECKS = 30
@@ -1649,6 +1650,7 @@ export default function AiSettingsPage() {
       )}
 
       {/* Connections Management */}
+      <AccountPoolSection />
       <SettingsSection title={t("settings.ai.connections")} description={t("settings.ai.connectionsDesc")}>
         <SettingsCard>
           {llmConnections.length === 0 ? (

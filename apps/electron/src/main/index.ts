@@ -3,7 +3,7 @@
 import { loadShellEnv } from './shell-env'
 loadShellEnv()
 // Finder/Dock launches have no shell exports; restore the persisted remote connection.
-import { applyPersistentRemoteClientConfig } from './remote-client-config'
+import { applyPersistentRemoteClientConfig, remoteClientWindowOptions } from './remote-client-config'
 applyPersistentRemoteClientConfig()
 
 import { app, BrowserWindow, dialog, ipcMain, nativeImage, nativeTheme, shell } from 'electron'
@@ -328,6 +328,17 @@ async function createInitialWindows(): Promise<void> {
 
   // Load saved window state
   const savedState = loadWindowState()
+  if (process.env.CRAFT_SERVER_URL && process.env.CRAFT_WORKSPACE_ID) {
+    const remoteId = process.env.CRAFT_WORKSPACE_ID
+    const localWorkspaces = getWorkspaces()
+    const matchingWindows = savedState?.windows.filter(saved => saved.workspaceId === remoteId
+      || localWorkspaces.some(workspace => workspace.id === saved.workspaceId && workspace.remoteServer?.remoteWorkspaceId === remoteId)) ?? []
+    for (const saved of matchingWindows.length ? matchingWindows : [undefined]) {
+      const window = windowManager.createWindow(remoteClientWindowOptions(remoteId, saved))
+      if (saved) window.setBounds(saved.bounds)
+    }
+    return
+  }
   let workspaces = getWorkspaces()
 
   // If no workspaces exist, create default "My Workspace" on first run

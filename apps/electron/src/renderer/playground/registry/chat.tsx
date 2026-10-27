@@ -586,8 +586,6 @@ interface InputContainerPlaygroundProps {
   attachmentCount?: number
   showFollowUps?: boolean
   followUpCount?: number
-  showCodingMode?: boolean
-  codingMode?: boolean
   conversationStarted?: boolean
 }
 
@@ -614,15 +612,9 @@ function InputContainerPlayground({
   attachmentCount = 2,
   showFollowUps = false,
   followUpCount = 2,
-  showCodingMode = true,
-  codingMode = false,
   conversationStarted = true,
 }: InputContainerPlaygroundProps) {
   const playgroundSessionId = 'playground-session'
-  const [coding, setCoding] = React.useState(codingMode)
-  React.useEffect(() => {
-    setCoding(codingMode)
-  }, [codingMode])
   const [model, setModel] = React.useState(currentModel)
   const [mode, setMode] = React.useState<PermissionMode>(permissionMode)
   const [inputValue, setInputValue] = React.useState('')
@@ -812,11 +804,6 @@ function InputContainerPlayground({
             isEmptySession: !conversationStarted,
             workspaceId: 'playground-workspace',
             sessionId: playgroundSessionId,
-            codingMode: coding,
-            onCodingModeChange: showCodingMode ? setCoding : undefined,
-            onContinueWithCodingMode: showCodingMode
-              ? (enabled: boolean) => console.log('[Playground] Continue in a new session, coding mode:', enabled)
-              : undefined,
             onSubmit: mockInputCallbacks.onSubmit,
             onModelChange: setModel,
             onInputChange: setInputValue,
@@ -1541,20 +1528,8 @@ export const chatComponents: ComponentEntry[] = [
         defaultValue: 2,
       },
       {
-        name: 'showCodingMode',
-        description: 'Show the Coding mode chip next to the folder chip',
-        control: { type: 'boolean' },
-        defaultValue: true,
-      },
-      {
-        name: 'codingMode',
-        description: 'Coding mode is on for this session',
-        control: { type: 'boolean' },
-        defaultValue: false,
-      },
-      {
         name: 'conversationStarted',
-        description: 'The session has messages: coding mode is fixed and the chip offers a new session instead',
+        description: 'The session has messages',
         control: { type: 'boolean' },
         defaultValue: true,
       },
@@ -1565,31 +1540,6 @@ export const chatComponents: ComponentEntry[] = [
         name: 'Default (Comprehensive)',
         description: 'App-like full setup with badges, labels, statuses, sources, and working directory',
         props: {},
-      },
-      {
-        name: 'Coding Mode: New Session (Off)',
-        description: 'Before the first message the Coding chip toggles the mode; turning it on asks for a new worktree (mock repos) or an existing folder',
-        props: { conversationStarted: false, codingMode: false },
-      },
-      {
-        name: 'Coding Mode: New Session (On)',
-        description: 'Coding mode turned on before the first message (accent tint)',
-        props: { conversationStarted: false, codingMode: true },
-      },
-      {
-        name: 'Coding Mode: Started Session (On)',
-        description: 'Mode is fixed once the conversation starts; the chip opens "Continue in a new standard session"',
-        props: { conversationStarted: true, codingMode: true },
-      },
-      {
-        name: 'Coding Mode: Started Session (Off)',
-        description: 'Icon-only chip in a started standard session; opens "Continue in a new Coding session"',
-        props: { conversationStarted: true, codingMode: false },
-      },
-      {
-        name: 'Coding Mode: Compact',
-        description: 'Compact/mobile composer: icon-only chip',
-        props: { compactMode: true, conversationStarted: false, codingMode: true },
       },
       {
         name: 'Working Dir History (Few)',

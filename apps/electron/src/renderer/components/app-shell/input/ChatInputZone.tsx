@@ -13,7 +13,6 @@ import type { BackgroundTask } from '../ActiveTasksBar'
 import { ActiveOptionBadges } from '../ActiveOptionBadges'
 import { InputContainer } from './InputContainer'
 import { InputErrorBoundary } from './InputErrorBoundary'
-import { ComposerHintLine } from './ComposerHintLine'
 import { COMPOSER_META_CHIP } from './composer-styles'
 
 /**
@@ -140,15 +139,13 @@ export function ChatInputZone({
       CHAT_LAYOUT.maxWidth,
       'mx-auto w-full mt-1',
       // The card lines up with the transcript's text edge: the 16px gutter in compact, the column's
-      // 24px gutters on desktop (the hint line below the card reserves its own 24px)
+      // 24px gutters on desktop
       compactMode ? 'px-gutter pb-gutter' : 'px-3 @xs/panel:px-6 pb-3.5',
       className,
     )}>
       {shouldShowOptionBadges && (
         <ActiveOptionBadges
-          // The permission-mode chip lives in the composer toolbar next to the model (spec §7.5).
-          // A decision prompt replaces that toolbar, so the chip moves up here while one is shown.
-          showPermissionMode={!!inputProps.structuredInput}
+          showPermissionMode={false}
           permissionMode={permissionMode}
           onPermissionModeChange={onPermissionModeChange}
           tasks={tasks}
@@ -172,7 +169,7 @@ export function ChatInputZone({
           {...inputProps}
           onConsoleSnippetPaste={onRunCommand ? handleSnippetPaste : undefined}
           compactMode={compactMode}
-          showPermissionModeChip={shouldShowOptionBadges}
+          showPermissionModeChip={false}
           permissionMode={permissionMode}
           onPermissionModeChange={onPermissionModeChange}
           labels={labels}
@@ -184,8 +181,6 @@ export function ChatInputZone({
         />
       </InputErrorBoundary>
 
-      {/* Desktop shortcut hints: reserved height, shown while the composer has focus */}
-      {!compactMode && <ComposerHintLine empty={!!inputProps.structuredInput} />}
     </div>
   )
 }

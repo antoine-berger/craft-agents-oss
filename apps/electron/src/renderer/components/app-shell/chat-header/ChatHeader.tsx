@@ -1,7 +1,7 @@
 /**
  * ChatHeader — the chat panel's header (design spec §7.3).
  *
- * Desktop: status glyph · title (click to rename) · "workspace · folder" · PR chip (Coding mode) ·
+ * Desktop: status glyph · title (click to rename) · "workspace · folder" · PR chip ·
  * label chips · Info · Share · ⋯ · close. Session metadata lives here rather than in a badge row
  * above the composer.
  *
@@ -13,7 +13,7 @@
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 import { useSetAtom } from 'jotai'
-import { Info, MoreHorizontal, Pencil } from 'lucide-react'
+import { Info, MoreHorizontal, Pencil, GitCompareArrows } from 'lucide-react'
 import { PanelHeaderCenterButton } from '@/components/ui/PanelHeaderCenterButton'
 import { RenameDialog } from '@/components/ui/rename-dialog'
 import { DropdownMenu, DropdownMenuTrigger, StyledDropdownMenuContent } from '@/components/ui/styled-dropdown'
@@ -31,7 +31,7 @@ import { deriveSelectionFlags } from '../input/use-working-directory-state'
 import { ChatHeaderStatusButton } from './ChatHeaderStatusButton'
 import { ChatHeaderLabels } from './ChatHeaderLabels'
 import { ChatShareMenu } from './ChatShareMenu'
-import { CHAT_HEADER_CODING_MAX_LABELS } from './label-strip-layout'
+import { CHAT_HEADER_MAX_LABELS } from './label-strip-layout'
 import { ChatHeaderPrChip } from './pr-watch/ChatHeaderPrChip'
 import { isPrWatchVisible, type PrEntry, type PrMergeMethod, type PrWatchState } from './pr-watch/pr-watch-state'
 import type { PrAutoFixView, PrAutoMergeChange, PrWatchNav } from '@/hooks/usePrWatch'
@@ -45,9 +45,11 @@ export interface ChatHeaderProps {
   isRegeneratingTitle?: boolean
   /** Published viewer link; the loaded session can know it before the metadata does */
   sharedUrl?: string | null
+  checkpointControl?: React.ReactNode
+  onReviewChanges?: () => void
   workingDirectory?: string
   sessionFolderPath?: string
-  /** The active pull request; shown only for Coding-mode sessions, on the desktop layout */
+  /** The active pull request; shown on the desktop layout */
   prWatch?: PrWatchState
   /** The session's PRs (branch PR + pinned PRs); with more than one the chip shows "+N" and the card its tabs */
   prWatchNav?: PrWatchNav
@@ -83,6 +85,8 @@ function sameHeaderProps(prev: ChatHeaderProps, next: ChatHeaderProps): boolean 
     && prev.title === next.title
     && prev.isRegeneratingTitle === next.isRegeneratingTitle
     && prev.sharedUrl === next.sharedUrl
+    && prev.checkpointControl === next.checkpointControl
+    && prev.onReviewChanges === next.onReviewChanges
     && prev.workingDirectory === next.workingDirectory
     && prev.sessionFolderPath === next.sessionFolderPath
     && prev.prWatch === next.prWatch
@@ -104,6 +108,8 @@ export const ChatHeader = React.memo(function ChatHeader({
   isRegeneratingTitle,
   sharedUrl,
   workingDirectory,
+  onReviewChanges,
+  checkpointControl,
   sessionFolderPath,
   prWatch,
   prWatchNav,
@@ -222,8 +228,7 @@ export const ChatHeader = React.memo(function ChatHeader({
   // ("Design Audit · design-audit") was noise that competed with the title.
   const folderName = sessionFolderPath ? deriveSelectionFlags(workingDirectory, sessionFolderPath).folderName : undefined
   const meta = folderName ?? ''
-  const codingMode = !!item?.codingMode
-  const showPrChip = codingMode && !compact && isPrWatchVisible(prWatch)
+  const showPrChip = !compact && isPrWatchVisible(prWatch)
   // The PR chip, measured by the label strip (state: it mounts after the strip's first layout)
   const [prReserveEl, setPrReserveEl] = React.useState<HTMLElement | null>(null)
 
@@ -282,7 +287,7 @@ export const ChatHeader = React.memo(function ChatHeader({
           labels={labels}
           onLabelsChange={handleLabelsChange}
           rowEl={titleRowEl}
-          maxLabels={codingMode ? CHAT_HEADER_CODING_MAX_LABELS : undefined}
+          maxLabels={CHAT_HEADER_MAX_LABELS}
           reserveEl={showPrChip ? prReserveEl : null}
         />
       )}
@@ -292,6 +297,8 @@ export const ChatHeader = React.memo(function ChatHeader({
   const moreLabel = t('session.actionsFor', { title })
   const actions = (
     <div className="flex items-center gap-1">
+      {checkpointControl}
+      {onReviewChanges && <PanelHeaderCenterButton icon={<GitCompareArrows className="h-4 w-4" />} tooltip={t('gitReview.title', { defaultValue: 'Review changes' })} onClick={onReviewChanges} />}
       {isTaskOrchestrator && (
         <PanelHeaderCenterButton
           icon={<Pencil className="h-4 w-4" />}

@@ -29,8 +29,6 @@ export interface SessionMeta {
   lastReadMessageId?: string
   workingDirectory?: string
   enabledSourceSlugs?: string[]
-  /** Coding mode: lean coding prompt and session tools (shown as a glyph in the session list) */
-  codingMode?: boolean
   /** Shared viewer URL (if shared via viewer) */
   sharedUrl?: string
   /** Shared session ID in viewer (for revoke) */

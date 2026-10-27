@@ -207,6 +207,9 @@ describe('decision points in the session lifecycle', () => {
     ;(sm as any).getOrCreateAgent = async () => ({
       getModel: () => 'claude-sonnet-4-6',
       setAllSources: () => {},
+      // No source transports in this fixture; keep the normal source synchronization boundary.
+      getSummarizeCallback: () => undefined,
+      setSourceServers: async () => {},
       getSessionId: () => 'sdk-session',
       chat: async function* (message: string) { chats.push(message); yield { type: 'complete' } },
     })
@@ -230,6 +233,9 @@ describe('decision points in the session lifecycle', () => {
     ;(sm as any).getOrCreateAgent = async () => ({
       getModel: () => 'claude-sonnet-4-6',
       setAllSources: () => {},
+      // No source transports in this fixture; keep the normal source synchronization boundary.
+      getSummarizeCallback: () => undefined,
+      setSourceServers: async () => {},
       getSessionId: () => 'sdk-session',
       chat: async function* (message: string) { chats.push(message); yield { type: 'complete' } },
     })

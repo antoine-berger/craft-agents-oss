@@ -12,6 +12,8 @@ import { AlertCircle } from 'lucide-react'
 import { ChatDisplay, type ChatDisplayHandle } from '@/components/app-shell/ChatDisplay'
 import { PanelHeader } from '@/components/app-shell/PanelHeader'
 import { ChatHeader } from '@/components/app-shell/chat-header/ChatHeader'
+import { SessionCheckpointControl } from '@/components/checkpoints/SessionCheckpointControl'
+import { GitReviewDialog } from '@/components/git-review/GitReviewDialog'
 import { toast } from 'sonner'
 import { useAppShellContext, usePendingPermission, usePendingCredential, useSessionOptionsFor, useSession as useSessionData } from '@/context/AppShellContext'
 import { rendererPerf } from '@/lib/perf'
@@ -84,6 +86,18 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   // Check if session exists in metadata (for loading state detection)
   const sessionMetaMap = useAtomValue(sessionMetaMapAtom)
   const sessionMeta = sessionMetaMap.get(sessionId)
+
+  const listCheckpoints = React.useCallback(() => window.electronAPI.listSessionCheckpoints(sessionId), [sessionId])
+  const restoreCheckpoint = React.useCallback((checkpointId: string) => window.electronAPI.restoreSessionCheckpoint(sessionId, checkpointId), [sessionId])
+  const checkpointMessagesRef = React.useRef(session?.messages)
+  checkpointMessagesRef.current = session?.messages
+  const checkpointTurnLabel = React.useCallback((id: string) => checkpointMessagesRef.current?.find(message => message.id === id)?.content.slice(0, 100), [])
+  const checkpointsDisabled = !!session?.isProcessing || !!session?.isAsyncOperationOngoing
+  const hasOwnedCheckpointCheckout = !!session?.worktree?.owned
+  const checkpointControl = React.useMemo(() => hasOwnedCheckpointCheckout ? <SessionCheckpointControl
+    key={sessionId} sessionId={sessionId} disabled={checkpointsDisabled}
+    listCheckpoints={listCheckpoints} restoreCheckpoint={restoreCheckpoint} getTurnLabel={checkpointTurnLabel}
+  /> : undefined, [sessionId, hasOwnedCheckpointCheckout, checkpointsDisabled, listCheckpoints, restoreCheckpoint, checkpointTurnLabel])
 
   // Fallback: ensure messages are loaded when session is viewed
   const ensureMessagesLoaded = useSetAtom(ensureSessionMessagesLoadedAtom)
@@ -304,11 +318,18 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     return connection?.defaultModel ?? ''
   }, [session?.id, session?.model, session?.llmConnection, workspaceDefaultLlmConnection, llmConnections, connectionUnavailable])
 
+  const [gitReviewOpen, setGitReviewOpen] = React.useState(false)
+  const openGitReview = React.useCallback(() => setGitReviewOpen(true), [])
+  React.useEffect(() => { setGitReviewOpen(false) }, [sessionId])
+  const addGitReviewComments = React.useCallback((text: string) => {
+    handleInputChange([inputValueRef.current.trimEnd(), text].filter(Boolean).join('\n\n'))
+  }, [handleInputChange])
+
   // Working directory for this session
   const workingDirectory = session?.workingDirectory
-  // Coding mode's header PR chip: desktop only, with a folder. The chip itself renders only once that
+  // The header PR chip: desktop only, with a folder. The chip itself renders only once that
   // folder is a git repo whose branch has a PR (see ChatHeaderPrChip).
-  const prWatch = usePrWatch(sessionId, !!sessionOpts.codingMode && !!workingDirectory && !isCompactMode, workingDirectory)
+  const prWatch = usePrWatch(sessionId, !!workingDirectory && !isCompactMode, workingDirectory)
   const activeWorkspace = React.useMemo(
     () => workspaces.find((w) => w.id === activeWorkspaceId) || null,
     [workspaces, activeWorkspaceId]
@@ -448,8 +469,6 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
               onRespondToCredential={onRespondToCredential}
               thinkingLevel={sessionOpts.thinkingLevel}
               onThinkingLevelChange={(level) => setOption('thinkingLevel', level)}
-              codingMode={sessionOpts.codingMode}
-              onCodingModeChange={(enabled) => setOption('codingMode', enabled)}
               permissionMode={sessionOpts.permissionMode}
               previousPermissionMode={sessionOpts.previousPermissionMode}
               onPermissionModeChange={setPermissionMode}
@@ -503,6 +522,8 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
         sharedUrl={sharedUrl}
         workingDirectory={workingDirectory}
         sessionFolderPath={session?.sessionFolderPath}
+        checkpointControl={checkpointControl}
+        onReviewChanges={workingDirectory ? openGitReview : undefined}
         prWatch={prWatch.state}
         prWatchNav={prWatch.nav}
         prWatchActiveOrigin={prWatch.activeOrigin}
@@ -513,6 +534,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
         onSetPrAutoFix={prWatch.setAutoFix}
         onPrCardOpenChange={prWatch.onCardOpenChange}
       />
+      <GitReviewDialog key={sessionId} sessionId={sessionId} open={gitReviewOpen} onOpenChange={setGitReviewOpen} onAddToChat={addGitReviewComments} />
       <div className="flex-1 flex flex-col min-h-0">
         <ChatDisplay
           ref={chatDisplayRef}
@@ -533,8 +555,6 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
           onRespondToCredential={onRespondToCredential}
           thinkingLevel={sessionOpts.thinkingLevel}
           onThinkingLevelChange={(level) => setOption('thinkingLevel', level)}
-          codingMode={sessionOpts.codingMode}
-          onCodingModeChange={(enabled) => setOption('codingMode', enabled)}
           permissionMode={sessionOpts.permissionMode}
           previousPermissionMode={sessionOpts.previousPermissionMode}
           onPermissionModeChange={setPermissionMode}

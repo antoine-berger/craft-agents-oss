@@ -30,7 +30,6 @@ import {
   // Types
   type ToolResult,
   type AuthRequest,
-  type SessionToolFilterOptions,
   type SessionToolContext,
 } from '@craft-agent/session-tools-core';
 import { createLLMTool, type LLMQueryRequest, type LLMQueryResult } from './llm-tool.ts';
@@ -164,9 +163,8 @@ function convertResult(result: ToolResult): { content: Array<{ type: 'text'; tex
 // Cache for Session-Scoped Tools
 // ============================================================
 
-/** Profile inputs for the session tool set (see `getSessionToolDefs` in session-tools-core). */
-export type SessionToolProfileOptions = Pick<SessionToolFilterOptions, 'profile' | 'hasEnabledSources' | 'hasProject'>
-  & Pick<SessionToolContext, 'mcpManagement'>;
+/** Connection ownership policy; individual features are controlled by their own settings. */
+export type SessionToolOptions = Pick<SessionToolContext, 'mcpManagement'>;
 
 // Cache tools by session to avoid recreating them on every query.
 // We cache the tools array (expensive to build) but NOT the MCP server wrapper,
@@ -225,16 +223,11 @@ export function getSessionScopedTools(
   sessionId: string,
   workspaceRootPath: string,
   workspaceId?: string,
-  profileOptions?: SessionToolProfileOptions,
+  options?: SessionToolOptions,
 ): ReturnType<typeof createSdkMcpServer> {
-  // Profile inputs and MCP ownership determine the tools and their context.
-  // Include ownership so switching providers cannot reuse another connection's policy.
-  const profileKey = profileOptions?.profile === 'coding'
-    ? `${sessionId}::${workspaceRootPath}::coding:${profileOptions.hasEnabledSources ? 1 : 0}:${profileOptions.hasProject ? 1 : 0}`
-    : `${sessionId}::${workspaceRootPath}`;
-  const cacheKey = profileOptions?.mcpManagement
-    ? `${profileKey}::mcp:${profileOptions.mcpManagement}`
-    : profileKey;
+  // Include connection ownership so another provider cannot reuse the wrong policy.
+  const sessionKey = `${sessionId}::${workspaceRootPath}`;
+  const cacheKey = options?.mcpManagement ? `${sessionKey}::mcp:${options.mcpManagement}` : sessionKey;
 
   // Return cached tools if available, but always create a fresh MCP server wrapper
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -245,7 +238,7 @@ export function getSessionScopedTools(
       sessionId,
       workspacePath: workspaceRootPath,
       workspaceId: workspaceId || basename(workspaceRootPath) || '',
-      mcpManagement: profileOptions?.mcpManagement,
+      mcpManagement: options?.mcpManagement,
       onPlanSubmitted: (planPath: string) => {
         setLastPlanFilePath(sessionId, planPath);
         const callbacks = getSessionScopedToolCallbacks(sessionId);
@@ -276,7 +269,7 @@ export function getSessionScopedTools(
     assertClaudeBackendSessionToolParity();
 
     // Tool visibility is centrally filtered in session-tools-core to avoid backend drift:
-    // feature flags, the "Built-in browser" setting and the agent profile (coding mode).
+    // feature flags, the "Built-in browser" setting and each feature preference.
     const defs = getSessionToolDefs({
       includeDeveloperFeedback: FEATURE_FLAGS.developerFeedback,
       // `decide` is advertised only while the decision layer is on; the tool list
@@ -284,7 +277,6 @@ export function getSessionScopedTools(
       includeDecide: isDecisionFeatureActive('decideTool'),
       // Users with external browser tools (Playwright, Puppeteer, etc.) can disable the built-in one.
       includeBrowser: getBrowserToolEnabled(),
-      ...profileOptions,
     });
     const visible = new Set(defs.map(def => def.name));
 

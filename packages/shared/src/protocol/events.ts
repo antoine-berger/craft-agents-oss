@@ -20,6 +20,8 @@ import type {
 } from './dto'
 
 export interface BroadcastEventMap {
+  [RPC_CHANNELS.attention.CHANGED]: [snapshot: import('./session-attention').WorkspaceAttention]
+  [RPC_CHANNELS.ship.CHANGED]: [workspaceId: string, state: import('./ship-workflow').ShipWorkflowState]
   // Session events (workspace-scoped via broadcastToWorkspace)
   [RPC_CHANNELS.sessions.EVENT]: [event: SessionEvent]
   [RPC_CHANNELS.sessions.UNREAD_SUMMARY_CHANGED]: [summary: UnreadSummary]

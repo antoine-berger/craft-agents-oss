@@ -21,6 +21,7 @@ interface ComposerSourcesChipProps {
   disabled: boolean
   buttonRef: React.RefObject<HTMLButtonElement>
   claudeAccountConnectors?: boolean
+  managedConnectors?: LoadedSource[]
 }
 
 /** Up to three source marks on raised tiles with a hairline, then a "+N" tile. */
@@ -65,6 +66,7 @@ export function ComposerSourcesChip({
   disabled,
   buttonRef,
   claudeAccountConnectors = false,
+  managedConnectors,
 }: ComposerSourcesChipProps) {
   const { t } = useTranslation()
   const enabledSources = sources.filter(s => selectedSlugs.includes(s.config.slug))
@@ -101,6 +103,7 @@ export function ComposerSourcesChip({
           selectedSlugs={selectedSlugs}
           onToggleSlug={onToggleSlug}
           claudeAccountConnectors={claudeAccountConnectors}
+          managedConnectors={managedConnectors}
         />
       </div>
     )
@@ -138,6 +141,7 @@ export function ComposerSourcesChip({
         selectedSlugs={selectedSlugs}
         onToggleSlug={onToggleSlug}
         claudeAccountConnectors={claudeAccountConnectors}
+        managedConnectors={managedConnectors}
       />
     </div>
   )

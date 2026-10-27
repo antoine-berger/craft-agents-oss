@@ -136,7 +136,12 @@ export function SourcesListPanel({
               <span className={statusConfig.textClass}>{t(statusConfig.labelKey)}</span>
             )
           ) : description || undefined,
-          menu: (
+          menu: source.claudeAccount ? (
+            <Button size="sm" variant="ghost" onClick={(event) => {
+              event.stopPropagation()
+              window.electronAPI.openUrl('https://claude.ai/customize/connectors')
+            }}>{t('chat.claudeConnectors.manage')}</Button>
+          ) : (
             <SourceMenu
               sourceSlug={source.config.slug}
               sourceName={source.config.name}

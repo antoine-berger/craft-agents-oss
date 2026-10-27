@@ -45,6 +45,6 @@ export async function generateConversationSummary(
 
 export function buildTransferredSessionContext(summary: string): string {
   // One wording for every handoff: a remote workspace transfer, an imported session, and a session
-  // continued in a new one (Coding mode switch)
+  // continued in a new one (conversation handoff)
   return `<session_transfer_summary>\nThis session continues an earlier conversation from another session or workspace, which was summarized for the handoff.\nUse the summary below as prior context for the next turn.\n\n${summary}\n</session_transfer_summary>`;
 }

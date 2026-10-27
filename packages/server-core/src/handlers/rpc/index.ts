@@ -1,7 +1,10 @@
+import { registerSessionAttentionHandlers, getSessionAttentionService } from './session-attention'
 import type { RpcServer } from '@craft-agent/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
 
 import { registerAuthHandlers } from './auth'
+import { registerProviderQuotaHandlers } from './provider-quotas'
+import { registerCliProxyHandlers } from './cli-proxy'
 import { registerAutomationsHandlers } from './automations'
 import { registerDecisionsHandlers } from './decisions'
 import { registerFilesHandlers } from './files'
@@ -12,8 +15,11 @@ import { registerResourcesHandlers } from './resources'
 import { registerOnboardingHandlers } from './onboarding'
 import { cleanupSessionFileWatchForClient, registerSessionsHandlers } from './sessions'
 export { registerSessionsHandlers, cleanupSessionFileWatchForClient } from './sessions'
-import { cleanupPrWatchForClient, registerPrWatchHandlers } from './pr-watch'
-import { registerCodingReposHandlers } from './coding-repos'
+import { cleanupPrWatchForClient, registerPrWatchHandlers, getPrWatchRegistry } from './pr-watch'
+import { registerRepositoryHandlers } from './repositories'
+import { registerGitReviewHandlers } from './git-review'
+import { registerConductorImportHandlers } from './conductor-import'
+import { registerCheckpointHandlers } from './checkpoints'
 import { registerServerHandlers } from './server'
 import type { ServerHandlerContext } from '../../bootstrap/headless-start'
 export type { ServerHandlerContext } from '../../bootstrap/headless-start'
@@ -36,6 +42,8 @@ export function registerCoreRpcHandlers(
   serverCtx?: ServerHandlerContext,
 ): void {
   registerAuthHandlers(server, deps)
+  registerCliProxyHandlers(server, deps)
+  registerProviderQuotaHandlers(server)
   registerAutomationsHandlers(server, deps)
   registerDecisionsHandlers(server, deps)
   registerFilesHandlers(server, deps)
@@ -49,8 +57,14 @@ export function registerCoreRpcHandlers(
   registerSettingsHandlers(server, deps)
   registerProjectsHandlers(server, deps)
   registerPagesHandlers(server, deps)
+  registerSessionAttentionHandlers(server, deps)
   registerPrWatchHandlers(server, deps)
-  registerCodingReposHandlers(server, deps)
+  const prRegistry = getPrWatchRegistry()
+  if (prRegistry) getSessionAttentionService()?.start(prRegistry)
+  registerRepositoryHandlers(server, deps)
+  registerGitReviewHandlers(server, deps)
+  registerCheckpointHandlers(server, deps)
+  registerConductorImportHandlers(server, deps)
   registerSkillsHandlers(server, deps)
   registerSourcesHandlers(server, deps)
   registerStatusesHandlers(server, deps)

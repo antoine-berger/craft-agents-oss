@@ -1,14 +1,13 @@
-import { describe, expect, it } from 'bun:test'
+import { describe, expect, it, mock } from 'bun:test'
+// These tests exercise copy/state decisions, without loading browser-only UI assets.
+mock.module('@/components/ui/button', () => ({ Button: () => null }))
 import { setupI18n } from '@craft-agent/shared/i18n/setupI18n'
 
 // Bootstrap i18next with bundled English resources before importing the
 // component-under-test so its top-level i18n.t() calls return real strings.
 setupI18n()
 
-import {
-  getTransportBannerCopy,
-  shouldShowTransportConnectionBanner,
-} from '../TransportConnectionBanner'
+const { getTransportBannerCopy, shouldShowTransportConnectionBanner } = await import('../TransportConnectionBanner')
 import type { TransportConnectionState } from '../../../../shared/types'
 
 function state(overrides: Partial<TransportConnectionState>): TransportConnectionState {

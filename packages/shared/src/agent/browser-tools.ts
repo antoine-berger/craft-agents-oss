@@ -130,6 +130,8 @@ export interface BrowserLifecycleActionResult {
 }
 
 export interface BrowserPaneFns {
+  /** Server-owned Chromium has no native window that can be shown to the user. */
+  headless?: boolean;
   openPanel: (options?: { background?: boolean }) => Promise<{ instanceId: string }>;
   navigate: (url: string) => Promise<{ url: string; title: string }>;
   snapshot: () => Promise<{ url: string; title: string; nodes: Array<{ ref: string; role: string; name: string; value?: string; description?: string; focused?: boolean; checked?: boolean; disabled?: boolean }> }>;

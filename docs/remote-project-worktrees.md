@@ -6,16 +6,20 @@ Projects organize initiatives, not unique repositories: “Checkout redesign” 
 
 1. Connect to the server, then open the project's **Settings**.
 2. Set **Working directory** to the repository or a subdirectory such as `packages/api` on that server. **Choose…** browses the server when connected remotely. The repository needs a commit, and the server user needs write access to it and the directory where neighboring worktrees are created.
-3. Enable **New worktree for each chat**. Optionally set **Base branch** to an existing branch such as `main` or `origin/main`; leave it blank for the repository default.
+3. New independent chats automatically use their own branch and worktree. Optionally set **Base branch** to an existing branch such as `main` or `origin/main`; leave it blank for the repository default.
 4. Save, then use **New session in …** from the project.
 
-The worktree is created before the agent starts on the first message. Creating an empty independent chat does not create a checkout. Subsequent messages and resumed chats reuse the same branch and directory. Settings are captured when a new chat is created; existing chats are not migrated.
+The worktree is created before the agent starts on the first message. The composer remembers repositories you selected explicitly and preselects your last choice. An empty search shows only those repositories, alphabetically. Searching discovers other local repositories and GitHub repositories owned by the signed-in user, shared with them as a collaborator, or accessible through their organization memberships. The GitHub catalog is paginated and includes private repositories and forks; search never queries the worldwide public catalog. Selecting one updates the draft immediately; cloning, fetching and worktree creation wait until the first message. Chat titles are derived from that first message. No Coding mode switch is required. Subsequent messages and resumed chats reuse the same branch and directory. Existing chats are not migrated.
 
 Delegated chats and subtasks inherit their parent's current folder unless another folder or project is explicitly selected. They share the parent's worktree; creating a child can prepare that checkout if the parent has not started yet. Conversation forks and standalone task sessions retain their existing directory behavior.
 
 When the project uses a repository subdirectory, the agent starts in the corresponding subdirectory of its worktree. That folder is preserved after restart and archive/reopen. If the selected base branch lacks the folder, or the folder resolves outside the checkout, preparation stops with an error. Existing worktree records created without a subdirectory retain their original root directory.
 
-Choosing an explicit folder before the first message opts that chat out of automatic worktrees. After worktree preparation starts, the folder is locked for that chat; start another chat to use a different folder.
+Choosing a repository before the first message keeps automatic isolation enabled. After worktree preparation starts, the folder is locked for that chat; start another chat to use a different repository. Internal utility sessions and explicit programmatic `worktree: 'none'` requests retain their existing behavior.
+
+## Claude account MCP connectors
+
+Sources shows the native connectors supplied by each Claude account, including their connection status and tools. All available connectors and configured API/local sources are enabled automatically for every chat, including existing chats, delegated chats and resumed sessions. The composer has no connector selector; @mentions add context without enabling or disabling tools. Availability is refreshed before every message and when configured sources change. Unauthenticated or unavailable account connectors stay listed in Sources and become active automatically once connected. These rows are read-only: use **Open claude.ai** to authenticate or manage them. In all-proxy mode, discovery and MCP traffic use the selected CLIProxyAPI account; both Claude and GPT can call the connectors. In per-chat mode, native account discovery uses SDK control messages without a model prompt or tool call. Connector credentials remain with Claude; the display does not create duplicate Craft source files. Craft-managed API and local sources retain their existing controls.
 
 ### Archive and delete
 

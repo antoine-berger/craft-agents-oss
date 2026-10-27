@@ -1,5 +1,5 @@
 /**
- * PR watcher contract (Coding mode): what the workspace server's watcher pushes to the chat header's
+ * PR watcher contract: what the workspace server's watcher pushes to the chat header's
  * PR chip and returns for its card. Pure types, safe to import from the renderer.
  *
  * Server: packages/server-core/src/services/pr-watch/. UI rules (chip status, card action, prompts):
@@ -37,6 +37,11 @@ export type PrAutoMergeBlock = 'repo-disabled' | 'draft' | 'mergeable' | 'unavai
  * two always agree (see {@link prCardAction}). One small GraphQL query.
  */
 export interface PrSummary {
+  /** Exact PR commit and freshness, used by durable attention. */
+  headOid?: string
+  headMatchesLocal?: boolean | null
+  attentionStale?: boolean
+  attentionFeedback?: Array<{ id: string; author: string; title: string; url: string }>
   number: number
   title: string
   url: string
@@ -170,4 +175,4 @@ export type PrWatchSessionState =
   | { kind: 'loading' }
   | { kind: 'none' }
   | { kind: 'unavailable'; reason: PrWatchUnavailableReason }
-  | { kind: 'ready'; prs: PrEntry[] }
+  | { kind: 'ready'; prs: PrEntry[]; incomplete?: boolean }

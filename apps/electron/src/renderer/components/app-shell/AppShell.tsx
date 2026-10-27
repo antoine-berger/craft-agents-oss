@@ -1,3 +1,4 @@
+import { SidebarQuotaIndicator } from './SidebarQuotaIndicator'
 import * as React from "react"
 import { useTranslation, Trans } from "react-i18next"
 import { useRef, useState, useEffect, useCallback, useMemo } from "react"
@@ -91,7 +92,6 @@ import type { Session, Workspace, FileAttachment, PermissionRequest, LoadedSourc
 import { sessionMetaMapAtom, sendToWorkspaceAtom, type SessionMeta } from "@/atoms/sessions"
 import { sourcesAtom } from "@/atoms/sources"
 import { DECISION_SETTINGS_CHANGED_EVENT, guardedModeAvailableAtom } from "@/atoms/permission-modes"
-import { DEFAULT_PERMISSION_MODES } from "@craft-agent/shared/agent/modes"
 import { RtkUpdatePrompt } from "@/components/RtkUpdateDialog"
 import { skillsAtom } from "@/atoms/skills"
 import { panelStackAtom, panelCountAtom, focusedPanelIdAtom, focusedSessionIdAtom, focusNextPanelAtom, focusPrevPanelAtom, parseSessionIdFromRoute } from "@/atoms/panel-stack"
@@ -490,6 +490,18 @@ function AppShellContent({
     navigate(routes.view.allSessions())
   }, [])
 
+  const setNewSessionProjectView = useCallback((projectId: string, statuses: FilterEntry = {}, labels: FilterEntry = {}) => {
+    setViewFiltersMap(previous => ({
+      ...previous,
+      allSessions: { statuses, labels, projects: { [projectId]: 'include' }, groupingMode: previous.allSessions?.groupingMode },
+    }))
+  }, [])
+
+  const handleNewSessionInProject = useCallback((projectId: string) => {
+    setNewSessionProjectView(projectId)
+    navigate(routes.action.newSession({ project: projectId }))
+  }, [navigate, setNewSessionProjectView])
+
   // Jump to All Sessions scoped to a task: replace the allSessions view's label filter
   // (and project filter, when the task is bound to one) with the task's scope, then open
   // the session. These are the SAME user-clearable filters the list-header chips edit —
@@ -635,7 +647,7 @@ function AppShellContent({
   const { projects } = useProjects(activeWorkspaceId)
   const { pages } = usePages(activeWorkspaceId)
   const projectMenuOptions = useMemo(
-    () => projects.map(p => ({ id: p.config.id, slug: p.config.slug, name: p.config.name, color: p.config.color })),
+    () => projects.map(p => ({ id: p.config.id, slug: p.config.slug, name: p.config.name, color: p.config.color, pilotSessionId: p.config.pilotSessionId })),
     [projects],
   )
   const handleSessionProjectChange = useCallback(async (sessionId: string, projectId: string | null) => {
@@ -687,7 +699,6 @@ function AppShellContent({
   // Guarded permission mode is offered while the decision layer and its `guardedMode` feature
   // are on, on the server this workspace talks to. Refreshed on workspace switch and when the AI
   // settings page saves decision model settings.
-  const guardedModeAvailable = useAtomValue(guardedModeAvailableAtom)
   const setGuardedModeAvailable = useSetAtom(guardedModeAvailableAtom)
   React.useEffect(() => {
     if (!activeWorkspaceId || typeof window.electronAPI?.getDecisionLayerStatus !== 'function') return
@@ -751,11 +762,13 @@ function AppShellContent({
   // Load sources from backend on mount
   React.useEffect(() => {
     if (!activeWorkspaceId) return
-    window.electronAPI.getSources(activeWorkspaceId).then((loaded) => {
-      setSources(loaded || [])
-    }).catch(err => {
-      console.error('[Chat] Failed to load sources:', err)
-    })
+    let cancelled = false
+    const refresh = () => window.electronAPI.getSources(activeWorkspaceId).then((loaded) => {
+      if (!cancelled) setSources(loaded || [])
+    }).catch(err => { console.error('[Chat] Failed to load sources:', err) })
+    refresh()
+    window.addEventListener('focus', refresh)
+    return () => { cancelled = true; window.removeEventListener('focus', refresh) }
   }, [activeWorkspaceId])
 
   // Subscribe to live source updates (when sources are added/removed dynamically)
@@ -764,7 +777,8 @@ function AppShellContent({
       if (workspaceId !== activeWorkspaceId) return
       // Clear icon cache so updated source icons are re-fetched on render
       clearSourceIconCaches()
-      setSources(updatedSources || [])
+      setSources(previous => updatedSources?.some(source => source.claudeAccount) ? updatedSources
+        : [...previous.filter(source => source.claudeAccount), ...(updatedSources || [])])
     })
     return cleanup
   }, [activeWorkspaceId])
@@ -891,8 +905,7 @@ function AppShellContent({
     focusNextZone()
   }, { enabled: () => !document.querySelector('[role="dialog"]') })
 
-  // Shift+Tab cycles permission mode through enabled modes (textarea handles its own, this handles when focus is elsewhere)
-  // In multi-panel, targets the focused panel's session
+  // In multi-panel, actions target the focused panel's session.
   const effectiveSessionId = focusedSessionId ?? session.selected
 
   // Focus chat input for the target session only (multi-panel safe).
@@ -900,25 +913,6 @@ function AppShellContent({
     if (!targetSessionId) return
     dispatchFocusInputEvent({ sessionId: targetSessionId })
   }, [])
-
-  useAction('chat.cyclePermissionMode', () => {
-    if (effectiveSessionId) {
-      const currentOptions = contextValue.sessionOptions.get(effectiveSessionId)
-      const currentMode = currentOptions?.permissionMode ?? 'ask'
-      // Cycle through enabled permission modes. An unavailable Guarded behaves as Ask, so it
-      // stands in as Ask (never re-adding Execute the user left out of the cycle).
-      const base = enabledModes.length >= 2 ? enabledModes : DEFAULT_PERMISSION_MODES
-      const listed = base
-        .map(mode => (mode === 'guarded' && !guardedModeAvailable ? 'ask' : mode))
-        .filter((mode, index, all) => all.indexOf(mode) === index)
-      const modes = listed.length >= 2 ? listed : (['safe', 'ask'] as PermissionMode[])
-      const currentIndex = modes.indexOf(currentMode)
-      // If current mode not in enabled list, jump to first enabled mode
-      const nextIndex = currentIndex === -1 ? 0 : (currentIndex + 1) % modes.length
-      const nextMode = modes[nextIndex]
-      contextValue.onSessionOptionsChange(effectiveSessionId, { permissionMode: nextMode })
-    }
-  })
 
   // Whether the next sidebar/list show-hide animates: pointer toggles glide (FLIP), keyboard toggles
   // (⌘B, ⌘., menu accelerators) are instant — spec §6.1. Set in the same batch as the toggle.
@@ -1426,6 +1420,7 @@ function AppShellContent({
   const appShellContextValue = React.useMemo<AppShellContextType>(() => ({
     ...contextValue,
     onDeleteSession: handleDeleteSession,
+    onNewSessionInProject: handleNewSessionInProject,
     enabledSources: sources,
     skills,
     chatStarters,
@@ -1450,7 +1445,7 @@ function AppShellContent({
     automationTestResults,
     getAutomationHistory,
     onReplayAutomation: handleReplayAutomation,
-  }), [contextValue, handleDeleteSession, sources, skills, chatStarters, activeSessionWorkingDirectory, displayLabelConfigs, handleSessionLabelsChange, enabledModes, effectiveSessionStatuses, handleSessionSourcesChange, handleJumpToTaskSessions, isAutoCompact, searchActive, searchQuery, handleChatMatchInfoChange, handleTestAutomation, handleToggleAutomation, handleDuplicateAutomation, handleDeleteAutomation, automationTestResults, getAutomationHistory, handleReplayAutomation])
+  }), [contextValue, handleDeleteSession, handleNewSessionInProject, sources, skills, chatStarters, activeSessionWorkingDirectory, displayLabelConfigs, handleSessionLabelsChange, enabledModes, effectiveSessionStatuses, handleSessionSourcesChange, handleJumpToTaskSessions, isAutoCompact, searchActive, searchQuery, handleChatMatchInfoChange, handleTestAutomation, handleToggleAutomation, handleDuplicateAutomation, handleDeleteAutomation, automationTestResults, getAutomationHistory, handleReplayAutomation])
 
   // Persist expanded folders to localStorage (workspace-scoped)
   React.useEffect(() => {
@@ -1741,21 +1736,22 @@ function AppShellContent({
     setCreateProjectDialogOpen(false)
     try {
       const project = await window.electronAPI.createProject(activeWorkspace.id, { name })
-      navigate(routes.view.projects(project.slug))
+      const pilot = await contextValue.onCreateSession(activeWorkspace.id, { projectId: project.id, name: 'Pilote' })
+      await window.electronAPI.updateProject(activeWorkspace.id, project.slug, { pilotSessionId: pilot.id })
+      setNewSessionProjectView(project.id)
+      navigate(routes.view.allSessions(pilot.id))
     } catch (err) {
       console.error('[AppShell] Failed to create project:', err)
       toast.error(t('projectsList.createFailed'))
     }
-  }, [activeWorkspace?.id, navigate, t])
+  }, [activeWorkspace?.id, contextValue.onCreateSession, setNewSessionProjectView, navigate, t])
 
-  /**
-   * Resolve the "inherit sole active filter" rule for new sessions. Only
-   * include-mode filters are candidates — an excluded status/label/project must
-   * never be inherited (#970). See resolveInheritedFilterParams.
-   */
+  // The project page is an explicit context even though it has no session-list filter.
+  const openedProjectSlug = isProjectsNavigation(navState) ? navState.details?.projectSlug : undefined
+  const openedProjectId = projects.find(project => project.config.slug === openedProjectSlug)?.config.id
   const resolveInheritedNewSessionParams = useCallback(
-    () => resolveInheritedFilterParams(listFilter, labelFilter, projectFilter),
-    [listFilter, labelFilter, projectFilter]
+    () => resolveInheritedFilterParams(listFilter, labelFilter, projectFilter, openedProjectId),
+    [listFilter, labelFilter, projectFilter, openedProjectId]
   )
 
   // Create a new chat and select it
@@ -1768,6 +1764,9 @@ function AppShellContent({
 
     // Inherit sole-active filter into the new session when unambiguous.
     const inherited = resolveInheritedNewSessionParams()
+    if (inherited?.project) {
+      setNewSessionProjectView(inherited.project, Object.fromEntries(listFilter), Object.fromEntries(labelFilter))
+    }
 
     // Delegate to NavigationContext which handles session creation
     navigate(
@@ -1777,7 +1776,7 @@ function AppShellContent({
 
     // Focus the chat input after navigation completes
     setTimeout(() => focusZone('chat', { intent: 'programmatic' }), 50)
-  }, [activeWorkspace, focusZone, navigate, resolveInheritedNewSessionParams])
+  }, [activeWorkspace, focusZone, navigate, resolveInheritedNewSessionParams, listFilter, labelFilter, setNewSessionProjectView])
 
   // Create a brand new dedicated browser window and focus it.
   // Intentionally unbound: this action should always create a NEW window.
@@ -2159,6 +2158,30 @@ function AppShellContent({
         },
       ],
     },
+    {
+      id: "nav:projects",
+      title: t("sidebar.projects"),
+      label: String(projects.length),
+      icon: FolderKanban,
+      // Highlight only when on Projects view itself, not when a child is "active" (jumped-to filter)
+      variant: isProjectsNavigation(navState) ? "default" : "ghost",
+      onClick: handleProjectsClick,
+      expandable: projects.length > 0,
+      expanded: isExpanded('nav:projects'),
+      onToggle: () => toggleExpanded('nav:projects'),
+      contextMenu: {
+        type: 'projects' as const,
+        onAddProject: openAddProject,
+      },
+      items: projects.map(p => ({
+        id: `nav:projects:${p.config.id}`,
+        title: p.config.name,
+        icon: FolderKanban,
+        // Highlight when on allSessions view AND filter includes this project (the jump-to state)
+        variant: (sessionFilter?.kind === 'allSessions' && projectFilter.get(p.config.id) === 'include') ? "default" as const : "ghost" as const,
+        onClick: () => handleJumpToProjectSessions(p.config.id),
+      })),
+    },
     // Labels: navigable header (shows all labeled sessions) + hierarchical tree (drag-and-drop reorder + re-parent)
     {
       id: "nav:labels",
@@ -2249,30 +2272,6 @@ function AppShellContent({
         type: 'skills',
         onAddSkill: openAddSkill,
       },
-    },
-    {
-      id: "nav:projects",
-      title: t("sidebar.projects"),
-      label: String(projects.length),
-      icon: FolderKanban,
-      // Highlight only when on Projects view itself, not when a child is "active" (jumped-to filter)
-      variant: isProjectsNavigation(navState) ? "default" : "ghost",
-      onClick: handleProjectsClick,
-      expandable: projects.length > 0,
-      expanded: isExpanded('nav:projects'),
-      onToggle: () => toggleExpanded('nav:projects'),
-      contextMenu: {
-        type: 'projects' as const,
-        onAddProject: openAddProject,
-      },
-      items: projects.map(p => ({
-        id: `nav:projects:${p.config.id}`,
-        title: p.config.name,
-        icon: FolderKanban,
-        // Highlight when on allSessions view AND filter includes this project (the jump-to state)
-        variant: (sessionFilter?.kind === 'allSessions' && projectFilter.get(p.config.id) === 'include') ? "default" as const : "ghost" as const,
-        onClick: () => handleJumpToProjectSessions(p.config.id),
-      })),
     },
     {
       id: "nav:pages",
@@ -2411,6 +2410,7 @@ function AppShellContent({
               onKeyDown={handleSidebarKeyDown}
               links={sidebarLinks}
               footerLinks={sidebarFooterLinks}
+              footerTop={<SidebarQuotaIndicator getQuotas={window.electronAPI.getProviderQuotas} className="mx-2 mt-1.5" />}
               getItemProps={getSidebarItemProps}
               focusedItemId={focusedSidebarItemId}
               onNewSession={(openInNewWindow) => handleNewChat(openInNewWindow)}
@@ -2607,6 +2607,7 @@ function AppShellContent({
                 <SessionList
                   key={sessionFilter?.kind}
                   items={searchActive ? workspaceSessionMetas : filteredSessionMetas}
+                  onNewSession={() => handleNewChat()}
                   onDelete={handleDeleteSession}
                   onFlag={onFlagSession}
                   onUnflag={onUnflagSession}

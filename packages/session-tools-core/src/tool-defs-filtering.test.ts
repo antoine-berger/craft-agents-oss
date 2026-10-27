@@ -7,8 +7,6 @@ import {
   getSessionSafeAllowedToolNames,
   getSessionSafeBlockedToolNames,
   getToolDefsAsJsonSchema,
-  CODING_PROFILE_TOOLS,
-  CODING_ONLY_TOOLS,
 } from './tool-defs.ts';
 
 describe('session tool filtering helpers', () => {
@@ -107,52 +105,22 @@ describe('session tool filtering helpers', () => {
     expect(blockedPrefixed.has('mcp__session__spawn_session')).toBe(true);
   });
 
-  describe('agent profile', () => {
-    const names = (options?: Parameters<typeof getSessionToolDefs>[0]) => getSessionToolDefs(options).map(d => d.name);
-
-    it('default profile: every tool except the Coding-only PR tools', () => {
-      expect(names({ profile: 'default' })).toEqual(names());
-      expect(names({ profile: 'default', includeDecide: true })).toEqual(names({ includeDecide: true }));
-      expect(names({ includeDecide: true })).toEqual(SESSION_TOOL_DEFS.map(d => d.name).filter(name => !CODING_ONLY_TOOLS.has(name)));
-      expect([...CODING_ONLY_TOOLS]).toEqual(['pr_status', 'pr_bind', 'pr_unbind', 'pr_set_auto_merge']);
-      for (const name of CODING_ONLY_TOOLS) {
-        expect(names()).not.toContain(name);
-        expect(CODING_PROFILE_TOOLS[name]).toBe('always'); // offered in every Coding session instead
+  describe('complete tool availability', () => {
+    it('offers every registered capability when its feature preference is on', () => {
+      expect(getSessionToolDefs({ includeDecide: true })).toEqual(SESSION_TOOL_DEFS);
+      for (const name of ['spawn_session', 'create_page', 'browser_tool', 'pr_status', 'pr_bind', 'project_memory_append', 'source_test']) {
+        expect(getSessionToolNames()).toContain(name);
       }
     });
 
-    it('keeps only the always-on coding tools in a bare coding session', () => {
-      expect(names({ profile: 'coding' })).toEqual(['SubmitPlan', 'send_developer_feedback', 'pr_status', 'pr_bind', 'pr_unbind', 'pr_set_auto_merge', 'list_background_tasks']);
-      expect(names({ profile: 'coding', includeDeveloperFeedback: false })).toEqual(['SubmitPlan', 'pr_status', 'pr_bind', 'pr_unbind', 'pr_set_auto_merge', 'list_background_tasks']);
+    it('uses the same complete list for the Pi JSON Schema view', () => {
+      const defs = getSessionToolDefs({ includeDecide: true, includeBrowser: false });
+      expect(getToolDefsAsJsonSchema({ prefix: 'mcp__session__', includeDecide: true, includeBrowser: false }).map(d => d.name))
+        .toEqual(defs.map(d => `mcp__session__${d.name}`));
     });
 
-    it('adds source tools only with enabled sources, project memory only with a project', () => {
-      const withSources = names({ profile: 'coding', hasEnabledSources: true });
-      expect(withSources).toContain('source_test');
-      expect(withSources).toContain('source_oauth_trigger');
-      expect(withSources).not.toContain('project_memory_append');
-
-      const withProject = names({ profile: 'coding', hasProject: true });
-      expect(withProject).toContain('project_memory_append');
-      expect(withProject).not.toContain('source_test');
-    });
-
-    it('drops desktop-workflow tools even when their own flags are on', () => {
-      const coding = names({ profile: 'coding', includeDecide: true, includeBrowser: true, hasEnabledSources: true, hasProject: true });
-      for (const dropped of ['browser_tool', 'create_page', 'set_session_labels', 'spawn_session', 'call_llm', 'decide', 'transform_data', 'update_user_preferences']) {
-        expect(coding).not.toContain(dropped);
-      }
-      expect(coding.every(name => name in CODING_PROFILE_TOOLS)).toBe(true);
-    });
-
-    it('lists only tools that exist in the registry', () => {
-      const registered = new Set(SESSION_TOOL_DEFS.map(d => d.name));
-      expect(Object.keys(CODING_PROFILE_TOOLS).filter(name => !registered.has(name))).toEqual([]);
-    });
-
-    it('applies the same filter to the JSON Schema view (Pi)', () => {
-      const pi = getToolDefsAsJsonSchema({ prefix: 'mcp__session__', profile: 'coding' }).map(d => d.name);
-      expect(pi).toEqual(['mcp__session__SubmitPlan', 'mcp__session__send_developer_feedback', 'mcp__session__pr_status', 'mcp__session__pr_bind', 'mcp__session__pr_unbind', 'mcp__session__pr_set_auto_merge', 'mcp__session__list_background_tasks']);
+    it('ignores obsolete untyped profile data rather than hiding tools', () => {
+      expect(getSessionToolDefs({ profile: 'coding', hasEnabledSources: false } as never)).toEqual(getSessionToolDefs());
     });
   });
 

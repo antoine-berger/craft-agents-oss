@@ -136,17 +136,17 @@ describe('claude.ai owns MCP connections for Claude account sessions', () => {
     const sourcePath = join(workspace.rootPath, 'sources', 'craft-mcp', 'config.json')
     const before = readFileSync(sourcePath, 'utf8')
     await manager.setSessionSources(managed.id, ['craft-mcp', 'rest-api', 'files'])
-    expect(manager.getSessionSources(managed.id)).toEqual(['rest-api', 'files'])
+    expect(manager.getSessionSources(managed.id)).toEqual(['files', 'rest-api'])
     expect(credentialReads).not.toContain('craft-mcp')
     expect(credentialReads).toContain('rest-api')
     const [mcp, api, intended] = agent.setSourceServers.mock.calls[0]!
     expect(Object.keys(mcp as object)).toEqual([])
     expect(Object.keys(api as object)).toEqual(['rest-api'])
-    expect(intended).toEqual(['rest-api', 'files'])
+    expect(intended).toEqual(['files', 'rest-api'])
     expect(agent.setAllSources.mock.calls[0]![0].map(s => s.config.type)).not.toContain('mcp')
     expect(readFileSync(sourcePath, 'utf8')).toBe(before)
     expect(internal.sendEvent).toHaveBeenCalledWith({
-      type: 'sources_changed', sessionId: managed.id, enabledSourceSlugs: ['rest-api', 'files'],
+      type: 'sources_changed', sessionId: managed.id, enabledSourceSlugs: ['files', 'rest-api'],
     }, workspace.id)
   })
 
@@ -168,15 +168,15 @@ describe('claude.ai owns MCP connections for Claude account sessions', () => {
     }
     internal.getOrCreateAgent = async () => { throw new Error('Stop before constructing a model backend') }
     await manager.sendMessage(managed.id, 'hello').catch(() => {})
-    expect(refreshInputs).toEqual([['rest-api', 'files']])
+    expect(refreshInputs).toEqual([['files', 'rest-api']])
     expect(managed.isProcessing).toBe(false)
   })
 
-  it('still builds Craft MCP sources for API-key connections', async () => {
+  it('automatically builds all available sources, including Craft MCP, for API-key connections', async () => {
     const managed = createSession('anthropic-api')
     const agent = attachAgent(managed)
     await manager.setSessionSources(managed.id, ['craft-mcp'])
-    expect(manager.getSessionSources(managed.id)).toEqual(['craft-mcp'])
+    expect(manager.getSessionSources(managed.id)).toEqual(['craft-mcp', 'files', 'rest-api'])
     expect(credentialReads).toContain('craft-mcp')
     expect(Object.keys(agent.setSourceServers.mock.calls[0]![0] as object)).toEqual(['craft-mcp'])
   })

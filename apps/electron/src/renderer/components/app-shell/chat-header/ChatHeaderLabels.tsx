@@ -1,6 +1,6 @@
 /**
  * The chat header's label chips (design spec §7.3): neutral chips with the label's color dot, at
- * most three whole chips that fit (one in Coding mode, which keeps the row for the PR chip), then "+N". "+N" lists the labels that didn't fit (picking one
+ * most three whole chips that fit, then "+N". "+N" lists the labels that didn't fit (picking one
  * opens its value editor on a pinned chip) above the Labels toggles. A valued label just applied
  * from the composer's `#` menu opens its editor here too.
  *

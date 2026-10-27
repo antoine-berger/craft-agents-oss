@@ -1,5 +1,12 @@
 import type { LargeResultExcerpt } from '../../../utils/large-response.ts';
 
+/** Main-process-only identity of a permission-checked deferred source invocation. */
+export interface PiProxyToolResult {
+  content: string;
+  isError: boolean;
+  canonicalTool?: { name: string; input: Record<string, unknown> };
+}
+
 /** Raw Pi SDK context metadata on JSONL events/responses. No runtime imports. */
 export interface PiContextUsagePayload {
   contextUsage?: { tokens: number | null; contextWindow: number; percent?: number | null };

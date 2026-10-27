@@ -13,6 +13,8 @@ const deletedIds: string[] = []
 let mockedProvider: 'anthropic' | 'pi' = 'anthropic'
 
 // Partial-mock baseline: import real modules via file paths (avoids recursive mock imports)
+const actualSharedWorkspaceModule = await import('../../../../../packages/shared/src/workspaces/index.ts')
+const actualSharedConfigModule = await import('../../../../../packages/shared/src/config/index.ts')
 const actualSharedAgentModule = await import('../../../../../packages/shared/src/agent/index.ts')
 const actualSharedAgentBackendModule = await import('../../../../../packages/shared/src/agent/backend/index.ts')
 
@@ -57,6 +59,8 @@ mock.module('../logger', () => {
 })
 
 mock.module('@craft-agent/shared/config', () => ({
+  // Preserve the barrel contract for newly imported manager dependencies; override only fixture data.
+  ...actualSharedConfigModule,
   getWorkspaceByNameOrId: (id: string) => (id === workspace.id ? workspace : null),
   getWorkspaces: () => [workspace],
   loadConfigDefaults: () => ({
@@ -110,6 +114,7 @@ mock.module('@craft-agent/shared/config', () => ({
 }))
 
 mock.module('@craft-agent/shared/workspaces', () => ({
+  ...actualSharedWorkspaceModule,
   loadWorkspaceConfig: () => ({
     defaults: {
       permissionMode: 'ask',

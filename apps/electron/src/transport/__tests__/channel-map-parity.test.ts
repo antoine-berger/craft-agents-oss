@@ -15,6 +15,9 @@ type BrowserPaneKeys = `browserPane.${FunctionKeys<ElectronAPI['browserPane']>}`
 type ApiToChannelMapKeys = Exclude<
   FunctionKeys<ElectronAPI>,
   | 'performOAuth'
+  | 'connectCliProxyAccount' // desktop callback server and browser sign-in
+  | 'importLocalCliProxyAccounts' // desktop credential import over authenticated RPC
+  | 'cancelCliProxySignIn' // cancels the local sign-in flow
   | 'getTransportConnectionState'
   | 'getRuntimeEnvironment'
   | 'onTransportConnectionStateChanged'

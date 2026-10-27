@@ -175,11 +175,6 @@ interface ChatDisplayProps {
   thinkingLevel?: ThinkingLevel
   /** Callback when thinking level changes */
   onThinkingLevelChange?: (level: ThinkingLevel) => void
-  // Coding mode (session-level, fixed once the conversation starts)
-  /** Coding mode is on: lean coding prompt and session tools */
-  codingMode?: boolean
-  /** Toggle coding mode (only before the first message) */
-  onCodingModeChange?: (enabled: boolean) => void
   // Advanced options
   /** Current permission mode */
   permissionMode?: PermissionMode
@@ -302,8 +297,6 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   // Thinking level
   thinkingLevel = 'medium',
   onThinkingLevelChange,
-  codingMode = false,
-  onCodingModeChange,
   // Advanced options
   permissionMode = 'ask',
   previousPermissionMode,
@@ -902,23 +895,6 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
       : pickNewChatSuggestions(sources ?? []),
     [chatStarters, sources]
   )
-
-  // Coding mode is fixed once the conversation starts: continue in a new session with it switched.
-  // The server carries the folder, model, sources and a summary of this conversation over.
-  const handleContinueWithCodingMode = useCallback(async (enabled: boolean) => {
-    if (!session) return
-    const toastId = toast.loading(t('chat.codingMode.continuing'))
-    try {
-      const result = await window.electronAPI.sessionCommand(session.id, { type: 'continueInNewSession', codingMode: enabled })
-      toast.dismiss(toastId)
-      navigate(routes.view.allSessions(result.sessionId))
-    } catch (error) {
-      toast.error(t('chat.codingMode.continueFailed'), {
-        id: toastId,
-        description: error instanceof Error ? error.message : String(error),
-      })
-    }
-  }, [session, navigate, t])
 
   // A background task's full output, from its chip card
   const handleOpenTaskOutput = useCallback((task: BackgroundTask, output: BackgroundTaskOutput) => {
@@ -1791,9 +1767,13 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
               onModelChange,
               thinkingLevel,
               onThinkingLevelChange,
-              codingMode,
-              onCodingModeChange,
-              onContinueWithCodingMode: handleContinueWithCodingMode,
+              requireWorktree: !session.hidden && !session.parentSessionId && !session.taskSlug,
+              worktreeConfigured: !!session.worktree && !session.worktree.needsRepository,
+              worktreeLocked: !!session.worktree?.owned,
+              pendingRepository: session.worktree?.pendingRepository,
+              worktreeChoicePending: !session.worktree?.owned && !!(session.worktree?.pendingRepository || session.worktree?.needsRepository),
+              worktreeRepository: session.worktree?.owned?.repoPath ?? session.worktree?.repositoryPath,
+              worktreeBranch: session.worktree?.owned?.branch,
               enabledModes,
               enableCompactModelPicker,
               structuredInput,

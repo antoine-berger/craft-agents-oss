@@ -20,7 +20,7 @@ const BRANCH_AND_PINNED: PrWatchSessionState = {
   ],
 }
 
-function fakes(options: { verifyThrows?: boolean; boundPrs?: BoundPr[]; cached?: PrWatchSessionState | null; codingMode?: boolean; monitors?: Record<string, PrMonitorState>; checkout?: RepoInfo | null } = {}) {
+function fakes(options: { verifyThrows?: boolean; boundPrs?: BoundPr[]; cached?: PrWatchSessionState | null; monitors?: Record<string, PrMonitorState>; checkout?: RepoInfo | null } = {}) {
   const calls = { verifyPr: 0, fetchOnce: 0, bind: [] as BoundPr[], unbind: 0, setSessionBoundPrs: 0, setSessionMonitors: 0, setAutoMerge: 0, nudge: 0, monitorsChanged: [] as string[] }
   let bound: BoundPr[] = options.boundPrs ?? []
   let monitors: Record<string, PrMonitorState> = options.monitors ?? {}
@@ -35,7 +35,7 @@ function fakes(options: { verifyThrows?: boolean; boundPrs?: BoundPr[]; cached?:
   }
   const sessionManager = {
     // A non-existent dir: resolveRepo (used only for bare-number fallback) returns null, so URL refs parse fine.
-    getSessionSnapshot: () => ({ workspaceId: 'ws', workingDirectory: '/work/app', codingMode: options.codingMode ?? true }),
+    getSessionSnapshot: () => ({ workspaceId: 'ws', workingDirectory: '/work/app' }),
     getSessionWorkingDirectory: () => '/work/app',
     getSessionBoundPrs: () => bound,
     bindPrToSession: (_s: string, pr: BoundPr) => { calls.bind.push(pr); bound = [...bound, pr]; return bound },
@@ -148,8 +148,8 @@ describe('PR watch operations — auto-fix toggle', () => {
     expect(calls.monitorsChanged).toEqual(['s1'])
   })
 
-  it('refuses outside Coding mode and for something that is not a PR id', async () => {
-    expect((await fakes({ codingMode: false }).ops.setAutoFix('s1', 'github.com/acme/app#7', true)).ok).toBe(false)
+  it('supports ordinary repository chats and rejects something that is not a PR id', async () => {
+    expect((await fakes({ cached: BRANCH_AND_PINNED }).ops.setAutoFix('s1', 'github.com/acme/app#7', true)).ok).toBe(true)
     const { ops, calls } = fakes()
     expect((await ops.setAutoFix('s1', 'not-an-id', true)).ok).toBe(false)
     expect(calls.monitorsChanged).toEqual([])

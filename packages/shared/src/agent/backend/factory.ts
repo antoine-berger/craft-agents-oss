@@ -28,6 +28,7 @@ import { PiAgent } from '../pi-agent.ts';
 import {
   getLlmConnection,
   getDefaultLlmConnection,
+  loadStoredConfig,
   type LlmConnection,
 } from '../../config/storage.ts';
 // Import deprecated type for legacy migration function only
@@ -323,22 +324,34 @@ export function resolveSessionConnection(
   sessionConnection?: string,
   workspaceDefaultConnection?: string
 ): LlmConnection | null {
+  const route = (connection: LlmConnection): LlmConnection => {
+    if (!loadStoredConfig()?.cliProxyRoutingAll || connection.slug.startsWith('cli-proxy-')) return connection;
+    const provider = connection.providerType;
+    const target = provider === 'anthropic' ? 'cli-proxy-claude'
+      : (provider === 'pi_compat' || provider === 'pi') && ['openai', 'openai-codex'].includes(connection.piAuthProvider ?? '')
+        ? 'cli-proxy-codex' : undefined;
+    if (!target) throw new Error('This connection is not available through CLIProxyAPI. Select an account-pool connection.');
+    const pooled = getLlmConnection(target);
+    if (!pooled) throw new Error('The integrated account-pool connection is unavailable');
+    return pooled;
+  };
   // 1. Session-level connection (locked after first message)
   if (sessionConnection) {
     const connection = getLlmConnection(sessionConnection);
-    if (connection) return connection;
+    if (connection) return route(connection);
   }
 
   // 2. Workspace default
   if (workspaceDefaultConnection) {
     const connection = getLlmConnection(workspaceDefaultConnection);
-    if (connection) return connection;
+    if (connection) return route(connection);
   }
 
   // 3. Global default
   const defaultSlug = getDefaultLlmConnection();
   if (!defaultSlug) return null;
-  return getLlmConnection(defaultSlug);
+  const connection = getLlmConnection(defaultSlug);
+  return connection ? route(connection) : null;
 }
 
 /**

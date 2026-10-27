@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next"
-import { AlertCircle, CodeXml, Flag, Hand } from "lucide-react"
+import { Archive, ArchiveRestore, Flag } from "lucide-react"
 import { useActionLabel } from "@/actions"
 import { cn } from "@/lib/utils"
 import { rendererPerf } from "@/lib/perf"
@@ -27,15 +27,6 @@ import { extractLabelId } from "@craft-agent/shared/labels"
 const PLATFORM_LABEL: Record<'telegram' | 'whatsapp', string> = {
   telegram: 'Telegram',
   whatsapp: 'WhatsApp',
-}
-
-/** Plan-ready mark (paper plane) — same glyph the row used before, now on the subtitle line. */
-function PlanReadyIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 25 24" fill="currentColor" aria-hidden="true">
-      <path fillRule="nonzero" d="M13.7207031,22.6523438 C13.264974,22.6523438 12.9361979,22.4895833 12.734375,22.1640625 C12.5325521,21.8385417 12.360026,21.4316406 12.2167969,20.9433594 L10.6640625,15.7871094 C10.5729167,15.4615885 10.5403646,15.1995443 10.5664062,15.0009766 C10.5924479,14.8024089 10.6998698,14.6022135 10.8886719,14.4003906 L20.859375,3.6484375 C20.9179688,3.58984375 20.9472656,3.52473958 20.9472656,3.453125 C20.9472656,3.38151042 20.921224,3.32291667 20.8691406,3.27734375 C20.8170573,3.23177083 20.7568359,3.20735677 20.6884766,3.20410156 C20.6201172,3.20084635 20.5566406,3.22851562 20.4980469,3.28710938 L9.78515625,13.296875 C9.5703125,13.4921875 9.36197917,13.601237 9.16015625,13.6240234 C8.95833333,13.6468099 8.70117188,13.609375 8.38867188,13.5117188 L3.11523438,11.9101562 C2.64648438,11.7669271 2.25911458,11.5960286 1.953125,11.3974609 C1.64713542,11.1988932 1.49414062,10.875 1.49414062,10.4257812 C1.49414062,10.0742188 1.63411458,9.77148438 1.9140625,9.51757812 C2.19401042,9.26367188 2.5390625,9.05859375 2.94921875,8.90234375 L19.7460938,2.46679688 C19.9739583,2.38216146 20.1871745,2.31542969 20.3857422,2.26660156 C20.5843099,2.21777344 20.764974,2.19335938 20.9277344,2.19335938 C21.2467448,2.19335938 21.4973958,2.28450521 21.6796875,2.46679688 C21.8619792,2.64908854 21.953125,2.89973958 21.953125,3.21875 C21.953125,3.38802083 21.9287109,3.5703125 21.8798828,3.765625 C21.8310547,3.9609375 21.7643229,4.17252604 21.6796875,4.40039062 L15.2832031,21.109375 C15.1009115,21.578125 14.8828125,21.952474 14.6289062,22.2324219 C14.375,22.5123698 14.0722656,22.6523438 13.7207031,22.6523438 Z" />
-    </svg>
-  )
 }
 
 export interface SessionItemProps {
@@ -74,6 +65,7 @@ export function SessionItem({
   const { hotkey: nextHotkey } = useActionLabel('chat.nextSearchMatch')
   const { hotkey: prevHotkey } = useActionLabel('chat.prevSearchMatch')
   const title = getSessionTitle(item)
+  const archiveAction = item.isArchived ? ctx.onUnarchive : ctx.onArchive
   // For the active session, prefer logical match count over ripgrep count
   const activeMatch = ctx.activeChatMatchInfo
   const isActiveSession = isSelected && activeMatch?.sessionId === item.id
@@ -84,26 +76,27 @@ export function SessionItem({
     const labelId = extractLabelId(entry)
     return ctx.flatLabels.some(l => l.id === labelId)
   }))
+  const attention = ctx.attention?.[item.id]
+  const hasServerAttention = attention?.status === 'needs-human'
   const hasPendingPrompt = ctx.hasPendingPrompt?.(item.id) ?? false
   const isUnread = hasUnreadMeta(item)
   const messagingBindingsBySession = useAtomValue(messagingBindingsBySessionAtom)
   const sessionBindings = messagingBindingsBySession.get(item.id) ?? []
   const hasMessagingBinding = sessionBindings.length > 0
 
-  // Run state owns the subtitle line; attention states win (spec §2.4).
-  const runState: 'needs-you' | 'working' | 'failed' | 'plan' | null = hasPendingPrompt
+  // Attention replaces the leading status glyph; ordinary working/preview content stays in its row.
+  const runState: 'needs-you' | 'working' | 'failed' | 'plan' | null = (hasPendingPrompt || hasServerAttention)
     ? 'needs-you'
-    : item.isProcessing
+    : (item.isProcessing || attention?.status === 'working')
       ? 'working'
       : item.lastMessageRole === 'error'
         ? 'failed'
         : item.lastMessageRole === 'plan'
           ? 'plan'
           : null
-  const needsAttention = runState === 'needs-you' || runState === 'failed'
-  // One line, one subject: run state, else labels (full width), else the preview. Squeezing the preview
-  // and the chips into one line truncated both into fragments ("Run `gh issu…" · "Schedul…").
-  const previewText = runState || hasLabels ? null : getSessionPreviewText(item)
+  const needsAttention = runState === 'needs-you' || runState === 'failed' || runState === 'plan'
+  // Keep the normal preview/labels instead of adding a second attention indicator.
+  const previewText = runState === 'working' || hasLabels ? null : getSessionPreviewText(item)
 
   // Resolve the bound project so the row can show a project-themed stripe /
   // tint and reveal the project name on hover. Treatment is a user preference
@@ -142,25 +135,10 @@ export function SessionItem({
     onSelect()
   }
 
-  const subtitle = runState === 'needs-you' ? (
-    <span className="flex items-center gap-1.5 min-w-0 text-info">
-      <Hand className="size-3.5 shrink-0" aria-hidden="true" />
-      <span className="truncate">{t("session.runState.needsYou")}</span>
-    </span>
-  ) : runState === 'working' ? (
+  const subtitle = runState === 'working' ? (
     <span className="flex items-center gap-1.5 min-w-0">
       <Spinner className="text-label text-accent shrink-0" />
       <span className="truncate">{t("session.runState.working")}</span>
-    </span>
-  ) : runState === 'failed' ? (
-    <span className="flex items-center gap-1.5 min-w-0 text-destructive">
-      <AlertCircle className="size-3.5 shrink-0" aria-hidden="true" />
-      <span className="truncate">{t("session.runState.failed")}</span>
-    </span>
-  ) : runState === 'plan' ? (
-    <span className="flex items-center gap-1.5 min-w-0">
-      <PlanReadyIcon className="size-3.5 shrink-0 text-success" />
-      <span className="truncate">{t("session.runState.planReady")}</span>
     </span>
   ) : previewText
 
@@ -184,6 +162,11 @@ export function SessionItem({
         },
       }}
       moreButtonLabel={t("session.actionsFor", { title })}
+      actionButton={archiveAction ? {
+        icon: item.isArchived ? <ArchiveRestore className="size-4" /> : <Archive className="size-4" />,
+        label: `${t(item.isArchived ? "sessionMenu.unarchive" : "sessionMenu.archive")}: ${title}`,
+        onClick: () => archiveAction(item.id),
+      } : undefined}
       menuContent={
         <SessionMenu
           item={item}
@@ -230,17 +213,14 @@ export function SessionItem({
           onDelete={() => ctx.onDelete(item.id)}
         />
       )}
-      icon={<SessionStatusIcon item={item} />}
+      icon={<SessionStatusIcon item={item} needsAttention={needsAttention} attentionDescription={attention?.reasons.map(reason => reason.title).join("; ")} />}
       title={ctx.searchQuery ? highlightMatch(title, ctx.searchQuery) : title}
       titleClassName={cn(isUnread && "font-semibold", item.isAsyncOperationOngoing && "animate-shimmer-text")}
       subtitle={subtitle}
-      subtitleTrailing={hasLabels && !needsAttention ? <SessionBadges item={item} /> : undefined}
+      subtitleTrailing={hasLabels ? <SessionBadges item={item} /> : undefined}
       titleSuffix={
-        (projectName || hasMessagingBinding || item.codingMode) ? (
+        (projectName || hasMessagingBinding) ? (
           <div className="flex items-center gap-1">
-            {item.codingMode && (
-              <CodeXml className="size-3.5 shrink-0 text-tertiary" aria-label={t("chat.codingMode.label")} />
-            )}
             {projectName && (
               // Revealed on hover/focus only, and out of the layout otherwise: an invisible (opacity-0)
               // name still reserved its width and cut the title short for nothing. Solved tertiary

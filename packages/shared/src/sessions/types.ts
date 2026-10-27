@@ -11,6 +11,7 @@
 
 import type { PermissionMode } from '../agent/mode-manager.ts';
 import type { ThinkingLevel } from '../agent/thinking-levels.ts';
+import type { ConductorImportOrigin } from '../protocol/conductor-import';
 import type { BoundPr, PrMonitorState } from '../protocol/pr-watch.ts';
 import type { StoredAttachment, MessageRole, ToolStatus, AuthRequestType, AuthStatus, CredentialInputMode, StoredMessage, ContextUsageSnapshot } from '@craft-agent/core/types';
 
@@ -37,11 +38,11 @@ export const SESSION_PERSISTENT_FIELDS = [
   'enabledSourceSlugs', 'permissionMode', 'previousPermissionMode', 'workingDirectory', 'worktree',
   // Model/Connection
   'model', 'llmConnection', 'connectionLocked', 'thinkingLevel',
-  // Coding mode (lean coding prompt + tool profile; fixed once the session has messages)
+  // Legacy header compatibility only. Never consulted by the runtime.
   'codingMode',
-  // Coding mode: PRs pinned to this session (chat-header PR carousel; see protocol/pr-watch BoundPr)
+  // PRs pinned to this session (chat-header PR carousel; see protocol/pr-watch BoundPr)
   'boundPrs',
-  // Coding mode: per-PR monitor state (auto-fix toggle + what it last acted on), keyed by PR id
+  // Per-PR monitor state (auto-fix toggle + what it last acted on), keyed by PR id
   'prMonitors',
   // Sharing
   'sharedUrl', 'sharedId',
@@ -62,6 +63,7 @@ export const SESSION_PERSISTENT_FIELDS = [
   'triggeredBy',
   // Project binding (workspace-scoped grouping)
   'projectId',
+  'importedFrom',
   // Kanban: task/subtask hierarchy + board column
   'parentSessionId',
   'kanbanColumn',
@@ -125,6 +127,10 @@ export interface OwnedWorktree {
   path: string;
   /** Project folder relative to the source checkout root; absent in legacy/root-only plans. */
   projectSubdirectory?: string;
+  /** GitHub login captured when this branch was planned; absent for legacy craft/ branches. */
+  branchPrefix?: string;
+  /** Legacy hash branches omit this; task/existing names retain durable ownership markers. */
+  branchNaming?: 'task' | 'existing';
   branch: string;
   base: string;
   baseCommit: string;
@@ -133,7 +139,15 @@ export interface OwnedWorktree {
 
 /** Project policy captured when a chat is created; existing chats keep their checkout. */
 export interface SessionWorktreeMetadata {
+  /** A new independent session must choose a repository before it can run. */
+  needsRepository?: boolean;
   repositoryPath: string;
+  /** Durable draft choice, resolved/cloned when the first message prepares the checkout. */
+  pendingRepository?: import('../protocol/git-repos').RepositorySelection;
+  /** Task/PR metadata resolved once before checkout creation and retained across restarts. */
+  resolvedStart?: { baseBranch?: string; existingBranch?: string; taskTitle?: string; context?: string; pullRequestUrl?: string };
+  startContextApplied?: boolean;
+  repositoryResolved?: boolean;
   baseBranch?: string;
   cleanupOnArchive?: boolean;
   owned?: OwnedWorktree;
@@ -143,6 +157,7 @@ export interface SessionWorktreeMetadata {
  * Session configuration (persisted metadata)
  */
 export interface SessionConfig {
+  importedFrom?: ConductorImportOrigin;
   id: string;
   /** SDK session ID (captured after first message) */
   sdkSessionId?: string;
@@ -193,11 +208,11 @@ export interface SessionConfig {
   connectionLocked?: boolean;
   /** Thinking level for this session ('off', 'think', 'max') */
   thinkingLevel?: ThinkingLevel;
-  /** Coding mode: lean coding system prompt and session-tool profile. Fixed once the session has messages. */
+  /** @deprecated Retained only when reading and preserving historical headers; ignored by the runtime. */
   codingMode?: boolean;
-  /** Coding mode: PRs pinned to this session, shown in the chat-header PR carousel (pr_bind / pr_unbind). */
+  /** PRs pinned to this session, shown in the chat-header PR carousel (pr_bind / pr_unbind). */
   boundPrs?: BoundPr[];
-  /** Coding mode: per-PR monitor state (auto-fix), keyed by PR id `host/owner/repo#number`. */
+  /** Per-PR monitor state (auto-fix), keyed by PR id `host/owner/repo#number`. */
   prMonitors?: Record<string, PrMonitorState>;
   /**
    * Pending plan execution state - tracks "Accept & Compact" flow.
@@ -292,6 +307,7 @@ export interface StoredSession extends SessionConfig {
  * This enables fast session listing without parsing message content.
  */
 export interface SessionHeader {
+  importedFrom?: ConductorImportOrigin;
   id: string;
   /** SDK session ID (captured after first message) */
   sdkSessionId?: string;
@@ -340,11 +356,11 @@ export interface SessionHeader {
   connectionLocked?: boolean;
   /** Thinking level for this session ('off', 'think', 'max') */
   thinkingLevel?: ThinkingLevel;
-  /** Coding mode: lean coding system prompt and session-tool profile. Fixed once the session has messages. */
+  /** @deprecated Retained only when reading and preserving historical headers; ignored by the runtime. */
   codingMode?: boolean;
-  /** Coding mode: PRs pinned to this session, shown in the chat-header PR carousel (pr_bind / pr_unbind). */
+  /** PRs pinned to this session, shown in the chat-header PR carousel (pr_bind / pr_unbind). */
   boundPrs?: BoundPr[];
-  /** Coding mode: per-PR monitor state (auto-fix), keyed by PR id `host/owner/repo#number`. */
+  /** Per-PR monitor state (auto-fix), keyed by PR id `host/owner/repo#number`. */
   prMonitors?: Record<string, PrMonitorState>;
   /**
    * Pending plan execution state - tracks "Accept & Compact" flow.
@@ -414,6 +430,7 @@ export interface SessionHeader {
  * Session metadata (lightweight, for lists)
  */
 export interface SessionMetadata {
+  importedFrom?: ConductorImportOrigin;
   id: string;
   workspaceRootPath: string;
   name?: string;
@@ -458,11 +475,9 @@ export interface SessionMetadata {
   connectionLocked?: boolean;
   /** Thinking level for this session ('off', 'think', 'max') */
   thinkingLevel?: ThinkingLevel;
-  /** Coding mode: lean coding system prompt and session-tool profile. Fixed once the session has messages. */
-  codingMode?: boolean;
-  /** Coding mode: PRs pinned to this session, shown in the chat-header PR carousel (pr_bind / pr_unbind). */
+  /** PRs pinned to this session, shown in the chat-header PR carousel (pr_bind / pr_unbind). */
   boundPrs?: BoundPr[];
-  /** Coding mode: per-PR monitor state (auto-fix), keyed by PR id `host/owner/repo#number`. */
+  /** Per-PR monitor state (auto-fix), keyed by PR id `host/owner/repo#number`. */
   prMonitors?: Record<string, PrMonitorState>;
   /** ID of last message user has read - for unread detection */
   lastReadMessageId?: string;

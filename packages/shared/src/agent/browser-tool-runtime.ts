@@ -270,6 +270,9 @@ function countActionableNodes(nodes: Array<{ role: string; disabled?: boolean }>
  */
 async function handChallengeToUser(fns: BrowserPaneFns): Promise<string> {
   await fns.releaseControl();
+  if (fns.headless) {
+    return 'Automation is paused for human verification. This browser runs on the server and has no desktop window to show. An authorized interactive connection to that server browser is required to complete the check. Do not bypass the challenge or retry it automatically.';
+  }
   try {
     await fns.focusWindow();
     return 'Browser shown — please complete the verification check.';
@@ -841,7 +844,7 @@ async function executeSingleCommand(args: {
     let settledByWait = true;
     let usedFocusFallback = false;
 
-    if (foreground) {
+    if (foreground && !fns.headless) {
       const visibilityResult = await waitForForegroundOpenVisibility({
         fns,
         instanceId: result.instanceId,
@@ -856,11 +859,13 @@ async function executeSingleCommand(args: {
     const mode = foreground ? 'foreground' : 'background';
 
     const lines = [
-      `Opened in-app browser window in ${mode} (instance: ${result.instanceId})`,
+      fns.headless
+        ? `Opened server browser in headless mode (instance: ${result.instanceId}); it runs independently of the desktop app.`
+        : `Opened in-app browser window in ${mode} (instance: ${result.instanceId})`,
       `Window state: ${reused ? 'reused existing window' : 'created new window'}`,
       `Session windows: ${summarizeWindows(windowsAfter)}`,
     ];
-    if (foreground) {
+    if (foreground && !fns.headless) {
       lines.push(`Visibility settle: ${settledByWait ? 'wait-loop' : 'timeout'}${usedFocusFallback ? ' + focus retry' : ''}`);
     }
     if (win) {
@@ -1753,7 +1758,7 @@ async function executeSingleCommand(args: {
     const target = windows.find((w) => w.id === result.instanceId);
 
     const lines = [
-      `Focused browser window ${result.instanceId}`,
+      fns.headless ? `Selected server browser ${result.instanceId} (no desktop window)` : `Focused browser window ${result.instanceId}`,
       `Title: ${result.title || 'New Tab'}`,
       `URL: ${result.url || 'about:blank'}`,
       `Session windows: ${summarizeWindows(windows)}`,

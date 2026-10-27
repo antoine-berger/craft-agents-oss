@@ -83,6 +83,7 @@ import { getPermissionModeDiagnostics } from './mode-manager.ts';
 
 // McpClientPool for source tool proxying (centralized pool from main process)
 import type { McpClientPool } from '../mcp/mcp-pool.ts';
+import { DeferredMcpToolCatalog, DEFERRED_MCP_TOOL_DEFS, MCP_SEARCH_TOOL, MCP_INVOKE_TOOL, McpInvocationApprovals } from '../mcp/deferred-tool-catalog.ts';
 
 // Path utilities
 import { join } from 'path';
@@ -346,6 +347,12 @@ export class PiAgent extends BaseAgent {
     displayName?: string;
     capturedAt: number;
   }> = new Map();
+
+  private readonly mcpInvocationApprovals = new McpInvocationApprovals();
+  private readonly mcpToolCatalog = new DeferredMcpToolCatalog(
+    () => this.mcpPool?.getProxyToolDefs() ?? [],
+    name => this.mcpPool?.isProxyTool(name) === true,
+  );
 
   // Pool reference for convenience (from this.config.mcpPool)
   private get mcpPool(): McpClientPool | undefined { return this.config.mcpPool; }
@@ -615,12 +622,8 @@ export class PiAgent extends BaseAgent {
     // are executed in the main process when the LLM calls them.
     this.assertBackendSessionToolParity();
     // Same visibility filters as Claude (session-scoped-tools.ts): feature flags, the
-    // "Built-in browser" setting and the agent profile (coding mode).
-    const sessionToolDefs = getSessionToolProxyDefs({
-      profile: this._agentProfile,
-      hasEnabledSources: this.sourceManager.getIntendedSlugs().size > 0,
-      hasProject: !!this.config.session?.projectId,
-    });
+    // "Built-in browser" setting and individual feature preferences.
+    const sessionToolDefs = getSessionToolProxyDefs();
 
     // Patch call_llm description with provider-specific model hint
     if (this.config.miniModel) {
@@ -645,14 +648,10 @@ export class PiAgent extends BaseAgent {
    */
   private registerPoolToolsWithSubprocess(): void {
     if (!this.mcpPool) return;
-    const proxyDefs = this.mcpPool.getProxyToolDefs();
-    if (proxyDefs.length > 0) {
-      this.send({
-        type: 'register_tools',
-        tools: proxyDefs,
-      });
-      this.debug(`Registered ${proxyDefs.length} MCP source tools from pool with subprocess`);
-    }
+    // Keep every source connected, but project just two bounded catalogue tools.
+    // Pi/OpenAI does not support Claude's native deferred MCP tool search.
+    this.send({ type: 'register_tools', tools: DEFERRED_MCP_TOOL_DEFS });
+    this.debug('Registered deferred MCP catalogue with subprocess');
   }
 
   /**
@@ -1199,6 +1198,16 @@ export class PiAgent extends BaseAgent {
       }
     }
 
+    if ((eventType === 'tool_execution_start' || eventType === 'tool_execution_end') && event.toolName === MCP_INVOKE_TOOL) {
+      try {
+        const callId = event.toolCallId as string | undefined;
+        const canonical = (callId ? this.mcpInvocationApprovals.peek(callId) : undefined)
+          ?? this.mcpToolCatalog.resolveInvocation((event.args ?? {}) as Record<string, unknown>);
+        adaptedEvent = { ...adaptedEvent, toolName: canonical.toolName, args: canonical.input };
+        if (eventType === 'tool_execution_end' && callId) this.mcpInvocationApprovals.revoke(callId);
+      } catch { /* Invalid calls stay visibly invalid and never dispatch. */ }
+    }
+
     // Adapt event to CraftAgentEvents
     // The event adapter expects typed PiAgentEvent/AgentSessionEvent objects,
     // but since we're receiving plain JSON, we cast through unknown.
@@ -1212,7 +1221,7 @@ export class PiAgent extends BaseAgent {
         this.resetPrerequisiteState();
       }
 
-      // Coding mode post-tool hook: a Bash `gh pr create` pins the PR it opened (fire-and-forget;
+      // Post-tool hook: a Bash `gh pr create` pins the PR it opened (fire-and-forget;
       // Pi has no hook output to tell the model, the carousel shows it)
       if (agentEvent.type === 'tool_result' && !agentEvent.isError && agentEvent.toolName === 'Bash') {
         const command = (agentEvent.input as { command?: unknown } | undefined)?.command;
@@ -1257,7 +1266,32 @@ export class PiAgent extends BaseAgent {
     toolCallId?: string;
     input: Record<string, unknown>;
   }): Promise<void> {
-    const { requestId, toolName, toolCallId, input } = req;
+    const { requestId, toolCallId } = req;
+    let { toolName, input } = req;
+    const isDeferredInvocation = toolName === MCP_INVOKE_TOOL;
+    if (isDeferredInvocation) {
+      if (toolCallId) this.mcpInvocationApprovals.revoke(toolCallId);
+      try {
+        if (!toolCallId) throw new Error('MCP invocation requires a tool call identity.');
+        ({ toolName, input } = this.mcpToolCatalog.resolveInvocation(input));
+      } catch (error) {
+        this.send({ type: 'pre_tool_use_response', requestId, action: 'block', reason: error instanceof Error ? error.message : String(error) });
+        return;
+      }
+    }
+    // The centralized pipeline sees the real source tool, including its exact args.
+    // Only a final allow/modify binds that invocation to this call id for dispatch.
+    const sendDecision = (decision: Record<string, unknown>): void => {
+      if (isDeferredInvocation && (decision.action === 'allow' || decision.action === 'modify')) {
+        if (this.turnAbort.signal.aborted) {
+          this.send({ type: 'pre_tool_use_response', requestId, action: 'block', reason: 'Tool execution was cancelled.' });
+          return;
+        }
+        const approvedInput = decision.action === 'modify' ? decision.input as Record<string, unknown> : input;
+        this.mcpInvocationApprovals.approve(toolCallId!, { toolName, input: approvedInput });
+        this.send({ type: 'pre_tool_use_response', requestId, action: 'modify', input: { tool_name: toolName, arguments: approvedInput } });
+      } else this.send(decision);
+    };
     const turnSignal = this.turnAbort.signal;
     const debugSessionId = this.config.session?.id || this._sessionId;
     this.debug(`PreToolUse request from subprocess: ${toolName} (${requestId}, sessionId=${debugSessionId})`);
@@ -1314,6 +1348,7 @@ export class PiAgent extends BaseAgent {
       hasSourceActivation: !!this.onSourceActivationRequest,
       permissionManager: this.permissionManager,
       prerequisiteManager: this.prerequisiteManager,
+      toolPolicy: this.getToolPolicy(),
       rtkContext,
       onDebug: (msg: string) => this.debug(`PreToolUse(sessionId=${sessionId}): ${msg}`),
     });
@@ -1334,7 +1369,7 @@ export class PiAgent extends BaseAgent {
             const reason = sourceExists
               ? `Source "${sourceSlug}" is not active. Activate it by @mentioning it in your message or via the source icon at the bottom of the input field.`
               : `Source "${sourceSlug}" is not available yet. It needs to be created and configured first.`;
-            this.send({ type: 'pre_tool_use_response', requestId, action: 'block', reason });
+            sendDecision({ type: 'pre_tool_use_response', requestId, action: 'block', reason });
             return;
           }
           this.debug(`PreToolUse(sessionId=${sessionId}): Source "${sourceSlug}" activated successfully`);
@@ -1347,14 +1382,14 @@ export class PiAgent extends BaseAgent {
           const reason = sourceExists
             ? `Source "${sourceSlug}" could not be activated: ${err}`
             : `Source "${sourceSlug}" is not available yet. It needs to be created and configured first.`;
-          this.send({ type: 'pre_tool_use_response', requestId, action: 'block', reason });
+          sendDecision({ type: 'pre_tool_use_response', requestId, action: 'block', reason });
           return;
         }
       }
 
       checkResult = runPreToolUseChecks(buildCheckInput());
       if (checkResult.type === 'source_activation_needed') {
-        this.send({
+        sendDecision({
           type: 'pre_tool_use_response',
           requestId,
           action: 'block',
@@ -1372,11 +1407,11 @@ export class PiAgent extends BaseAgent {
 
     switch (checkResult.type) {
       case 'allow':
-        this.send({ type: 'pre_tool_use_response', requestId, action: 'allow' });
+        sendDecision({ type: 'pre_tool_use_response', requestId, action: 'allow' });
         return;
 
       case 'modify':
-        this.send({ type: 'pre_tool_use_response', requestId, action: 'modify', input: checkResult.input });
+        sendDecision({ type: 'pre_tool_use_response', requestId, action: 'modify', input: checkResult.input });
         return;
 
       case 'block': {
@@ -1390,20 +1425,20 @@ export class PiAgent extends BaseAgent {
           changedAt: diagnostics.lastChangedAt,
           reason: checkResult.reason,
         })}`);
-        this.send({ type: 'pre_tool_use_response', requestId, action: 'block', reason: checkResult.reason });
+        sendDecision({ type: 'pre_tool_use_response', requestId, action: 'block', reason: checkResult.reason });
         return;
       }
 
       case 'call_llm_intercept':
       case 'spawn_session_intercept':
         // These tools are proxy tools handled via tool_execute_request — just allow
-        this.send({ type: 'pre_tool_use_response', requestId, action: 'allow' });
+        sendDecision({ type: 'pre_tool_use_response', requestId, action: 'allow' });
         return;
 
       case 'prompt': {
         if (!this.onPermissionRequest) {
           // Nobody can answer the prompt: deny, as ClaudeAgent does.
-          this.send({
+          sendDecision({
             type: 'pre_tool_use_response',
             requestId,
             action: 'block',
@@ -1445,14 +1480,14 @@ export class PiAgent extends BaseAgent {
         this.pendingPermissions.delete(permRequestId);
 
         if (!allowed) {
-          this.send({ type: 'pre_tool_use_response', requestId, action: 'block', reason: 'Permission denied by user.' });
+          sendDecision({ type: 'pre_tool_use_response', requestId, action: 'block', reason: 'Permission denied by user.' });
           return;
         }
 
         if (checkResult.modifiedInput) {
-          this.send({ type: 'pre_tool_use_response', requestId, action: 'modify', input: checkResult.modifiedInput });
+          sendDecision({ type: 'pre_tool_use_response', requestId, action: 'modify', input: checkResult.modifiedInput });
         } else {
-          this.send({ type: 'pre_tool_use_response', requestId, action: 'allow' });
+          sendDecision({ type: 'pre_tool_use_response', requestId, action: 'allow' });
         }
         return;
       }
@@ -1472,35 +1507,32 @@ export class PiAgent extends BaseAgent {
     toolCallId?: string;
     args: Record<string, unknown>;
   }): Promise<void> {
-    // Prerequisite check: block source tools until guide.md is read
-    const prereqResult = this.prerequisiteManager.checkPrerequisites(request.toolName);
-    if (!prereqResult.allowed) {
-      this.send({
-        type: 'tool_execute_response',
-        requestId: request.requestId,
-        result: { content: prereqResult.blockReason!, isError: true },
-      });
-      return;
-    }
-
     try {
-      // The approved args no longer carry `_intent`; the pre-tool-use bridge kept it by call id.
+      let toolName = request.toolName;
+      let args = request.args;
+      const deferred = toolName === MCP_INVOKE_TOOL;
+      if (deferred) {
+        const resolved = this.mcpToolCatalog.resolveInvocation(args);
+        const approved = this.mcpInvocationApprovals.consume(request.toolCallId, resolved);
+        toolName = approved.toolName;
+        args = approved.input;
+      }
+      // Recheck the actual source prerequisite and host policy at dispatch too.
+      const prereqResult = this.prerequisiteManager.checkPrerequisites(toolName);
+      if (!prereqResult.allowed) throw new Error(prereqResult.blockReason!);
+      const policyReason = this.getToolPolicy()?.(toolName, args);
+      if (policyReason) throw new Error(policyReason);
       const intent = request.toolCallId ? this.preToolMetadataByCallId.get(request.toolCallId)?.intent : undefined;
-      const result = await this.routeToolCall(request.toolName, request.args, intent);
+      const result = toolName === MCP_SEARCH_TOOL
+        ? this.mcpToolCatalog.search(args)
+        : await this.routeToolCall(toolName, args, intent);
       this.send({
-        type: 'tool_execute_response',
-        requestId: request.requestId,
-        result,
+        type: 'tool_execute_response', requestId: request.requestId,
+        result: deferred ? { ...result, canonicalTool: { name: toolName, input: args } } : result,
       });
     } catch (error) {
-      this.send({
-        type: 'tool_execute_response',
-        requestId: request.requestId,
-        result: {
-          content: error instanceof Error ? error.message : String(error),
-          isError: true,
-        },
-      });
+      this.send({ type: 'tool_execute_response', requestId: request.requestId,
+        result: { content: error instanceof Error ? error.message : String(error), isError: true } });
     }
   }
 
@@ -1873,6 +1905,7 @@ export class PiAgent extends BaseAgent {
 
     // Drop any cached pre-tool metadata for the dead subprocess.
     this.preToolMetadataByCallId.clear();
+    this.mcpInvocationApprovals.clear();
   }
 
   /**
@@ -2159,11 +2192,10 @@ export class PiAgent extends BaseAgent {
         'Craft Agents Backend', // backendName
         this.pinnedIncludeCoAuthoredBy ?? undefined,
         this.pinnedProjectContext ?? undefined,
-        this._agentProfile,
       );
 
       // Build context from sources
-      const sourceContext = this.sourceManager.formatSourceState({ activeOnly: this._agentProfile === 'coding' });
+      const sourceContext = this.sourceManager.formatSourceState();
 
       const promptModeDiagnostics = getPermissionModeDiagnostics(this._sessionId)
       this.debug(
@@ -2437,6 +2469,7 @@ export class PiAgent extends BaseAgent {
 
     // Clear bridge cache for this interrupted turn.
     this.preToolMetadataByCallId.clear();
+    this.mcpInvocationApprovals.clear();
   }
 
   forceAbort(reason: AbortReason): void {
@@ -2471,6 +2504,7 @@ export class PiAgent extends BaseAgent {
 
     // Clear bridge cache for aborted turn.
     this.preToolMetadataByCallId.clear();
+    this.mcpInvocationApprovals.clear();
 
     // For PlanSubmitted and AuthRequest, just interrupt the turn
     if (reason === AbortReason.PlanSubmitted || reason === AbortReason.AuthRequest) {
@@ -2629,6 +2663,7 @@ export class PiAgent extends BaseAgent {
     this.subprocessReadyResolve = null;
     this.callbackPort = 0;
     this.preToolMetadataByCallId.clear();
+    this.mcpInvocationApprovals.clear();
     this.adapter.resetRecoveryState();
 
     if (result) {
@@ -2673,6 +2708,7 @@ export class PiAgent extends BaseAgent {
     this.subprocessReadyResolve = null;
     this.callbackPort = 0;
     this.preToolMetadataByCallId.clear();
+    this.mcpInvocationApprovals.clear();
 
     // Clear any in-flight overflow/auto-retry recovery state so a stale
     // fallback timer doesn't fire on a torn-down adapter.

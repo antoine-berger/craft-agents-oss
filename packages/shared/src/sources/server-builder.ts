@@ -33,7 +33,7 @@ export const SERVER_BUILD_ERRORS = {
  * Supports HTTP/SSE (remote) and stdio (local subprocess) transports.
  */
 export type McpServerConfig =
-  | { type: 'http' | 'sse'; url: string; headers?: Record<string, string> }
+  | { type: 'http' | 'sse'; url: string; headers?: Record<string, string>; fetch?: typeof globalThis.fetch }
   | { type: 'stdio'; command: string; args?: string[]; env?: Record<string, string> };
 
 /**

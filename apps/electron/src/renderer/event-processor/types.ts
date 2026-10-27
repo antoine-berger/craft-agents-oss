@@ -145,15 +145,6 @@ export interface SourcesChangedEvent {
 }
 
 /**
- * Coding mode changed event (only before the conversation starts; see SessionManager.setSessionCodingMode)
- */
-export interface CodingModeChangedEvent {
-  type: 'coding_mode_changed'
-  sessionId: string
-  codingMode: boolean
-}
-
-/**
  * Labels changed event
  */
 export interface LabelsChangedEvent {
@@ -313,12 +304,13 @@ export interface AsyncOperationEvent {
 }
 
 /**
- * Working directory changed event (user-initiated via UI)
+ * Working directory changed by the user or by first-message worktree preparation
  */
 export interface WorkingDirectoryChangedEvent {
   type: 'working_directory_changed'
   sessionId: string
   workingDirectory: string
+  worktree?: Session['worktree'] | null
 }
 
 /**
@@ -542,6 +534,7 @@ export interface UsageUpdateEvent {
  * Union of all agent events
  */
 export type AgentEvent =
+  | Extract<SessionEvent, { type: 'session_restored' }>
   | TextDiscardEvent
   | RetryEvent
   | TextDeltaEvent
@@ -554,7 +547,6 @@ export type AgentEvent =
   | PermissionRequestEvent
   | CredentialRequestEvent
   | SourcesChangedEvent
-  | CodingModeChangedEvent
   | LabelsChangedEvent
   | ProjectIdChangedEvent
   | SessionStatusChangedEvent
@@ -599,7 +591,6 @@ export type Effect =
   | { type: 'credential_request'; request: CredentialRequest }
   | { type: 'generate_title'; sessionId: string; userMessage: string }
   | { type: 'permission_mode_changed'; sessionId: string; permissionMode: PermissionMode; previousPermissionMode?: PermissionMode; transitionDisplay?: string; modeVersion?: number; changedAt?: string; changedBy?: 'user' | 'system' | 'restore' | 'automation' | 'unknown' }
-  | { type: 'coding_mode_changed'; sessionId: string; codingMode: boolean }
   | { type: 'restore_input'; text: string }
   | { type: 'toast_error'; message: string }
 

@@ -15,7 +15,7 @@
 import { isLocalMcpEnabled } from '../../workspaces/storage.ts';
 import { formatPreferencesForPrompt } from '../../config/preferences.ts';
 import { formatSessionState } from '../mode-manager.ts';
-import { CLAUDE_ACCOUNT_CONNECTORS_GUIDANCE, getDateTimeContext, getWorkingDirectoryContext } from '../../prompts/system.ts';
+import { CLAUDE_ACCOUNT_CONNECTORS_GUIDANCE, getDateTimeContext, getWorkingDirectoryContext, getSystemPrompt } from '../../prompts/system.ts';
 import {
   formatStableGitDeveloperContext,
   formatVolatileGitDeveloperContext,
@@ -49,6 +49,7 @@ export class PromptBuilder {
   private config: PromptBuilderConfig;
   private workspaceRootPath: string;
   private pinnedPreferencesPrompt: string | null = null;
+  private legacyInstructionsUpdate: string | undefined;
   private stableDeveloperContextCache: { workingDirectory: string | undefined; value: string | null } | null = null;
 
   constructor(config: PromptBuilderConfig) {
@@ -149,7 +150,7 @@ export class PromptBuilder {
    * can safely live in the cached system prefix (issue #862).
    *
    * Blocks (in order):
-   *  1. workspace capabilities (not in coding mode: local MCP support is irrelevant to coding)
+   *  1. workspace capabilities
    *  2. working directory, when available
    *  3. stable git developer context, when the selected working directory is in a repo
    *
@@ -159,10 +160,20 @@ export class PromptBuilder {
   buildStableContextParts(claudeAccountConnectors: boolean = false): string[] {
     const parts: string[] = [];
 
-    // Workspace capabilities
-    if (this.config.agentProfile !== 'coding') {
-      parts.push(this.formatWorkspaceCapabilities(claudeAccountConnectors));
+    // Compatibility for existing SDK transcripts: their recorded system prefix cannot be
+    // replaced safely without discarding reasoning or resetting the SDK session. Supply the
+    // current complete application instructions on every turn until normal compaction refreshes
+    // that prefix. This legacy bit selects no tools, mode, profile or alternate base prompt.
+    if (this.config.session?.sdkSessionId && this.config.session.codingMode === true) {
+      const instructions = this.legacyInstructionsUpdate ??= getSystemPrompt(
+        '', undefined, this.workspaceRootPath, this.config.session.workingDirectory,
+        undefined, undefined, undefined, undefined, claudeAccountConnectors,
+      );
+      parts.push(`<application_instructions_update>\nThis existing transcript recorded an older application tool set. The current application exposes its full tool set according to the user's feature preferences. Use the current instructions below for the available capabilities.\n${instructions}\n</application_instructions_update>`);
     }
+
+    // Workspace capabilities
+    parts.push(this.formatWorkspaceCapabilities(claudeAccountConnectors));
 
     // Claude sends stable context on each user turn too, so resumed SDK snapshots receive the policy.
     if (claudeAccountConnectors) {
@@ -324,13 +335,6 @@ Please continue the conversation naturally from where we left off.
     this.config.workspace = workspace;
     this.workspaceRootPath = workspace?.rootPath ?? '';
     this.clearDeveloperContextCache();
-  }
-
-  /**
-   * Update the agent profile (coding mode trims the per-message context).
-   */
-  setAgentProfile(profile: NonNullable<PromptBuilderConfig['agentProfile']>): void {
-    this.config.agentProfile = profile;
   }
 
   /**

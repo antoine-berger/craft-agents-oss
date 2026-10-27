@@ -89,6 +89,10 @@ async function getExpectedCoreChannels(): Promise<Set<string>> {
   // Core handler channels (now in server-core)
   const [
     auth,
+    cliProxy,
+    providerQuotas,
+    attention,
+    ship,
     automations,
     files,
     labels,
@@ -109,9 +113,16 @@ async function getExpectedCoreChannels(): Promise<Set<string>> {
     transfer,
     decisions,
     prWatch,
-    codingRepos,
+    repositories,
+    gitReview,
+    checkpoints,
+    conductorImport,
   ] = await Promise.all([
     import('@craft-agent/server-core/handlers/rpc/auth'),
+    import('@craft-agent/server-core/handlers/rpc/cli-proxy'),
+    import('@craft-agent/server-core/handlers/rpc/provider-quotas'),
+    import('@craft-agent/server-core/handlers/rpc/session-attention'),
+    import('@craft-agent/server-core/handlers/rpc/ship-workflow'),
     import('@craft-agent/server-core/handlers/rpc/automations'),
     import('@craft-agent/server-core/handlers/rpc/files'),
     import('@craft-agent/server-core/handlers/rpc/labels'),
@@ -132,11 +143,18 @@ async function getExpectedCoreChannels(): Promise<Set<string>> {
     import('@craft-agent/server-core/handlers/rpc/transfer'),
     import('@craft-agent/server-core/handlers/rpc/decisions'),
     import('@craft-agent/server-core/handlers/rpc/pr-watch'),
-    import('@craft-agent/server-core/handlers/rpc/coding-repos'),
+    import('@craft-agent/server-core/handlers/rpc/repositories'),
+    import('@craft-agent/server-core/handlers/rpc/git-review'),
+    import('@craft-agent/server-core/handlers/rpc/checkpoints'),
+    import('@craft-agent/server-core/handlers/rpc/conductor-import'),
   ])
 
   return new Set([
     ...auth.HANDLED_CHANNELS,
+    ...cliProxy.HANDLED_CHANNELS,
+    ...providerQuotas.HANDLED_CHANNELS,
+    ...attention.HANDLED_CHANNELS,
+    ...ship.HANDLED_CHANNELS,
     ...automations.HANDLED_CHANNELS,
     ...files.HANDLED_CHANNELS,
     ...labels.HANDLED_CHANNELS,
@@ -157,7 +175,10 @@ async function getExpectedCoreChannels(): Promise<Set<string>> {
     ...transfer.HANDLED_CHANNELS,
     ...decisions.HANDLED_CHANNELS,
     ...prWatch.HANDLED_CHANNELS,
-    ...codingRepos.HANDLED_CHANNELS,
+    ...repositories.HANDLED_CHANNELS,
+    ...gitReview.HANDLED_CHANNELS,
+    ...checkpoints.HANDLED_CHANNELS,
+    ...conductorImport.HANDLED_CHANNELS,
   ])
 }
 

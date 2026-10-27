@@ -215,6 +215,17 @@ export const LOCAL_ONLY_CHANNELS = new Set<string>([
 // ---------------------------------------------------------------------------
 
 export const REMOTE_ELIGIBLE_CHANNELS = new Set<string>([
+  RPC_CHANNELS.attention.GET,
+  RPC_CHANNELS.attention.CHANGED,
+  RPC_CHANNELS.ship.START_PLAN,
+  RPC_CHANNELS.ship.GET,
+  RPC_CHANNELS.ship.ADVANCE,
+  RPC_CHANNELS.ship.REFRESH,
+  RPC_CHANNELS.ship.APPROVE,
+  RPC_CHANNELS.ship.STOP,
+  RPC_CHANNELS.ship.CHANGED,
+  RPC_CHANNELS.providerQuotas.GET,
+  RPC_CHANNELS.conductor.IMPORT,
   // server — server-level operations (no workspace context needed)
   RPC_CHANNELS.server.GET_WORKSPACES,
   RPC_CHANNELS.server.CREATE_WORKSPACE,
@@ -233,6 +244,8 @@ export const REMOTE_ELIGIBLE_CHANNELS = new Set<string>([
   RPC_CHANNELS.sessions.CREATE,
   RPC_CHANNELS.sessions.DELETE,
   RPC_CHANNELS.sessions.GET_MESSAGES,
+  RPC_CHANNELS.sessions.LIST_CHECKPOINTS,
+  RPC_CHANNELS.sessions.RESTORE_CHECKPOINT,
   RPC_CHANNELS.sessions.SEND_MESSAGE,
   RPC_CHANNELS.sessions.CANCEL,
   RPC_CHANNELS.sessions.KILL_SHELL,
@@ -366,6 +379,9 @@ export const REMOTE_ELIGIBLE_CHANNELS = new Set<string>([
 
   // sources — source config per-workspace
   RPC_CHANNELS.sources.GET,
+  RPC_CHANNELS.cliProxy.STATUS,
+  RPC_CHANNELS.cliProxy.COMMAND,
+  RPC_CHANNELS.cliProxy.IMPORT_ACCOUNTS,
   RPC_CHANNELS.sources.CREATE,
   RPC_CHANNELS.sources.DELETE,
   RPC_CHANNELS.sources.START_OAUTH,
@@ -474,6 +490,8 @@ export const REMOTE_ELIGIBLE_CHANNELS = new Set<string>([
 
   // git — workspace filesystem
   RPC_CHANNELS.git.GET_BRANCH,
+  RPC_CHANNELS.git.GET_REPOSITORY_IDENTITY,
+  RPC_CHANNELS.git.GET_REVIEW,
   RPC_CHANNELS.git.LIST_REPOS,
   RPC_CHANNELS.git.CREATE_WORKTREE,
 

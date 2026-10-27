@@ -1,5 +1,5 @@
 /**
- * PR watcher RPCs (Coding mode's chat-header PR carousel). The registry runs here, on the workspace
+ * PR watcher RPCs (chat-header PR carousel). The registry runs here, on the workspace
  * server: it has the session's folder, the source credentials and `gh`, so tokens never reach a
  * client. Clients subscribe per session and receive `prWatch:changed` pushes carrying the session's
  * whole PR set. Bind / unbind / auto-merge / auto-fix go through the shared ops so the agent tools and
@@ -115,7 +115,7 @@ export function registerPrWatchHandlers(server: RpcServer, deps: HandlerDeps): v
 
   server.handle(RPC_CHANNELS.prWatch.SUBSCRIBE, async (ctx, sessionId: string): Promise<{ subscriptionId: string | null; state: PrWatchSessionState }> => {
     const session = deps.sessionManager.getSessionSnapshot(sessionId)
-    if (!session?.codingMode) return { subscriptionId: null, state: { kind: 'unavailable', reason: 'not-git' } }
+    if (!session) return { subscriptionId: null, state: { kind: 'unavailable', reason: 'not-git' } }
     const dir = deps.sessionManager.getSessionWorkingDirectory(sessionId) ?? session.workingDirectory
     const workspaceRootPath = resolveWorkspaceRootPath(session.workspaceId)
     if (!dir || !workspaceRootPath) return { subscriptionId: null, state: { kind: 'unavailable', reason: 'not-git' } }

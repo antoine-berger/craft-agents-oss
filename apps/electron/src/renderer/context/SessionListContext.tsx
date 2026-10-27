@@ -5,7 +5,10 @@ import type { SessionMeta } from "@/atoms/sessions"
 import type { SessionOptions } from "@/hooks/useSessionOptions"
 import type { ContentSearchResult } from "@/hooks/useSessionSearch"
 
+import type { SessionAttention } from "@craft-agent/shared/protocol"
+
 export interface SessionListContextValue {
+  attention?: Record<string, SessionAttention>
   // Session action callbacks (shared across all items)
   onRenameClick: (sessionId: string, currentName: string) => void
   onSessionStatusChange: (sessionId: string, state: SessionStatusId) => void

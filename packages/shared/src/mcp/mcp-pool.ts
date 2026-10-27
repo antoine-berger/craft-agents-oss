@@ -163,6 +163,7 @@ function sdkConfigToClientConfig(config: SdkMcpServerConfig): McpClientConfig | 
       transport: 'http',
       url: config.url,
       headers: config.headers,
+      fetch: config.fetch,
     };
   }
   if (config.type === 'stdio') {

@@ -77,7 +77,7 @@ describe('derivePickerMode', () => {
   })
 
   // -------------------------------------------------------------------------
-  // Mid-session lock preserved: switcher off, locked-single still rendered
+  // Default drawer behavior preserves the existing-session connection lock
   // -------------------------------------------------------------------------
 
   test('non-empty session + single-model pi_compat default → locked-single (lock preserved)', () => {
@@ -177,4 +177,12 @@ describe('derivePickerMode', () => {
       ),
     ).toBe('flat')
   })
+})
+
+
+test('desktop retains the same provider hierarchy after the first message, including a fixed-model connection', () => {
+  for (const connectionDefaultModel of [null, 'mistral-7b']) {
+    expect(derivePickerMode(input({ isEmptySession: false, connectionCount: 2, connectionDefaultModel, keepHierarchy: true }))).toBe('switcher')
+  }
+  expect(derivePickerMode(input({ connectionUnavailable: true, connectionCount: 2, keepHierarchy: true }))).toBe('unavailable')
 })

@@ -62,6 +62,8 @@ export interface StoredConfig {
   // LLM Connections (authoritative source for auth and model config)
   llmConnections?: LlmConnection[];
   defaultLlmConnection?: string;  // Slug of default connection for new sessions
+  /** Resolve legacy/session connection references through the integrated proxy. */
+  cliProxyRoutingAll?: boolean;
   defaultThinkingLevel?: ThinkingLevel;  // App-level default thinking level for new sessions
 
   workspaces: Workspace[];

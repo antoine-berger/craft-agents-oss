@@ -30,16 +30,15 @@ import { RichTextInput, type RichTextInputHandle } from '@/components/ui/rich-te
 import { useInputAvailableHeight } from '@/hooks/useInputAvailableHeight'
 import { useTransportConnectionState } from '@/hooks/useTransportConnectionState'
 import { getComposerMaxHeight } from './composer-height'
-import { getContextDisplay, getContextDisplayLabels, type ContextStatus } from './context-display'
+import type { ContextStatus } from './context-display'
 import { createPendingPlanDispatcher } from './pending-plan-dispatch'
 import { scrollFocusedCaretIntoView } from '@/lib/scroll-focused-caret'
 import { cn } from '@/lib/utils'
 import { coerceInputText } from '@/lib/input-text'
-import { isMac } from '@/lib/platform'
 import { applySmartTypography } from '@/lib/smart-typography'
 import { AttachmentPreview } from '../AttachmentPreview'
 import { ImageSupportWarningBanner } from './ImageSupportWarningBanner'
-import { ANTHROPIC_MODELS, getModelDisplayName, getModelContextWindow } from '@config/models'
+import { ANTHROPIC_MODELS, getModelContextWindow } from '@config/models'
 import {
   resolveEffectiveConnectionSlug,
   isCompatProvider,
@@ -52,8 +51,7 @@ import { CompactWorkingDirectorySelector } from '@/components/ui/CompactWorkingD
 import { FreeFormInputContextBadge } from './FreeFormInputContextBadge'
 import { derivePickerMode } from './picker-mode'
 import type { FileAttachment, LoadedSource, LoadedSkill } from '../../../../shared/types'
-import { isPermissionMode, planExecutionMode, type PermissionMode } from '@craft-agent/shared/agent/modes'
-import { useAvailablePermissionModes } from '@/hooks/useAvailablePermissionModes'
+import { planExecutionMode, type PermissionMode } from '@craft-agent/shared/agent/modes'
 import type { ThinkingLevel } from '@craft-agent/shared/agent/thinking-levels'
 import { useEscapeInterrupt } from '@/context/EscapeInterruptContext'
 import { hasOpenOverlay } from '@/lib/overlay-detection'
@@ -66,38 +64,20 @@ import {
   addRecentWorkingDir,
 } from './working-directory-history'
 import { WorkingDirectorySelector, formatPathForDisplay } from './WorkingDirectorySelector'
-import { CompactPermissionModeSelector } from './CompactPermissionModeSelector'
 import { CompactModelSelector } from './CompactModelSelector'
 import {
   groupConnectionsByProvider,
-  stripPiPrefixForDisplay,
+  getPickerModelName,
+  sortPickerModels,
 } from './model-picker-helpers'
 import { useModelVisionToggle } from './useModelVisionToggle'
-import { ComposerSourcesChip } from './ComposerSourcesChip'
-import { ComposerCodingChip } from './ComposerCodingChip'
-import { useDirectoryPicker } from '@/hooks/useDirectoryPicker'
-import { ServerDirectoryBrowser } from '@/components/ServerDirectoryBrowser'
+import { initialRepository, setDraftRepository, clearDraftRepository } from './repository-history'
+import { ComposerRepositorySelector } from './ComposerRepositorySelector'
 import { ComposerModelMenu } from './ComposerModelMenu'
-import { ComposerModeChip } from './ComposerModeChip'
-import { ContextUsageChip } from './ContextUsageChip'
+import { ContextUsageIndicator } from './ContextUsageIndicator'
 import { FollowUpChips } from './FollowUpChips'
 import { SendButton } from './SendButton'
 
-
-/** Platform-specific modifier key for keyboard shortcuts */
-const cmdKey = isMac ? '⌘' : 'Ctrl'
-
-/** Default rotating placeholders are now generated inside FreeFormInput via useMemo + t() */
-
-/** Fisher-Yates shuffle — returns a new array in random order */
-function shuffleArray<T>(array: T[]): T[] {
-  const shuffled = [...array]
-  for (let i = shuffled.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]]
-  }
-  return shuffled
-}
 
 export interface FollowUpInputItem {
   id: string
@@ -196,13 +176,13 @@ export interface FreeFormInputProps {
   disableSend?: boolean
   /** Whether the session is empty (no messages yet) - affects context badge prominence */
   isEmptySession?: boolean
-  // Coding mode (session-level, fixed once the conversation starts)
-  /** Coding mode is on: lean coding prompt and session tools */
-  codingMode?: boolean
-  /** Toggle coding mode (only before the first message) */
-  onCodingModeChange?: (enabled: boolean) => void
-  /** Continue a started session in a new one with coding mode set to `enabled` */
-  onContinueWithCodingMode?: (enabled: boolean) => void
+  requireWorktree?: boolean
+  worktreeConfigured?: boolean
+  pendingRepository?: import('@craft-agent/shared/protocol').RepositorySelection
+  worktreeChoicePending?: boolean
+  worktreeLocked?: boolean
+  worktreeRepository?: string
+  worktreeBranch?: string
   /** Context status for showing compaction indicator and token usage */
   contextStatus?: ContextStatus
   /** Follow-up annotations shown as context chips above the input */
@@ -267,8 +247,6 @@ export function FreeFormInput({
   permissionMode = 'ask',
   previousPermissionMode,
   onPermissionModeChange,
-  enabledModes = ['safe', 'ask', 'allow-all'],
-  showPermissionModeChip = false,
   inputValue,
   onInputChange,
   attachmentsValue,
@@ -278,8 +256,6 @@ export function FreeFormInput({
   maxHeight,
   onFocusChange,
   sources: configuredSources = [],
-  enabledSourceSlugs = [],
-  onSourcesChange,
   skills = [],
   labels = [],
   sessionLabels = [],
@@ -292,9 +268,13 @@ export function FreeFormInput({
   currentSessionStatus,
   disableSend = false,
   isEmptySession = false,
-  codingMode = false,
-  onCodingModeChange,
-  onContinueWithCodingMode,
+  requireWorktree = false,
+  worktreeConfigured = false,
+  worktreeLocked = false,
+  worktreeChoicePending = false,
+  pendingRepository,
+  worktreeRepository,
+  worktreeBranch,
   contextStatus,
   followUpItems = [],
   onFollowUpClick,
@@ -308,20 +288,14 @@ export function FreeFormInput({
   onRequestExpand,
 }: FreeFormInputProps) {
   const { t } = useTranslation()
-
-  // Default rotating placeholders for onboarding/empty state (i18n-aware). The keyboard tips are
-  // left out in compact (touch) layouts, where they are noise.
-  const defaultPlaceholders = React.useMemo(() => [
-    t("chatInput.placeholder.workOn"),
-    ...(compactMode ? [] : [t("chatInput.placeholder.shiftTab")]),
-    t("chatInput.placeholder.mention"),
-    t("chatInput.placeholder.labels"),
-    ...(compactMode ? [] : [
-      t("chatInput.placeholder.newLine"),
-      t("chatInput.placeholder.sidebar", { key: cmdKey }),
-      t("chatInput.placeholder.focusMode", { key: cmdKey }),
-    ]),
-  ], [t, compactMode])
+  const [selectedRepository, setSelectedRepository] = React.useState(() => initialRepository(sessionId, workspaceId))
+  React.useEffect(() => {
+    if (worktreeLocked && sessionId) clearDraftRepository(sessionId, workspaceId)
+    const selected = worktreeLocked ? undefined : pendingRepository ?? initialRepository(sessionId, workspaceId)
+    setSelectedRepository(selected)
+    if (selected && sessionId) setDraftRepository(selected, sessionId, workspaceId)
+  }, [sessionId, workspaceId, worktreeLocked, pendingRepository])
+  const needsRepository = requireWorktree && (isEmptySession || worktreeChoicePending) && !worktreeConfigured && !selectedRepository
 
   // Read connection default model, connections, and workspace info from context.
   // Uses optional variant so playground (no provider) doesn't crash.
@@ -342,14 +316,14 @@ export function FreeFormInput({
     return conn.defaultModel ?? null
   }, [currentConnection, workspaceDefaultConnection, llmConnections])
 
-  // Decide which of the four picker UIs to render. The `switcher` branch
-  // wins over `locked-single` so users with a single-model pi_compat default
-  // can still reach the connection list on a fresh session (#727).
+  // Keep the desktop picker compact on existing chats too; model selection
+  // still respects the session connection lock.
   const pickerMode = derivePickerMode({
     connectionUnavailable,
     connectionDefaultModel,
     isEmptySession,
     connectionCount: llmConnections.length,
+    keepHierarchy: true,
   })
 
   // Compute available models from the effective connection.
@@ -366,7 +340,7 @@ export function FreeFormInput({
       return ANTHROPIC_MODELS // Safety net — shouldn't happen
     }
 
-    return connection.models || ANTHROPIC_MODELS
+    return sortPickerModels(connection.models || ANTHROPIC_MODELS)
   }, [llmConnections, currentConnection, workspaceDefaultConnection, connectionUnavailable])
 
   // Disable thinking selector when the current model explicitly doesn't support it
@@ -381,15 +355,7 @@ export function FreeFormInput({
     const model = availableModels.find(m =>
       typeof m === 'string' ? m === modelToDisplay : m.id === modelToDisplay
     )
-    if (!model) {
-      // Fallback: use helper function to format unknown model IDs nicely
-      return stripPiPrefixForDisplay(getModelDisplayName(modelToDisplay))
-    }
-    if (typeof model === 'string') return stripPiPrefixForDisplay(model)
-    // Defensive: partial entries (custom-endpoint user-config or vision-toggle
-    // promotions) may lack `name`. Fall back to the id so the trigger button
-    // never goes blank.
-    return model.name ?? stripPiPrefixForDisplay(model.id)
+    return getPickerModelName(model ?? modelToDisplay)
   }, [availableModels, currentModel, connectionDefaultModel])
 
   // Group connections by provider type for hierarchical dropdown.
@@ -417,9 +383,10 @@ export function FreeFormInput({
   }, [llmConnections, effectiveConnection])
 
   const claudeAccountConnectors = !!effectiveConnectionDetails && isClaudeAccountConnection(effectiveConnectionDetails)
+    && !configuredSources.some(source => source.claudeAccount?.proxy)
   // Keep the source picker and @mentions limited to Craft API/local sources for Claude accounts.
   const sources = React.useMemo(
-    () => claudeAccountConnectors ? configuredSources.filter(source => source.config.type !== 'mcp') : configuredSources,
+    () => configuredSources.filter(source => (!source.claudeAccount || !!source.claudeAccount.proxy) && (!claudeAccountConnectors || source.config.type !== 'mcp')),
     [configuredSources, claudeAccountConnectors],
   )
 
@@ -444,31 +411,10 @@ export function FreeFormInput({
   const appShellContext = useOptionalAppShellContext()
   const isFocusedPanel = appShellContext?.isFocusedPanel ?? true
 
-  // In compact mode, suppress desktop-keyboard guidance that is noisy or misleading on
-  // narrow/mobile-like layouts: the defaults drop their keyboard tips above, and caller-provided
-  // lists drop entries that mention keys.
-  const placeholderOptions = React.useMemo(() => {
-    if (placeholder === undefined) return defaultPlaceholders
-    if (!Array.isArray(placeholder)) return placeholder
-    if (!compactMode) return placeholder
-    return placeholder.filter((entry) => {
-      const lower = entry.toLowerCase()
-      return !lower.includes('shift + tab')
-        && !lower.includes('shift + return')
-        && !lower.includes('toggle the sidebar')
-        && !lower.includes('focus mode')
-        && !lower.includes('⌘')
-        && !lower.includes('ctrl')
-    })
-  }, [placeholder, compactMode, defaultPlaceholders])
-
-  // Shuffle placeholder order once per mount so each session feels fresh.
-  // Hide placeholder entirely when panel is unfocused in multi-panel layout
-  const shuffledPlaceholder = React.useMemo(
-    () => Array.isArray(placeholderOptions) ? shuffleArray(placeholderOptions) : placeholderOptions,
-    [] // eslint-disable-line react-hooks/exhaustive-deps -- intentionally shuffle only on mount
-  )
-  const effectivePlaceholder = isFocusedPanel ? shuffledPlaceholder : ''
+  // One fixed prompt, also when callers provide legacy placeholder arrays.
+  const fixedPlaceholder = (Array.isArray(placeholder) ? placeholder[0] : placeholder)
+    ?? t('chatInput.placeholder.workOn')
+  const effectivePlaceholder = isFocusedPanel ? fixedPlaceholder : ''
 
   // Performance optimization: Always use internal state for typing to avoid parent re-renders
   // Sync FROM parent on mount/change (for restoring drafts)
@@ -539,27 +485,6 @@ export function FreeFormInput({
     onAttachmentsChangeRef.current?.(attachments)
   }, [attachments])
 
-  // Optimistic state for source selection - updates UI immediately before IPC round-trip completes
-  const [optimisticSourceSlugs, setOptimisticSourceSlugs] = React.useState(enabledSourceSlugs)
-  const visibleSelectedSourceSlugs = React.useMemo(
-    () => optimisticSourceSlugs.filter(slug => sources.some(source => source.config.slug === slug)),
-    [optimisticSourceSlugs, sources],
-  )
-
-  // Sync from prop when server state changes (reconciles after IPC or on external updates)
-  // Use content comparison (not reference) to avoid infinite loops with empty arrays
-  const prevEnabledSourceSlugsRef = React.useRef(enabledSourceSlugs)
-  React.useEffect(() => {
-    const prev = prevEnabledSourceSlugsRef.current
-    const changed = enabledSourceSlugs.length !== prev.length ||
-      enabledSourceSlugs.some((slug, i) => slug !== prev[i])
-
-    if (changed) {
-      setOptimisticSourceSlugs(enabledSourceSlugs)
-      prevEnabledSourceSlugsRef.current = enabledSourceSlugs
-    }
-  }, [enabledSourceSlugs])
-
   // Sync from parent when inputValue changes externally (e.g., switching sessions)
   const prevInputValueRef = React.useRef(coerceInputText(inputValue))
   React.useEffect(() => {
@@ -601,7 +526,6 @@ export function FreeFormInput({
 
   const [isDraggingOver, setIsDraggingOver] = React.useState(false)
   const [loadingCount, setLoadingCount] = React.useState(0)
-  const [sourceDropdownOpen, setSourceDropdownOpen] = React.useState(false)
   const [isFocused, setIsFocused] = React.useState(false)
   const [modelDropdownOpen, setModelDropdownOpen] = React.useState(false)
 
@@ -638,7 +562,6 @@ export function FreeFormInput({
   const contentScrollRef = React.useRef<HTMLDivElement>(null)
   const availableHeight = useInputAvailableHeight(containerRef, maxHeight === undefined)
   const composerMaxHeight = maxHeight ?? getComposerMaxHeight(availableHeight, 'freeform')
-  const sourceButtonRef = React.useRef<HTMLButtonElement>(null)
   const fileInputRef = React.useRef<HTMLInputElement>(null)
 
   // Merge refs for RichTextInput
@@ -894,19 +817,10 @@ export function FreeFormInput({
     return () => window.removeEventListener('craft:paste-files', handlePasteFiles as unknown as EventListener)
   }, [disabled, sessionId, isFocusedPanel, richInputRef, refuseOversizedAttachment])
 
-  // Build active commands list for slash command menu
-  const activeCommands = React.useMemo(() => {
-    const active: SlashCommandId[] = []
-    // Add the currently active permission mode
-    if (permissionMode) active.push(permissionMode)
-    return active
-  }, [permissionMode])
-
-  // Handle slash command selection (mode/feature commands)
+  const activeCommands: SlashCommandId[] = []
   const handleSlashCommand = React.useCallback((commandId: SlashCommandId) => {
-    if (isPermissionMode(commandId)) onPermissionModeChange?.(commandId)
-    else if (commandId === 'compact' && !isProcessing) onSubmit('/compact', undefined)
-  }, [onPermissionModeChange, isProcessing, onSubmit])
+    if (commandId === 'compact' && !isProcessing) onSubmit('/compact', undefined)
+  }, [isProcessing, onSubmit])
 
   // Handle folder selection from slash command menu
   const handleSlashFolderSelect = React.useCallback((path: string) => {
@@ -927,29 +841,11 @@ export function FreeFormInput({
     })
   }, [workspaceId])
 
-  // Inline slash command hook (modes, features, and folders); Guarded only while it is offered
-  const availableModes = useAvailablePermissionModes(permissionMode)
+  // Slash commands retain features and folders; chats always execute.
 
-  // Coding mode is about a folder's code: turning it on asks for one (the chip's popover offers a new
-  // worktree or an existing folder; "existing" opens this picker)
-  const codingFolderPicker = useDirectoryPicker(React.useCallback((path: string) => {
-    onWorkingDirectoryChange?.(path)
-  }, [onWorkingDirectoryChange]))
-  const { pickDirectory: pickCodingFolder } = codingFolderPicker
-  const hasWorkingFolder = !!workingDirectory && workingDirectory !== sessionFolderPath
-  const handleCodingModeToggle = React.useCallback((enabled: boolean) => {
-    onCodingModeChange?.(enabled)
-  }, [onCodingModeChange])
-  const codingWorkspaceSetup = React.useMemo(() => (onWorkingDirectoryChange ? {
-    workspaceId,
-    sessionId,
-    currentFolder: hasWorkingFolder ? workingDirectory : undefined,
-    onUseExistingFolder: pickCodingFolder,
-    onWorktreeCreated: onWorkingDirectoryChange,
-  } : undefined), [onWorkingDirectoryChange, workspaceId, sessionId, hasWorkingFolder, workingDirectory, pickCodingFolder])
   const inlineSlash = useInlineSlashCommand({
     inputRef: richInputRef,
-    modes: availableModes,
+    modes: [],
     onSelectCommand: handleSlashCommand,
     onSelectFolder: handleSlashFolderSelect,
     activeCommands,
@@ -957,29 +853,12 @@ export function FreeFormInput({
     homeDir,
   })
 
-  // Handle mention selection (sources, skills, files)
-  const handleMentionSelect = React.useCallback((item: MentionItem) => {
-    // For sources: enable the source immediately
-    if (item.type === 'source' && item.source && onSourcesChange) {
-      const slug = item.source.config.slug
-      if (!optimisticSourceSlugs.includes(slug)) {
-        const newSlugs = [...optimisticSourceSlugs, slug]
-        setOptimisticSourceSlugs(newSlugs)
-        onSourcesChange(newSlugs)
-      }
-    }
-
-    // Files via @ mention in text are sufficient context for the agent.
-    // Skills also don't need special handling beyond text insertion.
-  }, [optimisticSourceSlugs, onSourcesChange])
-
   // Inline mention hook (for skills, sources, and files)
   const inlineMention = useInlineMention({
     inputRef: richInputRef,
     skills,
     sources,
     basePath: workingDirectory,
-    onSelect: handleMentionSelect,
     // Use workspace slug (not UUID) for SDK skill qualification
     workspaceId: workspaceSlug,
   })
@@ -1255,7 +1134,7 @@ export function FreeFormInput({
     if (!hasContent || disabled) return false
 
     // Tutorial may disable sending to guide user through specific steps
-    if (disableSend) return false
+    if (disableSend || needsRepository) return false
 
     // Too much to send in one message: say so and keep the draft (the send would drop the connection)
     const sizeProblem = checkAttachmentSizes(attachments, maxMessageBytesRef.current)
@@ -1268,15 +1147,6 @@ export function FreeFormInput({
     const skillSlugs = skills.map(s => s.slug)
     const sourceSlugs = sources.map(s => s.config.slug)
     const mentions = parseMentions(input, skillSlugs, sourceSlugs)
-
-    // Enable any mentioned sources that aren't already enabled
-    if (mentions.sources.length > 0 && onSourcesChange) {
-      const newSlugs = [...new Set([...optimisticSourceSlugs, ...mentions.sources])]
-      if (newSlugs.length > optimisticSourceSlugs.length) {
-        setOptimisticSourceSlugs(newSlugs)
-        onSourcesChange(newSlugs)
-      }
-    }
 
     const attachmentSnapshot = attachments
 
@@ -1299,7 +1169,7 @@ export function FreeFormInput({
     })
 
     return true
-  }, [input, attachments, followUpItems, disabled, disableSend, onInputChange, onAttachmentsChange, onSubmit, skills, sources, optimisticSourceSlugs, onSourcesChange, onWorkingDirectoryChange, homeDir, showAttachmentSizeProblem])
+  }, [input, attachments, followUpItems, disabled, disableSend, needsRepository, onInputChange, onAttachmentsChange, onSubmit, skills, sources, onWorkingDirectoryChange, homeDir, showAttachmentSizeProblem])
 
   // Listen for craft:submit-input events (simulate pressing the Send button)
   React.useEffect(() => {
@@ -1430,29 +1300,10 @@ export function FreeFormInput({
   // Handle input changes from RichTextInput
   const handleInputChange = React.useCallback((value: string) => {
     const nextValue = coerceInputText(value)
-    // Get previous input value before updating state
-    const prevValue = inputRef.current
-
     setInput(nextValue)
     syncToParent(nextValue) // Debounced sync to parent for draft persistence
 
-    // Sync source selection when mentions are removed from input
-    if (onSourcesChange) {
-      const sourceSlugs = sources.map(s => s.config.slug)
-
-      // Parse mentions from previous and current input
-      const prevMentions = parseMentions(prevValue, [], sourceSlugs)
-      const currMentions = parseMentions(nextValue, [], sourceSlugs)
-
-      // Remove sources that were mentioned before but not anymore
-      const removedSources = prevMentions.sources.filter(slug => !currMentions.sources.includes(slug))
-      if (removedSources.length > 0) {
-        const newSlugs = optimisticSourceSlugs.filter(slug => !removedSources.includes(slug))
-        setOptimisticSourceSlugs(newSlugs)
-        onSourcesChange(newSlugs)
-      }
-    }
-  }, [syncToParent, sources, optimisticSourceSlugs, onSourcesChange])
+  }, [syncToParent])
 
   // Handle input with cursor position (for menu detection)
   const handleRichInput = React.useCallback((value: string, cursorPosition: number) => {
@@ -1579,21 +1430,10 @@ export function FreeFormInput({
     && !!effectiveConnectionDetails
     && isCompatProvider(effectiveConnectionDetails.providerType)
     && !modelSupportsImages(effectiveConnectionDetails, currentModel)
-  const contextDisplay = getContextDisplay(contextStatus, getModelContextWindow(currentModel))
-  const contextLabels = getContextDisplayLabels(contextDisplay, t)
 
   React.useLayoutEffect(() => {
     if (contentScrollRef.current) scrollFocusedCaretIntoView(contentScrollRef.current)
   }, [composerMaxHeight, attachments, followUpItems, showVisionWarning, isCollapsedInCompact])
-
-  const handleToggleSourceSlug = (slug: string) => {
-    const isEnabled = optimisticSourceSlugs.includes(slug)
-    const newSlugs = isEnabled
-      ? optimisticSourceSlugs.filter(currentSlug => currentSlug !== slug)
-      : [...optimisticSourceSlugs, slug]
-    setOptimisticSourceSlugs(newSlugs)
-    onSourcesChange?.(newSlugs)
-  }
 
   return (
     <form onSubmit={handleSubmit}>
@@ -1766,9 +1606,8 @@ export function FreeFormInput({
             onChange={handleFileInputChange}
           />
 
-          {/* Left: attach, sources, working folder. Compact, and desktop panels under 32rem, show
-              the chips icon-only (their names stay in tooltips/aria-labels) so the model keeps its
-              name. Desktop keeps the three icons (96px) while the row still leaves 11rem for mode ·
+          {/* Left: attachments and repository context. Compact folder badges can collapse to
+              icons while repository labels stay short. The row leaves 11rem for mode ·
               model · context · Send; in a narrower row that floor gives way so Send is never pushed
               out. overflow-hidden is safe — popovers/drawers portal. */}
           <div className={cn(
@@ -1789,24 +1628,13 @@ export function FreeFormInput({
             className="input-toolbar-btn"
           />
 
-          {/* Source selector chip - only show if onSourcesChange is provided */}
-          {onSourcesChange && (
-            <ComposerSourcesChip
-              compact={compactMode}
-              sources={sources}
-              selectedSlugs={visibleSelectedSourceSlugs}
-              onToggleSlug={handleToggleSourceSlug}
-              open={sourceDropdownOpen}
-              setOpen={setSourceDropdownOpen}
-              isEmptySession={isEmptySession}
-              disabled={disabled}
-              buttonRef={sourceButtonRef}
-              claudeAccountConnectors={claudeAccountConnectors}
-            />
-          )}
-
           {/* Working directory chip */}
-          {onWorkingDirectoryChange && (compactMode ? (
+          {(requireWorktree && (isEmptySession || worktreeChoicePending || !!worktreeRepository)) || worktreeLocked ? (
+            <ComposerRepositorySelector key={sessionId} workspaceId={workspaceId} sessionId={sessionId}
+              repository={worktreeLocked ? undefined : selectedRepository}
+              repositoryPath={worktreeRepository} worktreePath={workingDirectory} branch={worktreeBranch} locked={worktreeLocked || (!isEmptySession && !worktreeChoicePending)} disabled={disabled}
+              onChoose={setSelectedRepository} />
+          ) : onWorkingDirectoryChange && (compactMode ? (
             <CompactWorkingDirectorySelector
               workingDirectory={workingDirectory}
               onWorkingDirectoryChange={onWorkingDirectoryChange}
@@ -1824,18 +1652,6 @@ export function FreeFormInput({
             />
           ))}
 
-          {/* Coding mode chip — next to the folder: the mode is about the folder's code */}
-          {onCodingModeChange && onContinueWithCodingMode && (
-            <ComposerCodingChip
-              enabled={codingMode}
-              locked={!isEmptySession}
-              compact={compactMode}
-              disabled={disabled}
-              onToggle={handleCodingModeToggle}
-              onContinueInNewSession={onContinueWithCodingMode}
-              workspaceSetup={codingWorkspaceSetup}
-            />
-          )}
           </div>
 
           {/* Spacer — doubles as a tap / hover target while the input is
@@ -1855,26 +1671,16 @@ export function FreeFormInput({
             <div className="flex-1" />
           )}
 
-          {/* Right: mode · model absorb the squeeze — the model label truncates, and in narrow
-              panels the mode chip folds to its icon. Context and Send sit outside this group and
-              never shrink, so Send stays inside the card (craft-agents-oss#798). The 4px inset
-              keeps focus rings visible inside the clipping group. */}
+          {/* Model selection truncates as needed, keeping Context and Send visible. */}
           <div className="-m-1 flex min-w-0 shrink items-center gap-1 overflow-hidden p-1">
-          {compactMode
-            ? onPermissionModeChange && (
-              <CompactPermissionModeSelector
-                permissionMode={permissionMode}
-                onPermissionModeChange={onPermissionModeChange}
-              />
-            )
-            : showPermissionModeChip && (
-              <ComposerModeChip
-                permissionMode={permissionMode}
-                onPermissionModeChange={onPermissionModeChange}
-                sessionId={sessionId}
-              />
-            )}
-
+          <ContextUsageIndicator
+            snapshot={contextStatus?.contextUsage}
+            reportedContextWindow={contextStatus?.contextWindow}
+            modelName={currentModelDisplayName}
+            modelContextWindow={getModelContextWindow(currentModel)}
+            isProcessing={isProcessing}
+            onCompact={() => onSubmit('/compact', [])}
+          />
           {/* Model/Connection selector — drawer in compact (when enabled), dropdown on desktop */}
           {compactMode ? (
             enableCompactModelPicker && (
@@ -1912,39 +1718,21 @@ export function FreeFormInput({
               thinkingLevel={thinkingLevel}
               thinkingDisabled={thinkingDisabled}
               onThinkingLevelChange={onThinkingLevelChange}
-              contextDisplay={contextDisplay}
-              contextLabels={contextLabels}
-              isCompacting={contextStatus?.isCompacting}
             />
           )}
 
           </div>
 
-          {/* Context usage meter. Percent text is truthful and may exceed 100%; action requires explicit canCompact. */}
-          <ContextUsageChip
-            display={contextDisplay}
-            labels={contextLabels}
-            isProcessing={isProcessing}
-            showMeter={!compactMode}
-            onCompact={() => onSubmit('/compact', [])}
-          />
 
           {/* Send/Stop Button - Always show stop when processing */}
           <SendButton
             isProcessing={isProcessing}
-            disabled={!hasContent || disabled || disableSend}
+            disabled={!hasContent || disabled || disableSend || needsRepository}
             onStop={() => handleStop(false)}
           />
           </div>
         </div>
       </div>
-      {/* Remote servers: folder browser for the coding-mode folder prompt (local uses the native dialog) */}
-      <ServerDirectoryBrowser
-        open={codingFolderPicker.showServerBrowser}
-        mode={codingFolderPicker.serverBrowserMode}
-        onSelect={codingFolderPicker.confirmServerBrowser}
-        onCancel={codingFolderPicker.cancelServerBrowser}
-      />
     </form>
   )
 }

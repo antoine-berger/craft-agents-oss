@@ -32,7 +32,7 @@ describe('chat header label fit', () => {
   it('shows only the counter when the first chip is too wide', () => {
     expect(headerLabelFitCount([140, 20, 20, 20], 100, 24)).toBe(0)
   })
-  it('honours a one-chip cap (Coding mode)', () => {
+  it('honours an explicit one-chip cap', () => {
     // One label: no counter
     expect(headerLabelFitCount([50], 200, 24, 4, 1)).toBe(1)
     // Past the cap: one chip and "+N", even with room to spare

@@ -183,6 +183,9 @@ describe('mid-stream queue runtime invariants', () => {
     const agent = {
       getModel: () => 'claude-sonnet-4-6',
       setAllSources: () => {},
+      // No source transports in this fixture; keep the normal source synchronization boundary.
+      getSummarizeCallback: () => undefined,
+      setSourceServers: async () => {},
       getSessionId: () => 'sdk-session',
       chat: async function* () {
         yield { type: 'context_usage', contextUsage: { usedTokens: 12_000, limitTokens: 200_000, limitKind: 'compaction', isEstimate: true, isStale: false, canCompact: true } }
@@ -207,6 +210,9 @@ describe('mid-stream queue runtime invariants', () => {
     agent.debug = () => {}
     agent.getModel = () => 'claude-sonnet-4-6'
     agent.setAllSources = () => {}
+    // This prototype-only backend has no SourceManager; this suite exercises turn routing.
+    agent.getSummarizeCallback = () => undefined
+    agent.setSourceServers = async () => {}
     agent.getSessionId = () => 'offline-sdk'
     agent.chat = agent.chatImpl.bind(agent)
     const acceptedIds: string[] = []
@@ -244,6 +250,9 @@ describe('mid-stream queue runtime invariants', () => {
     agent.debug = () => {}
     agent.getModel = () => 'claude-sonnet-4-6'
     agent.setAllSources = () => {}
+    // This prototype-only backend has no SourceManager; this suite exercises turn routing.
+    agent.getSummarizeCallback = () => undefined
+    agent.setSourceServers = async () => {}
     agent.getSessionId = () => 'offline-sdk'
     agent.chat = agent.chatImpl.bind(agent)
     const gates = [Promise.withResolvers<void>(), Promise.withResolvers<void>()]

@@ -7,9 +7,8 @@
  *
  * Precedence (highest first):
  *   1. unavailable     — current connection is gone / error state
- *   2. switcher        — empty session AND multiple connections configured
- *                        (lets the user pick a different connection BEFORE
- *                        the first message locks the session to one)
+ *   2. switcher        — multiple connections configured, before the first
+ *                        message or with the desktop hierarchy retained
  *   3. locked-single   — `pi_compat` connection with ≤1 model and no
  *                        switcher available (mid-session, or only one
  *                        connection configured)
@@ -31,11 +30,13 @@ export interface PickerModeInput {
   isEmptySession: boolean
   /** Total number of configured connections in the workspace. */
   connectionCount: number
+  /** Keep the desktop connection hierarchy after the first message. */
+  keepHierarchy?: boolean
 }
 
 export function derivePickerMode(input: PickerModeInput): PickerMode {
   if (input.connectionUnavailable) return 'unavailable'
-  if (input.isEmptySession && input.connectionCount > 1) return 'switcher'
+  if (input.connectionCount > 1 && (input.isEmptySession || input.keepHierarchy)) return 'switcher'
   if (input.connectionDefaultModel != null) return 'locked-single'
   return 'flat'
 }

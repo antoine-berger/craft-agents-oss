@@ -98,6 +98,8 @@ export interface EntityRowProps {
   hideMoreButton?: boolean
   /** Accessible name of the "⋯" button, e.g. "Actions for Weekly digest" (defaults to "More") */
   moreButtonLabel?: string
+  /** Direct row action replacing the dropdown trigger; the context menu stays available. */
+  actionButton?: { icon: React.ReactNode; label: string; onClick: () => void }
   /** Whether to render the menu surface in compact (drawer) mode. Pass-through
    *  from the consumer so EntityRow stays generic and usable from playground /
    *  non-AppShell surfaces. Only meaningful in combination with `compactMenu`. */
@@ -144,6 +146,7 @@ export function EntityRow({
   contextMenuContent,
   hideMoreButton = false,
   moreButtonLabel,
+  actionButton,
   isCompactMode = false,
   compactMenu,
   buttonProps,
@@ -269,7 +272,7 @@ export function EntityRow({
     : contextMenuContent ?? menuContent
 
   const anyMenuOpen = menuOpen || contextMenuOpen || compactMenuOpen
-  const hasMoreButton = (!!menuContent || useCompactMenu) && !hideMoreButton
+  const hasMoreButton = (!!actionButton || !!menuContent || useCompactMenu) && !hideMoreButton
   const moreLabel = moreButtonLabel ?? t('common.more')
   const iconSpacer = icon ? (
     <div className="shrink-0 flex items-center gap-2 [&>*]:size-4 invisible" aria-hidden="true">
@@ -412,7 +415,18 @@ export function EntityRow({
           )}
           onMouseDown={(e) => e.stopPropagation()}
         >
-          {useCompactMenu ? (
+          {actionButton ? (
+            <button
+              type="button"
+              tabIndex={useCompactMenu ? undefined : -1}
+              aria-label={actionButton.label}
+              title={actionButton.label}
+              onClick={(event) => { event.stopPropagation(); actionButton.onClick() }}
+              className={cn("inline-grid place-items-center rounded-sm text-secondary hover:bg-fill-pressed hover:text-foreground", useCompactMenu ? "size-9" : "size-6")}
+            >
+              {actionButton.icon}
+            </button>
+          ) : useCompactMenu ? (
             <button
               type="button"
               onClick={() => setCompactMenuOpen(true)}

@@ -68,7 +68,7 @@ describe('resolveRepo', () => {
 describe('localStatus', () => {
   it('is clean and level right after a push', async () => {
     const head = git(clone, 'rev-parse', 'HEAD')
-    expect(await localStatus(clone, head)).toEqual({ localAhead: 0, localDirty: false })
+    expect(await localStatus(clone, head)).toEqual({ localAhead: 0, localDirty: false, headMatchesLocal: true })
   })
 
   it('counts unpushed commits and sees uncommitted files', async () => {
@@ -77,7 +77,7 @@ describe('localStatus', () => {
     git(clone, 'add', '.')
     git(clone, 'commit', '-m', 'local only')
     writeFileSync(join(clone, 'untracked.txt'), 'u')
-    expect(await localStatus(clone, prHead)).toEqual({ localAhead: 1, localDirty: true })
+    expect(await localStatus(clone, prHead)).toEqual({ localAhead: 1, localDirty: true, headMatchesLocal: false })
     // An unknown PR head falls back to the push branch
     expect((await localStatus(clone, 'f'.repeat(40))).localAhead).toBe(1)
   })
@@ -87,10 +87,11 @@ describe('watchRefs', () => {
   it('fires when the branch moves', async () => {
     const repo = (await resolveRepo(clone))!
     let fired = 0
-    const stop = watchRefs(repo, () => fired++, 50)
+    const stop = watchRefs(repo, () => fired++, 50, 100)
     await new Promise(r => setTimeout(r, 100))
     git(clone, 'commit', '--allow-empty', '-m', 'move')
-    await new Promise(r => setTimeout(r, 600))
+    const deadline = Date.now() + 3000
+    while (!fired && Date.now() < deadline) await new Promise(r => setTimeout(r, 25))
     stop()
     expect(fired).toBeGreaterThanOrEqual(1)
   })

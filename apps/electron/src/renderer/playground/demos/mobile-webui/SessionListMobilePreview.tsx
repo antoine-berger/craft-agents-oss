@@ -49,6 +49,7 @@ export function SessionListMobilePreview({
       <MobileWebUIFrame device={device} showBezel={showBezel}>
         <div className="flex flex-col h-full bg-background">
           <SessionList
+            onNewSession={() => {}}
             items={items}
             onDelete={async (id) => {
               console.log('[Mobile SessionList] onDelete', id)

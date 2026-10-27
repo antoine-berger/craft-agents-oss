@@ -1,3 +1,4 @@
+import { initialRepository, seedSelectedRepositories } from './components/app-shell/input/repository-history'
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useTheme } from '@/hooks/useTheme'
@@ -506,13 +507,12 @@ export default function App() {
         ...current,
         permissionMode: session.permissionMode ?? defaultSessionOptions.permissionMode,
         thinkingLevel: session.thinkingLevel ?? DEFAULT_THINKING_LEVEL,
-        codingMode: session.codingMode === true,
       }
 
       const hasNonDefaultMode = merged.permissionMode !== defaultSessionOptions.permissionMode
       const hasNonDefaultThinking = merged.thinkingLevel !== DEFAULT_THINKING_LEVEL
 
-      if (!hasNonDefaultMode && !hasNonDefaultThinking && !merged.codingMode && merged.permissionModeVersion == null) {
+      if (!hasNonDefaultMode && !hasNonDefaultThinking && merged.permissionModeVersion == null) {
         next.delete(session.id)
       } else {
         next.set(session.id, merged)
@@ -553,17 +553,17 @@ export default function App() {
       // Initialize per-session atoms and metadata map
       // NOTE: No sessionsAtom used - sessions are only in per-session atoms
       initializeSessions(loadedSessions)
+      seedSelectedRepositories(loadedSessions)
 
       // Initialize unified sessionOptions from session data
       const optionsMap = new Map<string, SessionOptions>()
       for (const s of loadedSessions) {
         const hasNonDefaultMode = s.permissionMode && s.permissionMode !== 'ask'
         const hasNonDefaultThinking = s.thinkingLevel && s.thinkingLevel !== DEFAULT_THINKING_LEVEL
-        if (hasNonDefaultMode || hasNonDefaultThinking || s.codingMode) {
+        if (hasNonDefaultMode || hasNonDefaultThinking) {
           optionsMap.set(s.id, {
             permissionMode: s.permissionMode ?? 'ask',
             thinkingLevel: s.thinkingLevel ?? DEFAULT_THINKING_LEVEL,
-            codingMode: s.codingMode === true,
           })
         }
       }
@@ -896,15 +896,6 @@ export default function App() {
             }
             break
           }
-          case 'coding_mode_changed': {
-            // Another window or client changed it (this one already applied it optimistically)
-            setSessionOptions(prevOpts => {
-              const next = new Map(prevOpts)
-              next.set(effect.sessionId, mergeSessionOptions(next.get(effect.sessionId), { codingMode: effect.codingMode }))
-              return next
-            })
-            break
-          }
           case 'credential_request': {
             setPendingCredentials(prevCreds => {
               const next = new Map(prevCreds)
@@ -1194,7 +1185,7 @@ export default function App() {
   }, [])
 
   const handleCreateSession = useCallback(async (workspaceId: string, options?: import('../shared/types').CreateSessionOptions): Promise<Session> => {
-    const session = await window.electronAPI.createSession(workspaceId, options)
+    const session = await window.electronAPI.createSession(workspaceId, { ...options, permissionMode: 'allow-all' })
     // Add to per-session atom and metadata map (no sessionsAtom)
     addSession(session)
     syncSessionOptionsFromSession(session)
@@ -1301,7 +1292,13 @@ export default function App() {
       // Capture pre-send processing state so we can flag mid-stream sends
       // for the queued badge (#616 follow-up — covers Pi steer path which
       // returns status 'accepted', not 'queued').
-      const sendingMidStream = store.get(sessionAtomFamily(sessionId))?.isProcessing === true
+      const beforeSend = store.get(sessionAtomFamily(sessionId))
+      const sendingMidStream = beforeSend?.isProcessing === true
+      const repository = !beforeSend?.worktree?.owned && (beforeSend?.worktree?.pendingRepository || beforeSend?.worktree?.needsRepository || !beforeSend?.messages.some(message => message.role === 'user'))
+        ? initialRepository(sessionId, beforeSend?.workspaceId ?? windowWorkspaceId ?? undefined) : undefined
+
+      // Confirm the real backend mode before sending, including resumed older chats.
+      await window.electronAPI.sessionCommand(sessionId, { type: 'setPermissionMode', mode: 'allow-all' })
 
       // Step 1: Store attachments and get persistent metadata
       let storedAttachments: StoredAttachment[] | undefined
@@ -1447,6 +1444,7 @@ export default function App() {
         skillSlugs,
         badges: badges.length > 0 ? badges : undefined,
         optimisticMessageId: userMessage.id,
+        repository,
       })
     } catch (error) {
       console.error('Failed to send message:', error)
@@ -1470,6 +1468,7 @@ export default function App() {
    * Handles persistence and backend sync for each option type.
    */
   const handleSessionOptionsChange = useCallback((sessionId: string, updates: SessionOptionUpdates) => {
+    if (updates.permissionMode !== undefined) updates = { ...updates, permissionMode: 'allow-all' }
     setSessionOptions(prev => {
       const next = new Map(prev)
       const current = next.get(sessionId) ?? defaultSessionOptions
@@ -1486,21 +1485,7 @@ export default function App() {
       // Sync thinking level change with backend (session-level, persisted)
       window.electronAPI.sessionCommand(sessionId, { type: 'setThinkingLevel', level: updates.thinkingLevel })
     }
-    if (updates.codingMode !== undefined) {
-      const enabled = updates.codingMode
-      // The server refuses once the conversation has started (the composer then offers a new
-      // session instead); roll the optimistic value back if it does
-      window.electronAPI.sessionCommand(sessionId, { type: 'setCodingMode', enabled }).catch((error: unknown) => {
-        setSessionOptions(prev => {
-          const next = new Map(prev)
-          next.set(sessionId, mergeSessionOptions(next.get(sessionId), { codingMode: !enabled }))
-          return next
-        })
-        toast.error(t('chat.codingMode.toggleFailed'), {
-          description: error instanceof Error ? error.message : String(error),
-        })
-      })
-    }
+
   }, [sessionOptions, t])
 
   // Handle input draft changes per session with debounced persistence

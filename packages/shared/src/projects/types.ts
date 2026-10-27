@@ -46,6 +46,8 @@ export interface ProjectConfig {
   id: string;
   slug: string;
   name: string;
+  /** Ordinary session pinned at the top of this project's chats. */
+  pilotSessionId?: string;
   /** Short description shown in lists/detail header */
   description?: string;
   /** Absolute path bound to this project; new sessions inherit it when not overridden */

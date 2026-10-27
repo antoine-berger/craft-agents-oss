@@ -1,6 +1,6 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, mock } from 'bun:test'
 import { execFileSync } from 'node:child_process'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -8,7 +8,8 @@ import type { CreateSessionOptions } from '@craft-agent/shared/protocol'
 import { setupI18n } from '@craft-agent/shared/i18n'
 import { getSessionFilePath, loadSession, readSessionHeader, sessionPersistenceQueue } from '@craft-agent/shared/sessions'
 import { createManagedSession, SessionManager } from './SessionManager.ts'
-import { resolveSessionWorktreePolicy } from './session-worktree.ts'
+import { getGitHubBranchPrefix } from '../services/repositories/github'
+import { resolveSessionWorktreePolicy, defaultSessionWorktreePolicy } from './session-worktree.ts'
 
 type ManagedSession = ReturnType<typeof createManagedSession>
 type Agent = NonNullable<ManagedSession['agent']>
@@ -22,6 +23,7 @@ type LifecycleHarness = {
   cleanupSessionWorktree(managed: ManagedSession): Promise<void>
   persistSession(managed: ManagedSession): void
   flushSession(sessionId: string): Promise<void>
+  prepareNewSessionWorktree(workspaceId: string, sessionId: string, repositoryPath: string): Promise<{ path: string; branch: string }>
 }
 
 const gitEnv = {
@@ -37,11 +39,16 @@ let root: string
 let repository: string
 let workspace: ManagedSession['workspace']
 const sessionIds = new Set<string>()
+const originalPath = process.env.PATH
 
 beforeAll(() => { setupI18n() })
 
 beforeEach(() => {
   root = realpathSync(mkdtempSync(join(tmpdir(), 'session-worktree-lifecycle-')))
+  const bin = join(root, 'bin')
+  mkdirSync(bin)
+  writeFileSync(join(bin, 'gh'), '#!/bin/sh\nprintf "test-developer\\n"\n', { mode: 0o755 })
+  process.env.PATH = `${bin}:${originalPath ?? ''}`
   repository = join(root, 'repo')
   mkdirSync(repository)
   git(repository, 'init', '-b', 'main')
@@ -54,6 +61,7 @@ beforeEach(() => {
 })
 
 afterEach(async () => {
+  process.env.PATH = originalPath
   for (const id of sessionIds) {
     await sessionPersistenceQueue.flush(id)
     sessionPersistenceQueue.cancel(id)
@@ -130,6 +138,46 @@ function sendHarness() {
 }
 
 describe('SessionManager worktree lifecycle', () => {
+  it('keeps a repository choice as metadata until the first backend starts', async () => {
+    const { manager, createChat } = harness()
+    const chat = createChat({ messages: [], worktree: { repositoryPath: '', needsRepository: false,
+      pendingRepository: { kind: 'local', gitDir: join(repository, '.git'), name: 'repo' } } })
+    manager.persistSession(chat)
+    await manager.flushSession(chat.id)
+    expect(git(repository, 'worktree', 'list', '--porcelain').split('worktree ').length - 1).toBe(1)
+    expect(chat.worktree?.owned).toBeUndefined()
+    await manager.getOrCreateAgent(chat)
+    expect(chat.worktree?.owned?.status).toBe('ready')
+    expect(chat.worktree?.pendingRepository).toBeUndefined()
+    expect(chat.workingDirectory).not.toBe(repository)
+    expect(git(repository, 'worktree', 'list', '--porcelain').split('worktree ').length - 1).toBe(2)
+  })
+
+  it('creates distinct durable worktrees for two repository selections and resumes the same checkout after reload', async () => {
+    const { manager, createChat, restoreChat } = harness()
+    const a = createChat({ messages: [], worktree: { repositoryPath: root, needsRepository: true } })
+    const b = createChat({ messages: [], worktree: { repositoryPath: root, needsRepository: true } })
+    const first = await manager.prepareNewSessionWorktree(workspace.id, a.id, repository)
+    const second = await manager.prepareNewSessionWorktree(workspace.id, b.id, repository)
+    expect(first.path).not.toBe(second.path)
+    expect(first.branch).not.toBe(second.branch)
+    expect(first.branch).toStartWith(`${await getGitHubBranchPrefix()}/`)
+    expect(first.path).not.toBe(repository)
+    expect(readFileSync(join(repository, 'code.txt'), 'utf8')).toBe('main checkout\n')
+    expect(restoreChat(a.id).worktree?.owned?.path).toBe(first.path)
+    expect(await manager.prepareNewSessionWorktree(workspace.id, a.id, repository)).toEqual(first)
+    await expect(manager.prepareNewSessionWorktree(workspace.id, a.id, root)).rejects.toThrow('Start a new chat')
+    await expect(manager.prepareNewSessionWorktree('another-workspace', b.id, repository)).rejects.toThrow('Session not found')
+  })
+
+  it('defaults independent repository sessions to worktrees while non-repository folders require selection', async () => {
+    expect(await defaultSessionWorktreePolicy(repository)).toMatchObject({ repositoryPath: repository, needsRepository: false })
+    expect(await defaultSessionWorktreePolicy(root)).toMatchObject({ repositoryPath: root, needsRepository: true })
+    expect(await defaultSessionWorktreePolicy(repository, { workingDirectory: repository })).toMatchObject({ repositoryPath: repository })
+    for (const options of [{ hidden: true }, { parentSessionId: 'parent' }, { systemPromptPreset: 'mini' }, { worktree: 'none' as const }]) {
+      expect(await defaultSessionWorktreePolicy(repository, options)).toBeUndefined()
+    }
+  })
   it('starts the first chat only after its isolated cwd and ownership are durable', async () => {
     const { manager, createChat, backendStarts } = harness()
     const managed = createChat()
@@ -149,7 +197,7 @@ describe('SessionManager worktree lifecycle', () => {
     expect(backendStarts[0]?.persisted?.llmConnection).toBe('claude-account-a')
     expect(backendStarts[0]?.persisted?.messages[0]?.content).toBe('Implement this feature')
     expect(manager.sendEvent).toHaveBeenCalledWith({
-      type: 'working_directory_changed', sessionId: managed.id, workingDirectory: owned.path,
+      type: 'working_directory_changed', sessionId: managed.id, workingDirectory: owned.path, worktree: managed.worktree,
     }, workspace.id)
     expect(git(repository, 'symbolic-ref', '--short', 'HEAD')).toBe('main')
     expect(git(repository, 'status', '--porcelain')).toBe('')
@@ -200,7 +248,7 @@ describe('SessionManager worktree lifecycle', () => {
     expect(first.backendStarts[0]?.persisted?.workingDirectory).toBe(expectedCwd)
     expect(first.backendStarts[0]?.persisted?.sdkCwd).toBe(expectedCwd)
     expect(first.manager.sendEvent).toHaveBeenCalledWith({
-      type: 'working_directory_changed', sessionId: original.id, workingDirectory: expectedCwd,
+      type: 'working_directory_changed', sessionId: original.id, workingDirectory: expectedCwd, worktree: original.worktree,
     }, workspace.id)
     original.sdkSessionId = 'sdk-project-subdirectory'
     first.manager.persistSession(original)
@@ -393,7 +441,7 @@ describe('SessionManager worktree lifecycle', () => {
     expect(worktreeCount()).toBe(2)
   })
 
-  it('requires ownership to reach disk before creating any Git checkout or reservation', async () => {
+  it('requires durable session ownership before creating Git refs or checkouts and retains a recoverable name reservation', async () => {
     const { manager, createChat } = harness()
     const managed = createChat()
     // A file in place of the workspace directory makes the real persistence
@@ -405,7 +453,13 @@ describe('SessionManager worktree lifecycle', () => {
     const pending = managed.worktree!.owned!
     expect(pending.status).toBe('pending')
     expect(existsSync(pending.path)).toBe(false)
-    expect(existsSync(join(pending.gitDir, 'craft-session-worktrees'))).toBe(false)
+    // Human-readable names are reserved atomically in private metadata before the
+    // session header commits. A failed header write retains that recoverable lease,
+    // but must not create a branch ref or checkout.
+    const ownerKey = createHash('sha256').update(pending.ownerId).digest('hex')
+    const journal = JSON.parse(readFileSync(join(pending.gitDir, 'craft-session-worktrees', `${ownerKey}.json`), 'utf8'))
+    expect(journal).toMatchObject({ ownerId: pending.ownerId, token: pending.token, branch: pending.branch, status: 'pending' })
+    expect(journal.checkoutStarted).not.toBe(true)
     expect(git(repository, 'branch', '--list', pending.branch)).toBe('')
     expect(manager.getOrCreatePreparedAgent).not.toHaveBeenCalled()
     expect(worktreeCount()).toBe(1)

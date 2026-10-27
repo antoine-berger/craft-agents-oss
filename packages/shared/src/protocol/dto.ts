@@ -20,6 +20,7 @@ import type { ThinkingLevel } from '../agent/thinking-levels'
 import type { BoundPr, PrMonitorState } from './pr-watch'
 import type { CustomEndpointConfig } from '../config/llm-connections'
 import type { SessionWorktreeMetadata } from '../sessions/types'
+import type { RepositorySelection } from './git-repos'
 import type {
   AuthRequest as SharedAuthRequest,
   CredentialInputMode as SharedCredentialInputMode,
@@ -47,6 +48,7 @@ export type BuiltInStatusId = 'todo' | 'in-progress' | 'needs-review' | 'done' |
  * Extends core Session with messages array and processing state.
  */
 export interface Session {
+  importedFrom?: import('./conductor-import').ConductorImportOrigin
   id: string
   workspaceId: string
   workspaceName: string
@@ -78,11 +80,9 @@ export interface Session {
   model?: string
   llmConnection?: string
   thinkingLevel?: ThinkingLevel
-  /** Coding mode: lean coding prompt + session-tool profile (fixed once the session has messages) */
-  codingMode?: boolean
-  /** Coding mode: PRs pinned to this session (chat-header PR carousel; see pr_bind / pr_unbind) */
+  /** PRs pinned to this session (chat-header PR carousel; see pr_bind / pr_unbind) */
   boundPrs?: BoundPr[]
-  /** Coding mode: per-PR monitor state (auto-fix), keyed by PR id */
+  /** Per-PR monitor state (auto-fix), keyed by PR id */
   prMonitors?: Record<string, PrMonitorState>
   lastMessageRole?: 'user' | 'assistant' | 'plan' | 'tool' | 'error'
   lastFinalMessageId?: string
@@ -156,8 +156,6 @@ export interface CreateSessionOptions {
   hidden?: boolean
   /** Nobody answers prompts in this session (CLI runs): features that would add a prompt skip it. */
   unattended?: boolean
-  /** Start in coding mode (lean coding prompt + session-tool profile). Falls back to the workspace default. */
-  codingMode?: boolean
   sessionStatus?: SessionStatus
   labels?: string[]
   isFlagged?: boolean
@@ -434,6 +432,7 @@ export interface PermissionModeState {
 
 // turnId: Correlation ID from the API's message.id, groups all events in an assistant turn
 export type SessionEvent =
+  | { type: 'session_restored'; sessionId: string; session: Session }
   | { type: 'text_discard'; sessionId: string; turnId: string }
   | { type: 'retry'; sessionId: string; phase: 'backoff'; message: string }
   | { type: 'retry'; sessionId: string; phase: 'active' | 'end' }
@@ -451,13 +450,12 @@ export type SessionEvent =
   | { type: 'title_generated'; sessionId: string; title: string }
   | { type: 'title_regenerating'; sessionId: string; isRegenerating: boolean }
   | { type: 'async_operation'; sessionId: string; isOngoing: boolean }
-  | { type: 'working_directory_changed'; sessionId: string; workingDirectory: string }
+  | { type: 'working_directory_changed'; sessionId: string; workingDirectory: string; worktree?: SessionWorktreeMetadata | null }
   | { type: 'permission_request'; sessionId: string; request: PermissionRequest }
   | { type: 'credential_request'; sessionId: string; request: CredentialRequest }
   | { type: 'permission_mode_changed'; sessionId: string; permissionMode: PermissionMode; previousPermissionMode?: PermissionMode; transitionDisplay?: string; modeVersion?: number; changedAt?: string; changedBy?: PermissionModeState['changedBy'] }
   | { type: 'plan_submitted'; sessionId: string; message: Message }
   | { type: 'sources_changed'; sessionId: string; enabledSourceSlugs: string[] }
-  | { type: 'coding_mode_changed'; sessionId: string; codingMode: boolean }
   | { type: 'labels_changed'; sessionId: string; labels: string[] }
   | { type: 'project_id_changed'; sessionId: string; projectId: string | null }
   | { type: 'connection_changed'; sessionId: string; connectionSlug: string; supportsBranching?: boolean }
@@ -489,6 +487,8 @@ export type SessionEvent =
   | { type: 'working_directory_error'; sessionId: string; error: string }
 
 export interface SendMessageOptions {
+  /** Captured with the first message; selecting it in the composer never touches Git. */
+  repository?: RepositorySelection
   skillSlugs?: string[]
   badges?: ContentBadge[]
   optimisticMessageId?: string
@@ -523,9 +523,7 @@ export type SessionCommand =
   | { type: 'setActiveViewing'; workspaceId: string }
   | { type: 'setPermissionMode'; mode: PermissionMode }
   | { type: 'setThinkingLevel'; level: ThinkingLevel }
-  | { type: 'setCodingMode'; enabled: boolean }
-  /** Coding mode is fixed once a session has messages: continue in a new session with it switched. Returns `{ sessionId }`. */
-  | { type: 'continueInNewSession'; codingMode: boolean }
+  | { type: 'continueInNewSession' }
   | { type: 'updateWorkingDirectory'; dir: string }
   | { type: 'setSources'; sourceSlugs: string[] }
   | { type: 'setLabels'; labels: string[] }
@@ -821,8 +819,6 @@ export interface WorkspaceSettings {
   permissionMode?: PermissionMode
   cyclablePermissionModes?: PermissionMode[]
   thinkingLevel?: ThinkingLevel
-  /** Start new sessions in coding mode */
-  codingMode?: boolean
   workingDirectory?: string
   localMcpEnabled?: boolean
   defaultLlmConnection?: string

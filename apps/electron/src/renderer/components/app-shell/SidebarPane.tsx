@@ -26,6 +26,7 @@ interface SidebarPaneProps {
   links: SidebarItem[]
   /** Pinned below the scrolling navigation */
   footerLinks: SidebarItem[]
+  footerTop?: React.ReactNode
   getItemProps?: React.ComponentProps<typeof LeftSidebar>["getItemProps"]
   focusedItemId?: string | null
   /** `openInNewWindow` is true for ⌘/Ctrl-click (same as before: Gmail-style compose) */
@@ -41,6 +42,7 @@ export function SidebarPane({
   onKeyDown,
   links,
   footerLinks,
+  footerTop,
   getItemProps,
   focusedItemId,
   onNewSession,
@@ -97,6 +99,7 @@ export function SidebarPane({
         {footerLinks.length > 0 && (
           <div className="shrink-0 pb-1.5">
             <div className="mx-4 h-px bg-separator" aria-hidden="true" />
+            {footerTop}
             <LeftSidebar
               isCollapsed={false}
               getItemProps={getItemProps}

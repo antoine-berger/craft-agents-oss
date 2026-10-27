@@ -1,9 +1,18 @@
-import { afterEach, describe, expect, it } from 'bun:test';
+import { afterAll, afterEach, beforeAll, describe, expect, it, spyOn } from 'bun:test';
 import { mkdtempSync, mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { PromptBuilder } from '../prompt-builder.ts';
+import * as configStorage from '../../../config/storage.ts';
+
+// The prompt depends on feature preferences; this fixture always enables the built-in browser.
+let restoreBrowser = () => {};
+beforeAll(() => {
+  const setting = spyOn(configStorage, 'getBrowserToolEnabled').mockReturnValue(true);
+  restoreBrowser = () => setting.mockRestore();
+});
+afterAll(() => restoreBrowser());
 
 const tempDirs: string[] = [];
 
@@ -40,7 +49,7 @@ describe('PromptBuilder developer context split', () => {
   });
 });
 
-describe('PromptBuilder agent profile', () => {
+describe('PromptBuilder capabilities', () => {
   const workspace = { id: 'workspace', name: 'Workspace', rootPath: '/tmp/craft-prompt-builder-ws' } as any;
   const session = { id: 'session-1' } as any;
 
@@ -49,29 +58,33 @@ describe('PromptBuilder agent profile', () => {
     expect(builder.buildStableContextParts().join('\n')).toContain('<workspace_capabilities>');
   });
 
-  it('drops workspace capabilities in coding mode, set at construction or later', () => {
-    expect(new PromptBuilder({ workspace, session, agentProfile: 'coding' }).buildStableContextParts().join('\n'))
-      .not.toContain('<workspace_capabilities>');
-
-    const builder = new PromptBuilder({ workspace, session });
-    builder.setAgentProfile('coding');
-    const stable = builder.buildStableContextParts().join('\n');
-    expect(stable).not.toContain('<workspace_capabilities>');
-    expect(stable).toContain('<working_directory>');
+  it('retains every workspace capability even when an obsolete untyped profile is supplied', () => {
+    const builder = new PromptBuilder({ workspace, session, agentProfile: 'coding' } as never);
+    expect(builder.buildStableContextParts().join('\n')).toContain('<workspace_capabilities>');
   });
 
-  it('clarifies native connectors on every Claude-account turn, including Coding sessions', () => {
-    for (const agentProfile of ['default', 'coding'] as const) {
-      const builder = new PromptBuilder({ workspace, session, agentProfile });
-      for (let turn = 0; turn < 2; turn++) {
-        const context = builder.buildContextParts({ claudeAccountConnectors: true }, '<sources>Active: none</sources>').join('\n');
-        expect(context).toContain('<claude_account_connectors>');
-        expect(context).toContain('managed only on claude.ai');
-        expect(context).toContain('does not mean native connectors are unavailable');
-        expect(context).toContain('when the tool\'s schema declares');
-        expect(context).not.toContain('local-mcp:');
-        expect(context).toContain('API and local sources');
-      }
+  it('updates capabilities in old SDK transcripts without replacing their identity', () => {
+    const legacy = { ...session, sdkSessionId: 'retained-sdk-session', codingMode: true };
+    const builder = new PromptBuilder({ workspace, session: legacy });
+    const context = builder.buildStableContextParts().join('\n');
+    expect(context).toContain('<application_instructions_update>');
+    expect(context).toContain('## Pages');
+    expect(context).toContain('## Session Self-Management');
+    expect(context).not.toContain('Coding mode');
+    expect(legacy.sdkSessionId).toBe('retained-sdk-session');
+    expect(new PromptBuilder({ workspace, session }).buildStableContextParts().join('\n')).not.toContain('<application_instructions_update>');
+  });
+
+  it('clarifies native connectors on every Claude-account turn', () => {
+    const builder = new PromptBuilder({ workspace, session });
+    for (let turn = 0; turn < 2; turn++) {
+      const context = builder.buildContextParts({ claudeAccountConnectors: true }, '<sources>Active: none</sources>').join('\n');
+      expect(context).toContain('<claude_account_connectors>');
+      expect(context).toContain('managed only on claude.ai');
+      expect(context).toContain('does not mean native connectors are unavailable');
+      expect(context).toContain("when the tool's schema declares");
+      expect(context).not.toContain('local-mcp:');
+      expect(context).toContain('API and local sources');
     }
   });
 

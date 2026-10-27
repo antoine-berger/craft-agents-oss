@@ -9,7 +9,7 @@ import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 import { useEffect, useState, useCallback, useMemo } from 'react'
 import { useAtomValue } from 'jotai'
-import { FolderKanban, FolderOpen, Plus, Trash2, Upload } from 'lucide-react'
+import { FolderKanban, FolderOpen, Plus, Trash2, Upload, Pin } from 'lucide-react'
 import { toast } from 'sonner'
 import { useActiveWorkspace, useAppShellContext } from '@/context/AppShellContext'
 import { navigate, routes } from '@/lib/navigate'
@@ -41,7 +41,7 @@ export default function ProjectInfoPage({ projectSlug }: ProjectInfoPageProps) {
   const workspace = useActiveWorkspace()
   const workspaceId = workspace?.id
   const sessionMetaMap = useAtomValue(sessionMetaMapAtom)
-  const { onCreateSession } = useAppShellContext()
+  const { onCreateSession, onNewSessionInProject, onOpenFile } = useAppShellContext()
 
   const [project, setProject] = useState<LoadedProject | null>(null)
   const [loading, setLoading] = useState(true)
@@ -51,7 +51,6 @@ export default function ProjectInfoPage({ projectSlug }: ProjectInfoPageProps) {
   const [editName, setEditName] = useState('')
   const [editDescription, setEditDescription] = useState('')
   const [editWorkingDir, setEditWorkingDir] = useState('')
-  const [editWorktreeEnabled, setEditWorktreeEnabled] = useState(false)
   const [editWorktreeBaseBranch, setEditWorktreeBaseBranch] = useState('')
   const [editWorktreeCleanup, setEditWorktreeCleanup] = useState(false)
   const [editDetails, setEditDetails] = useState('')
@@ -76,7 +75,6 @@ export default function ProjectInfoPage({ projectSlug }: ProjectInfoPageProps) {
       setEditName(loaded.config.name)
       setEditDescription(loaded.config.description ?? '')
       setEditWorkingDir(loaded.config.workingDirectory ?? '')
-      setEditWorktreeEnabled(loaded.config.worktreeSettings?.enabled === true)
       setEditWorktreeBaseBranch(loaded.config.worktreeSettings?.baseBranch ?? '')
       setEditWorktreeCleanup(loaded.config.worktreeSettings?.cleanupOnArchive === true)
       setEditDetails(loaded.config.details ?? '')
@@ -126,12 +124,16 @@ export default function ProjectInfoPage({ projectSlug }: ProjectInfoPageProps) {
         result.push({ id: meta.id, name: meta.name ?? meta.id })
       }
     }
-    return result
+    return result.sort((a, b) => Number(b.id === project.config.pilotSessionId) - Number(a.id === project.config.pilotSessionId))
   }, [project, sessionMetaMap])
 
   const handleStartSession = useCallback(async () => {
     if (!workspaceId || !project) return
     try {
+      if (onNewSessionInProject) {
+        onNewSessionInProject(project.config.id)
+        return
+      }
       const session = await onCreateSession(workspaceId, { projectId: project.config.id })
       if (session?.id) {
         navigate(routes.view.allSessions(session.id))
@@ -142,7 +144,7 @@ export default function ProjectInfoPage({ projectSlug }: ProjectInfoPageProps) {
         description: err instanceof Error ? err.message : undefined,
       })
     }
-  }, [workspaceId, project, onCreateSession, t])
+  }, [workspaceId, project, onCreateSession, onNewSessionInProject, t])
 
   const handleSaveSettings = useCallback(async () => {
     if (!workspaceId || !project) return
@@ -154,7 +156,7 @@ export default function ProjectInfoPage({ projectSlug }: ProjectInfoPageProps) {
         // An empty string survives the RPC's JSON encoding, so clearing the folder is persisted.
         workingDirectory: editWorkingDir.trim(),
         worktreeSettings: {
-          enabled: editWorktreeEnabled,
+          enabled: !!editWorkingDir.trim(),
           baseBranch: editWorktreeBaseBranch.trim() || undefined,
           cleanupOnArchive: editWorktreeCleanup,
         },
@@ -170,7 +172,7 @@ export default function ProjectInfoPage({ projectSlug }: ProjectInfoPageProps) {
     } finally {
       setSaving(false)
     }
-  }, [workspaceId, project, editName, editDescription, editWorkingDir, editWorktreeEnabled, editWorktreeBaseBranch, editWorktreeCleanup, editDetails, editColor, t])
+  }, [workspaceId, project, editName, editDescription, editWorkingDir, editWorktreeBaseBranch, editWorktreeCleanup, editDetails, editColor, t])
 
   const handleDeleteProject = useCallback(async () => {
     if (!workspaceId || !project) return
@@ -271,6 +273,7 @@ export default function ProjectInfoPage({ projectSlug }: ProjectInfoPageProps) {
                         onClick={() => navigate(routes.view.allSessions(s.id))}
                       >
                         <span className="truncate">{s.name}</span>
+                        {s.id === project.config.pilotSessionId && <Pin className="ml-auto size-3.5 text-muted-foreground" aria-label="Pinned" />}
                       </button>
                     </li>
                   ))}
@@ -362,14 +365,8 @@ export default function ProjectInfoPage({ projectSlug }: ProjectInfoPageProps) {
                     </Button>
                   </div>
                 </Field>
-                <SettingsToggle
-                  inCard={false}
-                  label={t('projectInfo.worktree.enabled')}
-                  description={t('projectInfo.worktree.enabledHint')}
-                  checked={editWorktreeEnabled}
-                  onCheckedChange={setEditWorktreeEnabled}
-                />
-                {editWorktreeEnabled && (
+                <p className="text-label-sm text-secondary">{t('chat.worktree.defaultHint')}</p>
+                {!!editWorkingDir.trim() && (
                   <div className="space-y-4">
                     {!editWorkingDir.trim() && (
                       <p className="text-label-sm text-destructive" role="alert">
@@ -421,7 +418,7 @@ export default function ProjectInfoPage({ projectSlug }: ProjectInfoPageProps) {
                     <Trash2 className="size-3.5" />
                     {t('projectInfo.deleteProject')}
                   </Button>
-                  <Button variant="primary" onClick={handleSaveSettings} disabled={saving || (editWorktreeEnabled && !editWorkingDir.trim())}>
+                  <Button variant="primary" onClick={handleSaveSettings} disabled={saving}>
                     {saving ? t('common.saving') : t('common.save')}
                   </Button>
                 </div>
@@ -443,7 +440,7 @@ export default function ProjectInfoPage({ projectSlug }: ProjectInfoPageProps) {
                     aria-label={t('projectInfo.openLocation')}
                     tooltip
                     icon={<FolderOpen className="size-3.5" />}
-                    onClick={() => window.electronAPI.openFile(project.folderPath)}
+                    onClick={() => onOpenFile(project.folderPath)}
                   />
                 </div>
               </Info_Table.Row>

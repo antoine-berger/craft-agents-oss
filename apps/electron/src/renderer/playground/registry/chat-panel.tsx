@@ -77,7 +77,6 @@ function createStubSession(id: string): Session {
 
 interface ChatPanelCodingDemoProps {
   prScenario?: PrScenario
-  codingMode?: boolean
   labelCount?: number
   longTitle?: boolean
   compact?: boolean
@@ -85,7 +84,6 @@ interface ChatPanelCodingDemoProps {
 
 function ChatPanelCodingDemo({
   prScenario = 'open-passing',
-  codingMode = true,
   labelCount = 3,
   longTitle = false,
   compact = false,
@@ -122,9 +120,8 @@ function ChatPanelCodingDemo({
     labels,
     workingDirectory: WORKING_DIRECTORY,
     sessionFolderPath: SESSION_FOLDER,
-    codingMode,
     createdAt: now - 20 * MINUTE,
-  }), [name, messages, mode, status, labels, codingMode])
+  }), [name, messages, mode, status, labels])
 
   const meta = React.useMemo<SessionMeta>(() => ({
     id: SESSION_ID,
@@ -133,9 +130,8 @@ function ChatPanelCodingDemo({
     labels,
     sessionStatus: status,
     workingDirectory: WORKING_DIRECTORY,
-    codingMode,
     lastMessageAt: now - 2 * MINUTE,
-  }), [name, labels, status, codingMode])
+  }), [name, labels, status])
   const sessions = React.useMemo(() => [meta], [meta])
 
   const appShell = React.useMemo<Partial<AppShellContextType>>(() => ({
@@ -197,7 +193,6 @@ function ChatPanelCodingDemo({
               workspaceId={WORKSPACE_ID}
               workingDirectory={WORKING_DIRECTORY}
               sessionFolderPath={SESSION_FOLDER}
-              codingMode={codingMode}
               compactMode={compact}
               enableCompactModelPicker={compact}
             />
@@ -211,14 +206,13 @@ function ChatPanelCodingDemo({
 export const chatPanelComponents: ComponentEntry[] = [
   {
     id: 'chat-panel-coding-mode',
-    name: 'Chat panel · Coding mode',
+    name: 'Chat panel',
     category: 'Chat',
     description: 'ChatHeader + ChatDisplay for a Coding-mode session: PR chip (hover opens the card, click pins it; its action is Resolve > Fix > Fix CI > tick) and one label chip + "+N".',
     component: ChatPanelCodingDemo,
     layout: 'full',
     props: [
       { name: 'prScenario', description: 'PR watcher state', control: { type: 'select', options: PR_SCENARIO_OPTIONS }, defaultValue: 'open-passing' },
-      { name: 'codingMode', description: 'Coding mode (off: no PR chip, up to three label chips)', control: { type: 'boolean' }, defaultValue: true },
       { name: 'labelCount', description: 'Labels on the session (0–6)', control: { type: 'number', min: 0, max: 6, step: 1 }, defaultValue: 3 },
       { name: 'longTitle', description: 'Long session title', control: { type: 'boolean' }, defaultValue: false },
       { name: 'compact', description: 'Compact shell (phone): the chip is hidden', control: { type: 'boolean' }, defaultValue: false },
@@ -240,7 +234,6 @@ export const chatPanelComponents: ComponentEntry[] = [
       { name: 'First lookup running (hidden)', props: { prScenario: 'loading' } },
       { name: 'Not a git repo (hidden)', props: { prScenario: 'not-git' } },
       { name: 'No PR (hidden)', props: { prScenario: 'none' } },
-      { name: 'Standard mode (no chip)', props: { codingMode: false } },
       { name: 'Compact', props: { compact: true } },
     ],
   },

@@ -23,7 +23,6 @@ import { buildTransferredSessionContext } from './conversation-summary.ts';
 import { createdPrUrl } from '../pr-watch/rules.ts';
 import { getSessionScopedToolCallbacks } from './session-scoped-tool-callback-registry.ts';
 import type { ThinkingLevel } from './thinking-levels.ts';
-import type { AgentProfile } from '@craft-agent/session-tools-core';
 import { DEFAULT_THINKING_LEVEL, normalizeThinkingLevel } from './thinking-levels.ts';
 import type { PermissionMode } from './mode-manager.ts';
 import type { LoadedSource } from '../sources/types.ts';
@@ -68,7 +67,7 @@ import { getMiniAgentSystemPrompt } from '../prompts/system.ts';
 import { buildTitlePrompt, buildRegenerateTitlePrompt, validateTitle } from '../utils/title-generator.ts';
 
 // Skill extraction for Codex/Copilot backends (Claude uses native SDK Skill tool)
-import { parseMentions, resolveSkillMentions, resolveSourceMentions, resolveFileMentions } from '../mentions/index.ts';
+import { expandSkillCommand, parseMentions, resolveSkillMentions, resolveSourceMentions, resolveFileMentions } from '../mentions/index.ts';
 import { loadAllSkills } from '../skills/storage.ts';
 
 // ============================================================
@@ -105,7 +104,9 @@ export interface SpawnSessionRequest {
   labels?: string[];
   workingDirectory?: string;
   /** Workspace project id to bind the spawned session to */
-  projectId?: string;
+  projectId?: string | null;
+  /** Optional repository draft choice, resolved by the ordinary first-send pipeline. */
+  repository?: import('../protocol/git-repos.ts').RepositorySelection;
   attachments?: Array<{ path: string; name?: string }>;
 }
 
@@ -190,7 +191,6 @@ export abstract class BaseAgent implements AgentBackend {
   // ============================================================
   protected _model: string;
   protected _thinkingLevel: ThinkingLevel;
-  protected _agentProfile: AgentProfile;
 
   // ============================================================
   // Core Modules (protected for subclass access)
@@ -252,6 +252,11 @@ export abstract class BaseAgent implements AgentBackend {
     return this._currentTurnUserMessage;
   }
 
+  /** Shared host policy for both Claude hooks and Pi's normalized tool requests. */
+  protected getToolPolicy(): BackendConfig['toolPolicy'] {
+    return this.config.toolPolicy;
+  }
+
   protected setCurrentTurnUserMessage(message: string | null): void {
     this._currentTurnUserMessage = message;
   }
@@ -287,7 +292,6 @@ export abstract class BaseAgent implements AgentBackend {
     this._sessionId = config.session?.id || `agent-${Date.now()}`;
     this._model = config.model || defaultModel;
     this._thinkingLevel = normalizeThinkingLevel(config.thinkingLevel) ?? DEFAULT_THINKING_LEVEL;
-    this._agentProfile = config.agentProfile ?? 'default';
 
     // Initialize core modules
     // PermissionManager: handles permission evaluation, mode management, and command whitelisting
@@ -312,7 +316,6 @@ export abstract class BaseAgent implements AgentBackend {
       debugMode: config.debugMode,
       systemPromptPreset: config.systemPromptPreset,
       isHeadless: config.isHeadless,
-      agentProfile: config.agentProfile,
     });
 
     // PathProcessor: expands ~ and normalizes paths
@@ -438,25 +441,15 @@ export abstract class BaseAgent implements AgentBackend {
     this.debug(`Thinking level set to: ${level}`);
   }
 
-  getAgentProfile(): AgentProfile {
-    return this._agentProfile;
-  }
-
-  setAgentProfile(profile: AgentProfile): void {
-    this._agentProfile = profile;
-    this.promptBuilder.setAgentProfile(profile);
-    this.debug(`Agent profile set to: ${profile}`);
-  }
-
   /**
-   * Post-tool hook, Coding mode: a Bash `gh pr create` pins the PR it printed to this session's PR
+   * Post-tool hook: a Bash `gh pr create` pins the PR it printed to this session's PR
    * carousel through the same verified path as pr_bind, unless it is the folder's own branch PR
    * (shown anyway). PRs opened from another branch or worktree would otherwise never appear.
    * Returns a note for the model when it pinned one (Claude passes it on as `additionalContext`).
    * Never throws; bounded by PIN_CREATED_PR_TIMEOUT_MS, since Claude awaits it before its next step.
    */
   protected async pinCreatedPr(command: unknown, output: string): Promise<string | null> {
-    if (this._agentProfile !== 'coding' || typeof command !== 'string') return null;
+    if (typeof command !== 'string') return null;
     const url = createdPrUrl(command, output);
     const prWatch = url ? getSessionScopedToolCallbacks(this._sessionId)?.prWatch : undefined;
     if (!url || !prWatch) return null;
@@ -913,6 +906,7 @@ ${formattedMessages}
     const projectRoot = this.config.session?.workingDirectory;
     const skills = loadAllSkills(workspaceRoot, projectRoot);
     const skillSlugs = skills.map(s => s.slug);
+    message = expandSkillCommand(message, skillSlugs);
 
     this.debug(`[extractSkillPaths] Available skills: ${skillSlugs.join(', ')}`);
 
@@ -1183,7 +1177,8 @@ ${formattedMessages}
       workingDirectory: typeof input.workingDirectory === 'string' && input.workingDirectory
         ? expandPath(input.workingDirectory)
         : undefined,
-      projectId: input.projectId as string | undefined,
+      projectId: input.projectId as string | null | undefined,
+      repository: input.repository as SpawnSessionRequest['repository'],
       attachments: input.attachments as SpawnSessionRequest['attachments'],
     };
 

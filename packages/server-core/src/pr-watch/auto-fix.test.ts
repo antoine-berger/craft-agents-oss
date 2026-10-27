@@ -22,7 +22,7 @@ function setup(options: { session?: Record<string, unknown>; autoFix?: boolean; 
   let tokens = ['t:A:1', 't:B:2']
   let wakeResult = true
   let monitors: Record<string, PrMonitorState> = options.autoFix === false ? {} : { [ENTRY_ID]: { autoFix: true } }
-  const session = { id: 's1', codingMode: true, isArchived: false, permissionMode: 'allow-all', isProcessing: false, workspaceId: 'ws', workingDirectory: '/work/app', ...options.session }
+  const session = { id: 's1', isArchived: false, permissionMode: 'allow-all', isProcessing: false, workspaceId: 'ws', workingDirectory: '/work/app', ...options.session }
   const calls = { subscribe: [] as Array<{ clientId: string }>, unsubscribe: [] as string[], fetch: 0, wake: [] as string[], setMonitors: 0 }
   let nextSub = 1
 
@@ -80,10 +80,10 @@ describe('auto-fix arming', () => {
     expect(t.monitor.armedSessions()).toEqual([])
   })
 
-  it('never arms a session outside Coding mode or an archived one', async () => {
-    const notCoding = setup({ session: { codingMode: false } })
-    await notCoding.monitor.sync('s1')
-    expect(notCoding.calls.subscribe).toHaveLength(0)
+  it('arms ordinary repository chats but never archived ones', async () => {
+    const ordinary = setup()
+    await ordinary.monitor.sync('s1')
+    expect(ordinary.calls.subscribe).toHaveLength(1)
     const archived = setup({ session: { isArchived: true } })
     await archived.monitor.sync('s1')
     expect(archived.calls.subscribe).toHaveLength(0)
