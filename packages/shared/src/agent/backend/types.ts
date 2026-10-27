@@ -309,6 +309,8 @@ export type SdkMcpServerConfig =
       type: 'http' | 'sse';
       url: string;
       headers?: Record<string, string>;
+      /** Backend-only transport override, consumed by the MCP pool. */
+      fetch?: typeof globalThis.fetch;
       /** Environment variable name containing bearer token (Codex-specific) */
       bearerTokenEnvVar?: string;
     }

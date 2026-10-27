@@ -1,3 +1,4 @@
+import { loadProxyConnectorSources, usesCliProxyForAll } from './cli-proxy/connectors'
 import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { query, type McpServerStatus } from '@anthropic-ai/claude-agent-sdk'
@@ -78,6 +79,7 @@ export function connectorSources(servers: McpServerStatus[], connection: LlmConn
 }
 
 export async function loadClaudeConnectorSources(workspace: { id: string; rootPath: string }): Promise<LoadedSource[]> {
+  if (usesCliProxyForAll()) return loadProxyConnectorSources(workspace)
   const accounts = getLlmConnections().filter(isClaudeAccountConnection)
   const results = await Promise.allSettled(accounts.map(async connection => {
     const servers = await discoverClaudeConnectors(connection.slug)

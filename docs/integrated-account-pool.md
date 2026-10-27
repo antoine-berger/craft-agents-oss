@@ -4,7 +4,13 @@ In **Settings → AI → Claude and GPT accounts**, enable the account manager, 
 
 The application manages a CLIProxyAPI 8.0.44 child process on the machine running the Craft backend. Thin clients use the Linux backend; desktop-only installations use their local backend. No separate terminal, public proxy port, or manually entered proxy key is needed. Account routing uses round robin with session affinity. CLIProxyAPI owns provider refresh, quota fallback, and account selection.
 
-The native Claude connection remains available for claude.ai MCP connectors. Account-pool connections provide model inference; they do not inherit that account's claude.ai MCP connectors.
+**Use for all chats and MCPs** switches the defaults and resolves existing Claude/OpenAI connection references to their account pools. Original native connection credentials are retained for recovery. Calls fail if the proxy is unavailable; there is no direct-provider fallback. Laya/Jev's separate local decision API is paused, with its configuration preserved.
+
+In this mode, Craft discovers claude.ai connectors and relays their MCP HTTP traffic through CLIProxyAPI's authenticated `/v8/management/requests/api-call` API. CLIProxyAPI substitutes the selected account credential internally; Craft never receives the token. Both Claude and GPT can use these sources through Craft's common MCP pool and permission checks. New independent interactive sessions enable the authorized connectors by default. MCP access stays pinned to the selected Claude account, independently of model-account rotation. Changing the MCP account requires a new chat; stale connector identities cannot silently switch accounts.
+
+The relay accepts only the fixed Anthropic catalog and MCP gateway destinations, selected-account identities, and protocol headers. It does not expose a general HTTP forwarding RPC to renderers. MCP notification GET streams are disabled, as in Claude's own connector client; request/response POST traffic (JSON or bounded SSE) and DELETE pass through CLIProxyAPI. The management API imposes a 60-second upstream request limit.
+
+In per-chat mode, the original native Claude connection can still manage its connectors directly.
 
 ## Sign-in and import
 

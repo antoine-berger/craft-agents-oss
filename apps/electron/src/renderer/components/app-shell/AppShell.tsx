@@ -766,7 +766,8 @@ function AppShellContent({
       if (workspaceId !== activeWorkspaceId) return
       // Clear icon cache so updated source icons are re-fetched on render
       clearSourceIconCaches()
-      setSources(previous => [...previous.filter(source => source.claudeAccount), ...(updatedSources || [])])
+      setSources(previous => updatedSources?.some(source => source.claudeAccount) ? updatedSources
+        : [...previous.filter(source => source.claudeAccount), ...(updatedSources || [])])
     })
     return cleanup
   }, [activeWorkspaceId])

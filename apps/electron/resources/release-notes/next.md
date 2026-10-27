@@ -15,4 +15,4 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Breaking Changes
 
-- **Multiple Claude and GPT accounts** — Connect accounts in AI settings using an integrated CLIProxyAPI service, import existing CLI logins, and pause individual accounts. Account-pool model connections preserve the existing native Claude connection for claude.ai MCPs. (#4)
+- **Multiple Claude and GPT accounts** — Connect accounts in AI settings using an integrated CLIProxyAPI service, import existing CLI logins, and pause individual accounts. An optional all-proxy mode also routes legacy chats and claude.ai MCP discovery/tool calls through CLIProxyAPI, making those connectors available to Claude and GPT. (#4)

@@ -25,6 +25,8 @@ export interface HttpMcpClientConfig {
   transport: 'http';
   url: string;
   headers?: Record<string, string>;
+  /** Backend-only authenticated relay; never serialized to a renderer or subprocess. */
+  fetch?: typeof globalThis.fetch;
 }
 
 /**
@@ -147,6 +149,7 @@ export class CraftMcpClient implements PoolClient {
       this.transport = new StreamableHTTPClientTransport(
         new URL(config.url),
         {
+          fetch: config.fetch,
           requestInit: {
             headers: config.headers,
           },

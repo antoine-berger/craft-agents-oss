@@ -11,6 +11,9 @@ export interface CliProxyAccount {
 
 export interface CliProxyStatus {
   enabled: boolean
+  routingAll?: boolean
+  connectorAccountId?: string
+  routedMcpRequests?: number
   running: boolean
   version: string
   phase: 'stopped' | 'starting' | 'running' | 'error'
@@ -26,7 +29,8 @@ export interface CliProxyOAuthFlow {
 }
 
 export type CliProxyCommand =
-  | { action: 'enable' | 'disable' | 'importCraft' | 'syncModels' }
+  | { action: 'enable' | 'disable' | 'importCraft' | 'syncModels' | 'routeAll' }
+  | { action: 'setConnectorAccount'; id: string }
   | { action: 'setAccountEnabled'; id: string; enabled: boolean }
   | { action: 'startOAuth'; provider: CliProxyProvider }
   | { action: 'completeOAuth'; state: string; code: string; error?: string }

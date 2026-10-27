@@ -421,9 +421,10 @@ export function FreeFormInput({
   }, [llmConnections, effectiveConnection])
 
   const claudeAccountConnectors = !!effectiveConnectionDetails && isClaudeAccountConnection(effectiveConnectionDetails)
+    && !configuredSources.some(source => source.claudeAccount?.proxy)
   // Keep the source picker and @mentions limited to Craft API/local sources for Claude accounts.
   const sources = React.useMemo(
-    () => configuredSources.filter(source => !source.claudeAccount && (!claudeAccountConnectors || source.config.type !== 'mcp')),
+    () => configuredSources.filter(source => (!source.claudeAccount || !!source.claudeAccount.proxy) && (!claudeAccountConnectors || source.config.type !== 'mcp')),
     [configuredSources, claudeAccountConnectors],
   )
 

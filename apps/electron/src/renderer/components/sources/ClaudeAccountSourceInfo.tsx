@@ -17,7 +17,7 @@ export function ClaudeAccountSourceInfo({ source }: { source: LoadedSource }) {
         <Info_Page.Hero avatar={<SourceAvatar source={source} fluid />} title={source.config.name}
           tagline={source.config.tagline}
           meta={<Info_StatePill tone={connected ? 'ok' : 'warn'}>{t(status)}</Info_StatePill>} />
-        <Info_Section title={t('sourceInfo.connection')} description={t('chat.claudeConnectors.managedHint')}>
+        <Info_Section title={t('sourceInfo.connection')} description={t(source.claudeAccount?.proxy ? 'settings.accountPool.allMcp' : 'chat.claudeConnectors.managedHint')}>
           <Button variant="secondary" onClick={() => window.electronAPI.openUrl('https://claude.ai/customize/connectors')}>
             {t('chat.claudeConnectors.manage')}
           </Button>

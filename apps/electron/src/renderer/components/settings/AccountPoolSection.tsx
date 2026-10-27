@@ -66,6 +66,20 @@ export function AccountPoolSection() {
             <Button variant="ghost" disabled={!!busy} onClick={() => void run('refresh', () => command({ action: 'syncModels' }))}>{t('common.refresh')}</Button>
           </div>
         )}
+        {status?.running && (
+          <SettingsRow label={t('settings.accountPool.routing')} description={t(status.routingAll ? 'settings.accountPool.allRouted' : 'settings.accountPool.optInRouting')}>
+            {!status.routingAll && <Button variant="secondary" disabled={!!busy} onClick={() => void run('routing', () => command({ action: 'routeAll' }))}>{t('settings.accountPool.routeAll')}</Button>}
+          </SettingsRow>
+        )}
+        {status?.routingAll && (
+          <SettingsRow label={t('settings.accountPool.mcpAccount')} description={t('settings.accountPool.mcpAccountHint')}>
+            <select className="max-w-64 rounded-lg bg-background px-2 py-1.5 text-label-sm" aria-label={t('settings.accountPool.mcpAccount')}
+              disabled={!!busy || !status.running} value={status.connectorAccountId ?? ''}
+              onChange={event => void run('mcp-account', () => command({ action: 'setConnectorAccount', id: event.target.value }))}>
+              {status.accounts.filter(account => account.provider === 'claude').map(account => <option key={account.id} value={account.id} disabled={account.disabled}>{account.email ?? account.name}</option>)}
+            </select>
+          </SettingsRow>
+        )}
         {busy && (
           <SettingsRow label={t(busy === 'claude' || busy === 'codex' ? 'settings.accountPool.finishSignIn' : 'settings.accountPool.working')}>
             <Spinner />
@@ -80,7 +94,7 @@ export function AccountPoolSection() {
         ))}
         {(error || status?.error) && <p role="alert" className="px-3.5 py-3 text-label-sm text-destructive">{error || status?.error}</p>}
       </SettingsCard>
-      <p className="text-label-sm text-tertiary">{t('settings.accountPool.nativeMcp')}</p>
+      <p className="text-label-sm text-tertiary">{t(status?.routingAll ? 'settings.accountPool.allMcp' : 'settings.accountPool.nativeMcp')}</p>
       {!desktop && <p className="text-label-sm text-secondary">{t('settings.accountPool.desktopSignIn')}</p>}
     </SettingsSection>
   )

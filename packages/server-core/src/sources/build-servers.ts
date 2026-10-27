@@ -22,6 +22,7 @@ import {
   type SourceWithCredential,
   type SummarizeCallback,
 } from '@craft-agent/shared/sources'
+import { getCliProxyManager } from '../services/cli-proxy/manager'
 import { perf } from '@craft-agent/shared/utils'
 
 const defaultLog = createScopedLogger(CONSOLE_LOGGER, 'sources')
@@ -39,7 +40,7 @@ export async function buildServersFromSources(
 
   // Load credentials for all sources
   const sourcesWithCreds: SourceWithCredential[] = await Promise.all(
-    sources.map(async (source) => ({
+    sources.filter(source => !source.claudeAccount?.proxy).map(async (source) => ({
       source,
       token: await credManager.getToken(source),
       credential: await credManager.getApiCredential(source),
@@ -96,6 +97,13 @@ export async function buildServersFromSources(
     summarize,
     getCredentialForSource,
   )
+  for (const source of sources) {
+    const proxy = source.claudeAccount?.proxy
+    if (!proxy || !source.config.isAuthenticated) continue
+    result.mcpServers[source.config.slug] = { type: 'http',
+      url: `https://mcp-proxy.anthropic.com/v1/mcp/${proxy.serverId}`,
+      fetch: getCliProxyManager().connectorFetch(proxy.accountId, proxy.serverId) }
+  }
   span.mark('servers.built')
   span.setMetadata('mcpCount', Object.keys(result.mcpServers).length)
   span.setMetadata('apiCount', Object.keys(result.apiServers).length)

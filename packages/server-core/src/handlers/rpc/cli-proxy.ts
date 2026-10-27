@@ -1,3 +1,6 @@
+import { getWorkspaces } from '@craft-agent/shared/config'
+import { loadClaudeConnectorSources } from '../../services/claude-connectors'
+import { clearProxyConnectorCache } from '../../services/cli-proxy/connectors'
 import { RPC_CHANNELS, type CliProxyCommand, type CliProxyImportAccount } from '@craft-agent/shared/protocol'
 import type { RpcServer } from '@craft-agent/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
@@ -13,7 +16,16 @@ export function registerCliProxyHandlers(server: RpcServer, deps: HandlerDeps): 
   server.handle(RPC_CHANNELS.cliProxy.COMMAND, async (context, command: CliProxyCommand) => {
     if (!command || typeof command.action !== 'string') throw new Error('Invalid account action')
     const result = await manager.command(command, context.clientId)
-    if (['importCraft', 'syncModels', 'setAccountEnabled', 'oauthStatus'].includes(command.action)) changed()
+    if (['importCraft', 'syncModels', 'setAccountEnabled', 'oauthStatus', 'routeAll', 'setConnectorAccount'].includes(command.action)) changed()
+    if (['routeAll', 'setConnectorAccount', 'setAccountEnabled'].includes(command.action) && result.status.routingAll) {
+      clearProxyConnectorCache()
+      if (command.action === 'routeAll') await deps.sessionManager.reinitializeAuth()
+      for (const workspace of getWorkspaces()) {
+        const sources = await loadClaudeConnectorSources(workspace)
+        const { loadWorkspaceSources } = await import('@craft-agent/shared/sources')
+        server.push(RPC_CHANNELS.sources.CHANGED, { to: 'workspace', workspaceId: workspace.id }, workspace.id, [...sources, ...loadWorkspaceSources(workspace.rootPath)])
+      }
+    }
     return result
   })
   server.handle(RPC_CHANNELS.cliProxy.IMPORT_ACCOUNTS, async (_context, accounts: CliProxyImportAccount[]) => {

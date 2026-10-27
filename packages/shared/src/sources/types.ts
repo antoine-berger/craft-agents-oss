@@ -516,6 +516,8 @@ export interface LoadedSource {
     connectionSlug: string;
     connectionName: string;
     tools: Array<{ name: string; description?: string }>;
+    /** Connector identity only. OAuth credentials remain inside CLIProxyAPI. */
+    proxy?: { accountId: string; serverId: string };
   };
   config: FolderSourceConfig;
   guide: SourceGuide | null;

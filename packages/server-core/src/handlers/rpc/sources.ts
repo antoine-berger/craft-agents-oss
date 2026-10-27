@@ -5,6 +5,7 @@ import { safeJsonParse } from '@craft-agent/shared/utils/files'
 import { getCredentialManager } from '@craft-agent/shared/credentials'
 import type { RpcServer } from '@craft-agent/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
+import { usesCliProxyForAll } from '../../services/cli-proxy/connectors'
 import { loadClaudeConnectorSources, isClaudeConnectorSlug } from '../../services/claude-connectors'
 
 export const HANDLED_CHANNELS = [
@@ -33,6 +34,7 @@ export function registerSourcesHandlers(server: RpcServer, deps: HandlerDeps): v
     try {
       return [...await loadClaudeConnectorSources(workspace), ...sources]
     } catch (error) {
+      if (usesCliProxyForAll()) throw error
       log.warn('Claude connector discovery failed', error instanceof Error ? error.message : 'Unknown error')
       return sources
     }
