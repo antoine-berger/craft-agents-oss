@@ -34,7 +34,7 @@ export function listGitHubRepos({ fresh = false, query }: { fresh?: boolean; que
   const key = query?.trim() ?? ''
   const cached = cache.get(key)
   if (!fresh && cached && Date.now() - cached.at < CACHE_MS) return Promise.resolve(cached.value)
-  const args = key ? ['search', 'repos', '--limit', String(LIST_LIMIT), '--json', 'fullName,description,isPrivate,updatedAt', '--', key]
+  const args = key ? ['search', 'repos', '--include-forks', 'true', '--limit', String(LIST_LIMIT), '--json', 'fullName,description,isPrivate,updatedAt', '--', key]
     : ['repo', 'list', '--limit', String(LIST_LIMIT), '--json', 'nameWithOwner,description,isPrivate,updatedAt']
   return new Promise((done) => {
     execFile(
