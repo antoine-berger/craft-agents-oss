@@ -25,7 +25,6 @@ import { RenameDialog } from '@/components/ui/rename-dialog'
 import type { PermissionMode, WorkspaceSettings, LoadedSource } from '../../../shared/types'
 import { useDirectoryPicker } from '@/hooks/useDirectoryPicker'
 import { useAvailablePermissionModes } from '@/hooks/useAvailablePermissionModes'
-import { ConductorImportPanel } from '@/components/settings/ConductorImportPanel'
 import { ServerDirectoryBrowser } from '@/components/ServerDirectoryBrowser'
 import { PERMISSION_MODE_CONFIG, PERMISSION_MODE_ORDER } from '@craft-agent/shared/agent/mode-types'
 import type { DetailsPageMeta } from '@/lib/navigation-registry'
@@ -365,9 +364,6 @@ export default function WorkspaceSettingsPage() {
       description={t("settings.workspace.description")}
       actions={headerActions}
     >
-      <SettingsSection title="Import from Conductor" description="Preview and copy your chats, with their history and attachments.">
-        <SettingsCard><ConductorImportPanel workspaceId={activeWorkspaceId} api={window.electronAPI} /></SettingsCard>
-      </SettingsSection>
       {/* Workspace Info */}
       <SettingsSection title={t("settings.workspace.workspaceInfo")}>
         <SettingsCard>

@@ -1,10 +1,10 @@
-/** Local desktop only. Never loads a native SQLite addon into Electron. */
+/** Read-only Conductor SQLite reader for the standalone migration script. */
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import type { ConductorListOptions, ConductorExportOptions, ConductorChatList, ConductorImportBundle } from '../../../../packages/shared/src/protocol/conductor-import'
-import { convertConductorExport, type ConductorRawExport } from '../../../../packages/shared/src/conductor-import/convert'
+import type { ConductorListOptions, ConductorExportOptions, ConductorChatList, ConductorImportBundle } from '../protocol/conductor-import'
+import { convertConductorExport, type ConductorRawExport } from './convert'
 
 const run = promisify(execFile)
 export const DEFAULT_CONDUCTOR_DATABASE = join(homedir(), 'Library/Application Support/com.conductor.app/conductor.db')

@@ -1,4 +1,3 @@
-import type { ConductorImportAPI } from '@craft-agent/shared/protocol'
 // =============================================================================
 // Protocol re-exports (channels, DTOs, events, wire types)
 // =============================================================================
@@ -242,7 +241,7 @@ import type {
 /** Native window material the renderer may paint translucently over (see ThemeContext data-vibrancy). */
 export type WindowVibrancy = 'under-window' | 'mica'
 
-export interface ElectronAPI extends ConductorImportAPI {
+export interface ElectronAPI {
   // Session management
   getSessions(): Promise<Session[]>
   getUnreadSummary(): Promise<UnreadSummary>

@@ -354,9 +354,6 @@ export const CHANNEL_MAP = {
   // Git
   getGitBranch: invoke(RPC_CHANNELS.git.GET_BRANCH),
   getRepositoryIdentity: invoke(RPC_CHANNELS.git.GET_REPOSITORY_IDENTITY),
-  listConductorChats: invoke(RPC_CHANNELS.conductor.LIST_LOCAL),
-  exportConductorChat: invoke(RPC_CHANNELS.conductor.EXPORT_LOCAL),
-  importConductorChat: invoke(RPC_CHANNELS.conductor.IMPORT),
   getGitReview: invoke(RPC_CHANNELS.git.GET_REVIEW),
   listSessionCheckpoints: invoke(RPC_CHANNELS.sessions.LIST_CHECKPOINTS),
   restoreSessionCheckpoint: invoke(RPC_CHANNELS.sessions.RESTORE_CHECKPOINT),

@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, rm, writeFile, symlink, readFile } from 'node:fs/promis
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { execFileSync } from 'node:child_process'
-import { listLocalConductorChats, exportLocalConductorChat } from './conductor-reader'
+import { listLocalConductorChats, exportLocalConductorChat } from './reader'
 const folders: string[] = []
 afterEach(async () => { await Promise.all(folders.splice(0).map(folder => rm(folder, { recursive: true, force: true }))) })
 async function database(count = 3) {

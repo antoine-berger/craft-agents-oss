@@ -6,7 +6,6 @@ export { registerCoreRpcHandlers }
 // GUI-only handlers remain local (Electron-specific imports)
 import { registerSystemGuiHandlers } from './system'
 import { registerWorkspaceGuiHandlers } from './workspace'
-import { registerConductorLocalHandlers } from './conductor-import'
 import { registerBrowserHandlers } from './browser'
 import { registerSettingsGuiHandlers } from './settings'
 
@@ -14,7 +13,6 @@ export function registerGuiRpcHandlers(server: RpcServer, deps: HandlerDeps): vo
   registerSystemGuiHandlers(server, deps)
   registerWorkspaceGuiHandlers(server, deps)
   registerBrowserHandlers(server, deps)
-  registerConductorLocalHandlers(server)
   registerSettingsGuiHandlers(server, deps)
 }
 

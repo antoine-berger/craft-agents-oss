@@ -47,8 +47,3 @@ export interface ConductorImportOptions {
   repository?: RepositorySelection
 }
 export interface ConductorImportResult { status: 'imported' | 'skipped'; sessionId: string; projectId?: string; warnings: string[] }
-export interface ConductorImportAPI {
-  listConductorChats(options?: ConductorListOptions): Promise<ConductorChatList>
-  exportConductorChat(sessionId: string, options?: ConductorExportOptions): Promise<ConductorImportBundle>
-  importConductorChat(workspaceId: string, bundle: ConductorImportBundle, options?: ConductorImportOptions): Promise<ConductorImportResult>
-}

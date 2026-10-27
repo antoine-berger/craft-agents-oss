@@ -5,8 +5,6 @@
  */
 export const RPC_CHANNELS = {
   conductor: {
-    LIST_LOCAL: 'conductor:listLocal',
-    EXPORT_LOCAL: 'conductor:exportLocal',
     IMPORT: 'conductor:import',
   },
   cliProxy: {
