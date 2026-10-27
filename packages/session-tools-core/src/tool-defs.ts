@@ -864,6 +864,8 @@ export type AgentProfile = 'default' | 'coding';
  */
 export const CODING_PROFILE_TOOLS: Readonly<Record<string, 'always' | 'sources' | 'project'>> = {
   SubmitPlan: 'always',
+  // Browser execution is also available in server-backed repository sessions.
+  browser_tool: 'always',
   list_background_tasks: 'always',
   send_developer_feedback: 'always',
   // PR tools are core to Coding mode; each returns a clean "unavailable" result off a GitHub checkout

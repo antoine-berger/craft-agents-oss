@@ -122,8 +122,8 @@ describe('session tool filtering helpers', () => {
     });
 
     it('keeps only the always-on coding tools in a bare coding session', () => {
-      expect(names({ profile: 'coding' })).toEqual(['SubmitPlan', 'send_developer_feedback', 'pr_status', 'pr_bind', 'pr_unbind', 'pr_set_auto_merge', 'list_background_tasks']);
-      expect(names({ profile: 'coding', includeDeveloperFeedback: false })).toEqual(['SubmitPlan', 'pr_status', 'pr_bind', 'pr_unbind', 'pr_set_auto_merge', 'list_background_tasks']);
+      expect(names({ profile: 'coding' }).filter(name => name !== 'browser_tool')).toEqual(['SubmitPlan', 'send_developer_feedback', 'pr_status', 'pr_bind', 'pr_unbind', 'pr_set_auto_merge', 'list_background_tasks']);
+      expect(names({ profile: 'coding', includeDeveloperFeedback: false }).filter(name => name !== 'browser_tool')).toEqual(['SubmitPlan', 'pr_status', 'pr_bind', 'pr_unbind', 'pr_set_auto_merge', 'list_background_tasks']);
     });
 
     it('adds source tools only with enabled sources, project memory only with a project', () => {
@@ -137,9 +137,11 @@ describe('session tool filtering helpers', () => {
       expect(withProject).not.toContain('source_test');
     });
 
-    it('drops desktop-workflow tools even when their own flags are on', () => {
+    it('keeps the browser and drops unrelated desktop-workflow tools', () => {
       const coding = names({ profile: 'coding', includeDecide: true, includeBrowser: true, hasEnabledSources: true, hasProject: true });
-      for (const dropped of ['browser_tool', 'create_page', 'set_session_labels', 'spawn_session', 'call_llm', 'decide', 'transform_data', 'update_user_preferences']) {
+      expect(coding).toContain('browser_tool');
+      expect(names({ profile: 'coding', includeBrowser: false })).not.toContain('browser_tool');
+      for (const dropped of [ 'create_page', 'set_session_labels', 'spawn_session', 'call_llm', 'decide', 'transform_data', 'update_user_preferences']) {
         expect(coding).not.toContain(dropped);
       }
       expect(coding.every(name => name in CODING_PROFILE_TOOLS)).toBe(true);
@@ -152,7 +154,7 @@ describe('session tool filtering helpers', () => {
 
     it('applies the same filter to the JSON Schema view (Pi)', () => {
       const pi = getToolDefsAsJsonSchema({ prefix: 'mcp__session__', profile: 'coding' }).map(d => d.name);
-      expect(pi).toEqual(['mcp__session__SubmitPlan', 'mcp__session__send_developer_feedback', 'mcp__session__pr_status', 'mcp__session__pr_bind', 'mcp__session__pr_unbind', 'mcp__session__pr_set_auto_merge', 'mcp__session__list_background_tasks']);
+      expect(pi).toEqual(['mcp__session__SubmitPlan', 'mcp__session__send_developer_feedback', 'mcp__session__browser_tool', 'mcp__session__pr_status', 'mcp__session__pr_bind', 'mcp__session__pr_unbind', 'mcp__session__pr_set_auto_merge', 'mcp__session__list_background_tasks']);
     });
   });
 
