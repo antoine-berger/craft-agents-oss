@@ -647,7 +647,7 @@ function AppShellContent({
   const { projects } = useProjects(activeWorkspaceId)
   const { pages } = usePages(activeWorkspaceId)
   const projectMenuOptions = useMemo(
-    () => projects.map(p => ({ id: p.config.id, slug: p.config.slug, name: p.config.name, color: p.config.color })),
+    () => projects.map(p => ({ id: p.config.id, slug: p.config.slug, name: p.config.name, color: p.config.color, pilotSessionId: p.config.pilotSessionId })),
     [projects],
   )
   const handleSessionProjectChange = useCallback(async (sessionId: string, projectId: string | null) => {
@@ -1736,12 +1736,15 @@ function AppShellContent({
     setCreateProjectDialogOpen(false)
     try {
       const project = await window.electronAPI.createProject(activeWorkspace.id, { name })
-      navigate(routes.view.projects(project.slug))
+      const pilot = await contextValue.onCreateSession(activeWorkspace.id, { projectId: project.id, name: 'Pilote' })
+      await window.electronAPI.updateProject(activeWorkspace.id, project.slug, { pilotSessionId: pilot.id })
+      setNewSessionProjectView(project.id)
+      navigate(routes.view.allSessions(pilot.id))
     } catch (err) {
       console.error('[AppShell] Failed to create project:', err)
       toast.error(t('projectsList.createFailed'))
     }
-  }, [activeWorkspace?.id, navigate, t])
+  }, [activeWorkspace?.id, contextValue.onCreateSession, setNewSessionProjectView, navigate, t])
 
   // The project page is an explicit context even though it has no session-list filter.
   const openedProjectSlug = isProjectsNavigation(navState) ? navState.details?.projectSlug : undefined

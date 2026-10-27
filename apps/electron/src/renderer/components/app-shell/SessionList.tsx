@@ -22,7 +22,7 @@ import { SessionItem } from "./SessionItem"
 import { SessionListProvider, type SessionListContextValue } from "@/context/SessionListContext"
 import { useSessionSelection, useSessionSelectionStore } from "@/hooks/useSession"
 import { useSessionAttention } from "@/hooks/useSessionAttention"
-import { useSessionSearch, type FilterMode } from "@/hooks/useSessionSearch"
+import { useSessionSearch, sessionMatchesCurrentFilter, type FilterMode } from "@/hooks/useSessionSearch"
 import { useSessionActions } from "@/hooks/useSessionActions"
 import { useEntityListInteractions } from "@/hooks/useEntityListInteractions"
 import { useFocusZone } from "@/hooks/keyboard"
@@ -83,7 +83,7 @@ interface SessionListProps {
   /** Callback when session labels are toggled (for labels submenu in SessionMenu) */
   onLabelsChange?: (sessionId: string, labels: string[]) => void
   /** Workspace projects (for the Projects submenu in SessionMenu) */
-  projects?: Array<{ id: string; slug: string; name: string; color?: string }>
+  projects?: Array<{ id: string; slug: string; name: string; color?: string; pilotSessionId?: string }>
   /** Callback to bind/unbind a session to a project (null = unbind) */
   onSetProjectId?: (sessionId: string, projectId: string | null) => void
   /** How to group sessions: 'date' (default) or 'status' */
@@ -245,6 +245,16 @@ export function SessionList({
 
   // --- Data pipeline (search, filtering, pagination, grouping) ---
   const scrollViewportRef = useRef<HTMLDivElement>(null)
+  const pinnedItems = useMemo(() => items.filter(item =>
+    !item.hidden && !item.isArchived
+    && projects?.some(project => project.id === item.projectId && project.pilotSessionId === item.id)
+    && sessionMatchesCurrentFilter(item, currentFilter, { evaluateViews, statusFilter, labelFilterMap, labelConfigs: labels })
+  ), [items, projects, currentFilter, evaluateViews, statusFilter, labelFilterMap, labels])
+  const searchableItems = useMemo(() => {
+    if (searchActive && searchQuery.length >= 2) return items
+    const pinnedIds = new Set(pinnedItems.map(item => item.id))
+    return items.filter(item => !pinnedIds.has(item.id))
+  }, [items, pinnedItems, searchActive, searchQuery])
 
   const {
     isSearchMode,
@@ -260,7 +270,7 @@ export function SessionList({
     collapsedGroupsMeta,
     searchInputRef,
   } = useSessionSearch({
-    items,
+    items: searchableItems,
     searchActive: searchActive ?? false,
     searchQuery,
     workspaceId,
@@ -274,7 +284,7 @@ export function SessionList({
     scrollViewportRef,
   })
 
-  const rowData = useMemo(() => {
+  const groupedRowData = useMemo(() => {
     if (isSearchMode) {
       const matchingRows: SessionListRow[] = matchingFilterItems.map(item => ({ item }))
       const otherRows: SessionListRow[] = otherResultItems.map(item => ({ item }))
@@ -511,6 +521,14 @@ export function SessionList({
     }
   }, [isSearchMode, matchingFilterItems, otherResultItems, flatItems, groupingMode, sessionStatuses, projects, collapsedGroupsMeta, t])
 
+  const rowData = useMemo(() => {
+    if (isSearchMode || pinnedItems.length === 0) return groupedRowData
+    const pinnedRows = pinnedItems.map(item => ({ item }))
+    return {
+      rows: [...pinnedRows, ...groupedRowData.rows],
+      groups: [{ key: 'project-pilots', label: t('session.pinned', { defaultValue: 'Pinned' }), items: pinnedRows, collapsible: false }, ...groupedRowData.groups],
+    }
+  }, [groupedRowData, pinnedItems, isSearchMode, t])
   const flatRows = rowData.rows
 
   const collapseAllGroups = useCallback(() => {

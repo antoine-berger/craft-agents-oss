@@ -9,7 +9,7 @@ import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 import { useEffect, useState, useCallback, useMemo } from 'react'
 import { useAtomValue } from 'jotai'
-import { FolderKanban, FolderOpen, Plus, Trash2, Upload } from 'lucide-react'
+import { FolderKanban, FolderOpen, Plus, Trash2, Upload, Pin } from 'lucide-react'
 import { toast } from 'sonner'
 import { useActiveWorkspace, useAppShellContext } from '@/context/AppShellContext'
 import { navigate, routes } from '@/lib/navigate'
@@ -124,7 +124,7 @@ export default function ProjectInfoPage({ projectSlug }: ProjectInfoPageProps) {
         result.push({ id: meta.id, name: meta.name ?? meta.id })
       }
     }
-    return result
+    return result.sort((a, b) => Number(b.id === project.config.pilotSessionId) - Number(a.id === project.config.pilotSessionId))
   }, [project, sessionMetaMap])
 
   const handleStartSession = useCallback(async () => {
@@ -273,6 +273,7 @@ export default function ProjectInfoPage({ projectSlug }: ProjectInfoPageProps) {
                         onClick={() => navigate(routes.view.allSessions(s.id))}
                       >
                         <span className="truncate">{s.name}</span>
+                        {s.id === project.config.pilotSessionId && <Pin className="ml-auto size-3.5 text-muted-foreground" aria-label="Pinned" />}
                       </button>
                     </li>
                   ))}
