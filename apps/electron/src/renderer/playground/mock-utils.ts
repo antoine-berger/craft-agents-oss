@@ -233,6 +233,8 @@ export const mockElectronAPI = {
 
   // Coding mode worktree picker: a bare-layout repo from a recent folder, a plain clone in the
   // workspace folder, and two GitHub-only repos. Creating fails for a branch named "taken".
+  getRepositoryIdentity: async () => 'craft-ai-agents/craft-agents',
+
   listCodingRepos: async (workspaceId: string, recentDirs: string[]) => {
     console.log('[Playground] listCodingRepos called:', workspaceId, recentDirs)
     await new Promise(resolve => setTimeout(resolve, 500))

@@ -477,6 +477,7 @@ export const REMOTE_ELIGIBLE_CHANNELS = new Set<string>([
 
   // git — workspace filesystem
   RPC_CHANNELS.git.GET_BRANCH,
+  RPC_CHANNELS.git.GET_REPOSITORY_IDENTITY,
   RPC_CHANNELS.git.LIST_REPOS,
   RPC_CHANNELS.git.CREATE_WORKTREE,
 

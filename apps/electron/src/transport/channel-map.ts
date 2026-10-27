@@ -353,6 +353,7 @@ export const CHANNEL_MAP = {
 
   // Git
   getGitBranch: invoke(RPC_CHANNELS.git.GET_BRANCH),
+  getRepositoryIdentity: invoke(RPC_CHANNELS.git.GET_REPOSITORY_IDENTITY),
   listCodingRepos: invoke(RPC_CHANNELS.git.LIST_REPOS),
   createCodingWorktree: invoke(RPC_CHANNELS.git.CREATE_WORKTREE),
 

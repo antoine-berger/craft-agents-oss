@@ -655,6 +655,8 @@ export interface ElectronAPI {
 
   // Git operations
   getGitBranch(dirPath: string): Promise<string | null>
+  /** Read the chosen repository origin without scanning or fetching GitHub repositories. */
+  getRepositoryIdentity(dirPath: string): Promise<string | null>
   /** Coding mode worktree picker: local repos (workspace folder + these recent folders) and `gh repo list` */
   listCodingRepos(workspaceId: string, recentDirs: string[], options?: { refreshGitHub?: boolean; query?: string }): Promise<import('@craft-agent/shared/protocol').RepoListing>
   /** Creates a new session's worktree (cloning a GitHub-only repo first); rejects with git's reason */

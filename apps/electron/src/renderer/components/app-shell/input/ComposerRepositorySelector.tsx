@@ -1,6 +1,5 @@
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
-import { FolderGit2, Github } from 'lucide-react'
 import { Spinner } from '@craft-agent/ui'
 import type { RepositorySelection } from '@craft-agent/shared/protocol'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -9,6 +8,7 @@ import { COMPOSER_CHIP } from './composer-styles'
 import { useRepoListing } from './CodingWorkspacePanel'
 import { getSelectedRepositories, repositoryKey, repositoryLabel, rememberRepository, setDraftRepository } from './repository-history'
 import { getPathBasename } from '@/lib/platform'
+import { RepositoryAvatar, useRepositoryIdentity } from './RepositoryAvatar'
 
 interface ComposerRepositorySelectorProps {
   workspaceId?: string
@@ -24,9 +24,12 @@ interface ComposerRepositorySelectorProps {
 
 export function ComposerRepositorySelector({ workspaceId, sessionId, repository, repositoryPath, worktreePath, branch, disabled, locked, onChoose }: ComposerRepositorySelectorProps) {
   const { t } = useTranslation()
-  const label = repository
-    ? repository.kind === 'github' ? repository.nameWithOwner.split('/').pop()! : repository.name
-    : repositoryPath ? getPathBasename(repositoryPath.replace(/[\\/]\.git$/, '')) : t('chat.codingMode.repos.title')
+  const knownNameWithOwner = repository?.nameWithOwner
+  const identityPath = repository?.kind === 'local' ? repository.gitDir : repositoryPath
+  const nameWithOwner = useRepositoryIdentity(knownNameWithOwner, identityPath)
+  const label = nameWithOwner?.split('/').pop()
+    ?? (repository ? repositoryLabel(repository).split('/').pop()!
+      : repositoryPath ? getPathBasename(repositoryPath.replace(/[\\/]\.git$/, '')) : t('chat.codingMode.repos.title'))
   const [open, setOpen] = React.useState(false)
   const [query, setQuery] = React.useState('')
   const [history, setHistory] = React.useState(() => getSelectedRepositories(workspaceId))
@@ -62,7 +65,7 @@ export function ComposerRepositorySelector({ workspaceId, sessionId, repository,
     <Popover open={open && !disabled} onOpenChange={value => { setOpen(value); if (value) setHistory(getSelectedRepositories(workspaceId)); else setQuery('') }}>
       <PopoverTrigger asChild>
         <button type="button" className={COMPOSER_CHIP} disabled={disabled} aria-label={`${t('chat.repository.label')}: ${label}`}>
-          <FolderGit2 className="size-4 shrink-0" />
+          <RepositoryAvatar nameWithOwner={nameWithOwner ?? undefined} />
           <span className="min-w-0 truncate">{label}</span>
         </button>
       </PopoverTrigger>
@@ -92,8 +95,8 @@ export function ComposerRepositorySelector({ workspaceId, sessionId, repository,
               {searching && repos.listing?.githubUnavailable && <p className="px-3 py-2 text-label-sm text-tertiary">{t('chat.repository.remoteSearchUnavailable')}</p>}
               <CommandGroup heading={t(searching ? 'chat.repository.searchResults' : 'chat.repository.chosen')}>
                 {choices.map(repo => <CommandItem key={repositoryKey(repo)} value={repositoryKey(repo)} onSelect={() => choose(repo)}>
-                  {repo.kind === 'github' ? <Github className="size-4 text-tertiary" /> : <FolderGit2 className="size-4 text-tertiary" />}
-                  <span className="truncate">{repositoryLabel(repo)}</span>
+                  <RepositoryAvatar nameWithOwner={repo.nameWithOwner} repositoryPath={repo.kind === 'local' ? repo.gitDir : undefined} />
+                  <span className="truncate">{repositoryLabel(repo).split('/').pop()}</span>
                 </CommandItem>)}
               </CommandGroup>
             </CommandList>

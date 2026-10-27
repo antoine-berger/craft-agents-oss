@@ -11,11 +11,14 @@ import { loadWorkspaceConfig } from '@craft-agent/shared/workspaces'
 import type { RpcServer } from '@craft-agent/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
 import { cloneRootFor, discoverLocalRepos, repoCommandDir } from '../../services/coding-repos/discover'
+import { runGit } from '../../services/git'
+import { isGitHubDotCom, parseRemoteUrl } from '../../services/pr-watch/remote-url'
 import { listGitHubRepos } from '../../services/coding-repos/github'
 import { createWorktree, resolveWorktreeRepository } from '../../services/coding-repos/worktree'
 
 export const HANDLED_CHANNELS = [
   RPC_CHANNELS.git.LIST_REPOS,
+  RPC_CHANNELS.git.GET_REPOSITORY_IDENTITY,
   RPC_CHANNELS.git.CREATE_WORKTREE,
 ] as const
 
@@ -50,6 +53,15 @@ async function listing(workspaceId: string, recentDirs: unknown, refreshGitHub: 
 }
 
 export function registerCodingReposHandlers(server: RpcServer, deps: HandlerDeps): void {
+  server.handle(RPC_CHANNELS.git.GET_REPOSITORY_IDENTITY, async (_ctx, dirPath: string): Promise<string | null> => {
+    if (typeof dirPath !== 'string' || !dirPath.trim()) return null
+    const origin = await runGit(repoCommandDir(dirPath), ['config', '--get', 'remote.origin.url'])
+    const coordinates = origin ? parseRemoteUrl(origin) : null
+    // Never return a remote URL: it may contain credentials. Public owner avatars are GitHub-only.
+    return coordinates && isGitHubDotCom(coordinates.host)
+      && /^[\w.-]+$/.test(coordinates.owner) && /^[\w.-]+$/.test(coordinates.repo)
+      ? `${coordinates.owner}/${coordinates.repo}` : null
+  })
   server.handle(RPC_CHANNELS.git.LIST_REPOS, async (_ctx, workspaceId: string, recentDirs: string[], options?: { refreshGitHub?: boolean; query?: string }): Promise<RepoListing> => {
     const query = typeof options?.query === 'string' ? options.query.trim().slice(0, 250) : undefined
     return listing(workspaceId, recentDirs, !!options?.refreshGitHub, query)

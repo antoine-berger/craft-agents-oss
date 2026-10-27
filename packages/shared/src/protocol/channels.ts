@@ -371,6 +371,7 @@ export const RPC_CHANNELS = {
   },
   git: {
     GET_BRANCH: 'git:getBranch',
+    GET_REPOSITORY_IDENTITY: 'git:getRepositoryIdentity',
     /** Coding mode's worktree picker: local repos + `gh repo list` (see protocol/git-repos.ts) */
     LIST_REPOS: 'git:listRepos',
     /** Creates a worktree (cloning first for a GitHub-only repo) for a new Coding session */
