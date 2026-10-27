@@ -24,7 +24,7 @@ export function SessionAttentionBanner({ attention, onOpenUrl }: {
           </div>
           {reason.detail && <div className="text-secondary whitespace-pre-wrap break-words max-h-32 overflow-auto mt-0.5">{reason.detail}</div>}
         </div>)}
-        {attention.githubStale && <div className="text-caption text-tertiary">{t('attention.stale', { defaultValue: 'GitHub could not be refreshed. Previous requests are retained.' })}</div>}
+        {attention.githubStale && attention.reasons.some(reason => reason.source === 'github') && <div className="text-caption text-tertiary">{t('attention.stale', { defaultValue: 'GitHub could not be refreshed. Previous requests are retained.' })}</div>}
       </div>
     </div>
   </section>

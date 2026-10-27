@@ -4514,6 +4514,40 @@ export class SessionManager implements ISessionManager {
     })
   }
 
+  /** An attention handoff succeeds before stopping its SDK stream, just like submitting a plan. */
+  private async markSessionAttention(
+    managed: ManagedSession,
+    request: { kind: 'question' | 'plan' | 'error'; title: string; detail?: string },
+    service = getSessionAttentionService(),
+  ): Promise<void> {
+    if (!service) throw new Error('Human attention is unavailable on this server')
+    service.setReasons(managed.id, 'agent', [{ id: `agent:${request.kind}`, source: 'agent', kind: request.kind,
+      title: request.title, detail: request.detail, createdAt: Date.now(), action: { type: 'session' } }])
+
+    // The abort prevents the normal tool result from being delivered. Complete only our exact
+    // session tools, never an unrelated MCP source whose name happens to contain these words.
+    const attentionTool = [...managed.messages].reverse().find(message => message.toolStatus === 'executing'
+      && message.toolUseId && (message.toolName === 'mcp__session__request_user_input' || message.toolName === 'request_user_input'
+        || message.toolName === 'mcp__session__mark_attention' || message.toolName === 'mark_attention'))
+    if (attentionTool) {
+      await this.processEvent(managed, { type: 'tool_result', toolUseId: attentionTool.toolUseId!,
+        toolName: attentionTool.toolName!, isError: false, turnId: attentionTool.turnId,
+        parentToolUseId: attentionTool.parentToolUseId,
+        result: request.kind === 'question' ? 'Question saved. Waiting for your answer.'
+          : request.kind === 'plan' ? 'Plan saved for your review.' : 'Request saved. Waiting for your response.',
+      })
+    }
+    if (managed.isProcessing && managed.agent) {
+      managed.agent.interruptForHandoff(AbortReason.PlanSubmitted)
+      this.recoverPendingSteers(managed)
+      this.setProcessing(managed, false)
+      await releaseBrowserOwnershipOnForcedStop(sid => this.getBrowserPaneManagerForSession(sid), managed.id)
+      this.persistSession(managed)
+      this.sendEvent({ type: 'complete', sessionId: managed.id, tokenUsage: managed.tokenUsage,
+        backgroundTasksAlive: this.keepBackgroundTasksAlive }, managed.workspace.id)
+    }
+  }
+
   private async getOrCreateAgent(managed: ManagedSession, checkpointUserMessageId?: string): Promise<AgentInstance> {
     if (managed.isDeleting) throw new DOMException('Session was deleted', 'AbortError')
     await this.assertNoCheckpointRestore(managed)
@@ -5648,19 +5682,7 @@ export class SessionManager implements ISessionManager {
           return searchSessionHistory({ workspaceId: managed.workspace.id, workspaceRootPath: managed.workspace.rootPath,
             sessions: this.getSessions(managed.workspace.id).filter(session => !session.hidden) }, options)
         },
-        markAttentionFn: async request => {
-          const service = getSessionAttentionService()
-          if (!service) throw new Error('Human attention is unavailable on this server')
-          service.setReasons(managed.id, 'agent', [{ id: `agent:${request.kind}`, source: 'agent', kind: request.kind,
-            title: request.title, detail: request.detail, createdAt: Date.now(), action: { type: 'session' } }])
-          if (managed.isProcessing && managed.agent) {
-            managed.agent.interruptForHandoff(AbortReason.PlanSubmitted)
-            this.recoverPendingSteers(managed)
-            this.setProcessing(managed, false)
-            this.persistSession(managed)
-            this.sendEvent({ type: 'complete', sessionId: managed.id, tokenUsage: managed.tokenUsage }, managed.workspace.id)
-          }
-        },
+        markAttentionFn: request => this.markSessionAttention(managed, request),
         getSessionInfoFn: (sessionId?: string) => {
           const targetId = sessionId ?? managed.id
           const session = this.sessions.get(targetId)

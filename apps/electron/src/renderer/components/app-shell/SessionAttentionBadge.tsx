@@ -26,7 +26,7 @@ export function SessionAttentionBadge({ attention, onOpen }: { attention: Sessio
             else onOpen()
           }}>{t('attention.openAction', { defaultValue: 'Open action' })}</button>
         </div>)}
-        {attention.githubStale && <div className="text-xs text-muted-foreground">{t('attention.stale', { defaultValue: 'GitHub could not be refreshed. Previous requests are retained.' })}</div>}
+        {attention.githubStale && attention.reasons.some(reason => reason.source === 'github') && <div className="text-xs text-muted-foreground">{t('attention.stale', { defaultValue: 'GitHub could not be refreshed. Previous requests are retained.' })}</div>}
       </div>
     </TooltipContent>
   </Tooltip>
