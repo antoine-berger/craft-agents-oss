@@ -64,6 +64,9 @@ import { setupI18n, i18n, SUPPORTED_LANGUAGE_CODES, type LanguageCode } from '@c
 import { getPersistedUiLanguage, setPersistedUiLanguage } from '@craft-agent/shared/config'
 import { CONFIG_DIR } from '@craft-agent/shared/config/paths'
 import { registerDefaultZoomIpc } from './zoom'
+import { registerThinClientUpdateHandlers } from '../transport/thin-client-updates'
+import * as localUpdater from './auto-update'
+import { getDismissedUpdateVersion, setDismissedUpdateVersion } from '@craft-agent/shared/config'
 setupI18n()
 const persistedUiLanguage = getPersistedUiLanguage()
 if (persistedUiLanguage) {
@@ -91,7 +94,7 @@ import { createMessagingBootstrap, type MessagingBootstrapHandle } from '@craft-
 import { getCredentialManager } from '@craft-agent/shared/credentials'
 import { initModelRefreshService, getModelRefreshService, setFetcherPlatform } from '@craft-agent/server-core/model-fetchers'
 import { setSearchPlatform, setImageProcessor } from '@craft-agent/server-core/services'
-import { createApplicationMenu } from './menu'
+import { createApplicationMenu, rebuildMenu } from './menu'
 import { WindowManager } from './window-manager'
 import { loadWindowState, saveWindowState } from './window-state'
 import { getWorkspaces, getWorkspaceByNameOrId, loadStoredConfig, addWorkspace, saveConfig } from '@craft-agent/shared/config'
@@ -476,6 +479,14 @@ app.whenReady().then(async () => {
 
     if (isClientOnly) {
       mainLog.info(`Client-only mode: CRAFT_SERVER_URL=${process.env.CRAFT_SERVER_URL} (server initialization skipped)`)
+      registerThinClientUpdateHandlers(ipcMain, localUpdater, {
+        getDismissedUpdateVersion, setDismissedUpdateVersion,
+      }, (channel, ...args) => {
+        for (const win of BrowserWindow.getAllWindows()) {
+          if (!win.isDestroyed()) win.webContents.send(channel, ...args)
+        }
+        if (channel === RPC_CHANNELS.update.AVAILABLE) void rebuildMenu()
+      })
     }
 
     // Initialize notification service (always — triggered by server push events)
@@ -1263,7 +1274,8 @@ async function performQuitCleanup(): Promise<void> {
   }
 
   // Stop all model refresh timers
-  getModelRefreshService().stopAll()
+  // Thin clients never initialize the embedded model service.
+  if (sessionManager) getModelRefreshService().stopAll()
 
   // Stop messaging gateways so the WhatsApp worker subprocess exits cleanly.
   if (messagingHandle) {

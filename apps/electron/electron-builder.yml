@@ -70,7 +70,7 @@ files:
 extraMetadata:
   main: dist/main.cjs
 
-# Fork updates are intentionally disabled: never publish or fetch official updates.
+# Publishing is handled by fork-release.yml; the manual updater accepts only this fork.
 publish: []
 
 # Disable ASAR to avoid decompression overhead and click delays
