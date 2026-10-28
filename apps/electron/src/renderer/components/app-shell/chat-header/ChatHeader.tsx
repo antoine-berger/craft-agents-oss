@@ -51,7 +51,7 @@ export interface ChatHeaderProps {
   sessionFolderPath?: string
   /** The active pull request; shown on the desktop layout */
   prWatch?: PrWatchState
-  /** The session's PRs (branch PR + pinned PRs); with more than one the chip shows "+N" and the card its tabs */
+  /** The session's PRs (branch PR + pinned PRs); with more than one the chip shows "+N" */
   prWatchNav?: PrWatchNav
   /** Where the active PR came from — only `bound` PRs get an Unpin action */
   prWatchActiveOrigin?: PrEntry['origin']
@@ -268,16 +268,8 @@ export const ChatHeader = React.memo(function ChatHeader({
       )}
       {showPrChip && prWatch && (
         <ChatHeaderPrChip
-          sessionId={sessionId}
           state={prWatch}
           nav={prWatchNav}
-          activeOrigin={prWatchActiveOrigin}
-          onRefresh={onRefreshPrWatch}
-          onUnbind={onUnbindPr}
-          onSetAutoMerge={onSetPrAutoMerge}
-          autoFix={prWatchAutoFix}
-          onSetAutoFix={onSetPrAutoFix}
-          onCardOpenChange={onPrCardOpenChange}
           onReserveElChange={setPrReserveEl}
         />
       )}
