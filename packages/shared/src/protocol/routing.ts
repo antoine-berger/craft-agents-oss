@@ -225,6 +225,10 @@ export const REMOTE_ELIGIBLE_CHANNELS = new Set<string>([
   RPC_CHANNELS.ship.STOP,
   RPC_CHANNELS.ship.CHANGED,
   RPC_CHANNELS.providerQuotas.GET,
+  ...Object.values(RPC_CHANNELS.worktreeFiles),
+  ...Object.values(RPC_CHANNELS.terminal),
+  ...Object.values(RPC_CHANNELS.worktreeStack),
+  ...Object.values(RPC_CHANNELS.shipUsage),
   RPC_CHANNELS.conductor.IMPORT,
   // server — server-level operations (no workspace context needed)
   RPC_CHANNELS.server.GET_WORKSPACES,
@@ -245,6 +249,7 @@ export const REMOTE_ELIGIBLE_CHANNELS = new Set<string>([
   RPC_CHANNELS.sessions.DELETE,
   RPC_CHANNELS.sessions.GET_MESSAGES,
   RPC_CHANNELS.sessions.LIST_CHECKPOINTS,
+  RPC_CHANNELS.sessions.ADOPT_CHECKPOINT_WORKTREE,
   RPC_CHANNELS.sessions.RESTORE_CHECKPOINT,
   RPC_CHANNELS.sessions.SEND_MESSAGE,
   RPC_CHANNELS.sessions.CANCEL,

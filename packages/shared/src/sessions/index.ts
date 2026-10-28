@@ -22,6 +22,7 @@ export type {
   SessionPersistentField,
   OwnedWorktree,
   SessionWorktreeMetadata,
+  SessionChangeSummary,
 } from './types.ts';
 
 // Field constants

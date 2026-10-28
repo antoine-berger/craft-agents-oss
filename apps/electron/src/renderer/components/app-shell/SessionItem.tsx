@@ -1,4 +1,6 @@
 import { useTranslation } from "react-i18next"
+import { useState } from 'react'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@craft-agent/ui'
 import { Archive, ArchiveRestore, Flag } from "lucide-react"
 import { useActionLabel } from "@/actions"
 import { cn } from "@/lib/utils"
@@ -61,6 +63,9 @@ export function SessionItem({
   const { hotkey: nextHotkey } = useActionLabel('chat.nextSearchMatch')
   const { hotkey: prevHotkey } = useActionLabel('chat.prevSearchMatch')
   const title = getSessionTitle(item)
+  const [titleHovered, setTitleHovered] = useState(false)
+  const [titleFocused, setTitleFocused] = useState(false)
+  const changeSummary = item.worktree?.changeSummary
   const archiveAction = item.isArchived ? ctx.onUnarchive : ctx.onArchive
   // For the active session, prefer logical match count over ripgrep count
   const activeMatch = ctx.activeChatMatchInfo
@@ -145,6 +150,14 @@ export function SessionItem({
       onMouseDown={handleClick}
       buttonProps={{
         ...itemProps,
+        onFocus: (event: React.FocusEvent<HTMLButtonElement>) => {
+          ;(itemProps.onFocus as ((event: React.FocusEvent<HTMLButtonElement>) => void) | undefined)?.(event)
+          setTitleFocused(event.currentTarget.matches(':focus-visible'))
+        },
+        onBlur: (event: React.FocusEvent<HTMLButtonElement>) => {
+          ;(itemProps.onBlur as ((event: React.FocusEvent<HTMLButtonElement>) => void) | undefined)?.(event)
+          setTitleFocused(false)
+        },
         className: cn(itemProps.className as string | undefined, "items-center rounded-md py-2 pl-2.5 pr-10"),
         onKeyDown: (e: React.KeyboardEvent) => {
           ;(itemProps as { onKeyDown: (event: React.KeyboardEvent) => void }).onKeyDown(e)
@@ -209,7 +222,10 @@ export function SessionItem({
         {(!isPilot || needsAttention || runState === 'working') &&
           <SessionStatusIcon item={item} needsAttention={needsAttention} isWorking={runState === 'working'} isWaitingForSubagents={hasPendingSubagents && !item.isProcessing} attentionDescription={attention?.reasons.map(reason => reason.title).join("; ")} />}
       </>}
-      title={ctx.searchQuery ? highlightMatch(title, ctx.searchQuery) : title}
+      title={<Tooltip open={titleHovered || titleFocused} onOpenChange={setTitleHovered}>
+        <TooltipTrigger asChild><span>{ctx.searchQuery ? highlightMatch(title, ctx.searchQuery) : title}</span></TooltipTrigger>
+        <TooltipContent side="right" align="start" className="max-w-sm whitespace-normal">{title}</TooltipContent>
+      </Tooltip>}
       titleClassName={cn("truncate line-clamp-none", isUnread && !isWorking && "font-semibold")}
       titleSuffix={
         (showProjectName || hasMessagingBinding) ? (
@@ -251,6 +267,12 @@ export function SessionItem({
         </span>
       ) : item.isFlagged ? (
         <Flag className="size-3.5 text-info" aria-label={t("sidebar.flagged")} />
+      ) : changeSummary && (changeSummary.additions > 0 || changeSummary.deletions > 0 || changeSummary.binaryFiles > 0) ? (
+        <span className="inline-flex items-center gap-1 font-mono text-caption tabular-nums"
+          title={`Tracked changes since this session's base · updated ${new Date(changeSummary.observedAt).toLocaleString()}${changeSummary.binaryFiles ? ` · ${changeSummary.binaryFiles} binary files` : ''}`}>
+          <span className="text-success">+{changeSummary.additions}</span>
+          <span className="text-destructive">−{changeSummary.deletions}</span>
+        </span>
       ) : undefined}
     />
     </SessionProjectColorWrapper>

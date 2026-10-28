@@ -18,6 +18,11 @@ export { registerSessionsHandlers, cleanupSessionFileWatchForClient } from './se
 import { cleanupPrWatchForClient, registerPrWatchHandlers, getPrWatchRegistry } from './pr-watch'
 import { registerRepositoryHandlers } from './repositories'
 import { registerGitReviewHandlers } from './git-review'
+import { registerWorktreeFilesHandlers } from './worktree-files'
+import { registerTerminalHandlers, cleanupTerminalForClient } from './terminal'
+import { cancelSessionSearchesForClient } from '../../services/search'
+import { registerWorktreeStackHandlers } from './worktree-stack'
+import { registerShipUsageHandlers } from './ship-usage'
 import { registerConductorImportHandlers } from './conductor-import'
 import { registerCheckpointHandlers } from './checkpoints'
 import { registerServerHandlers } from './server'
@@ -63,6 +68,10 @@ export function registerCoreRpcHandlers(
   if (prRegistry) getSessionAttentionService()?.start(prRegistry)
   registerRepositoryHandlers(server, deps)
   registerGitReviewHandlers(server, deps)
+  registerWorktreeFilesHandlers(server, deps)
+  registerTerminalHandlers(server, deps)
+  registerWorktreeStackHandlers(server, deps)
+  registerShipUsageHandlers(server, deps)
   registerCheckpointHandlers(server, deps)
   registerConductorImportHandlers(server, deps)
   registerSkillsHandlers(server, deps)
@@ -79,4 +88,6 @@ export function registerCoreRpcHandlers(
 export function cleanupRpcClientResources(clientId: string): void {
   cleanupSessionFileWatchForClient(clientId)
   cleanupPrWatchForClient(clientId)
+  cleanupTerminalForClient(clientId)
+  cancelSessionSearchesForClient(clientId)
 }

@@ -3,7 +3,16 @@
  * Wire-format strings (values) are the stable API contract.
  * Key paths are internal and may be reorganized freely.
  */
+import { WORKTREE_FILES_CHANNELS } from './worktree-files'
+import { TERMINAL_CHANNELS } from './terminal'
+import { WORKTREE_STACK_CHANNELS } from './worktree-stack'
+import { SHIP_USAGE_CHANNELS } from './ship-usage'
+
 export const RPC_CHANNELS = {
+  worktreeFiles: WORKTREE_FILES_CHANNELS,
+  terminal: TERMINAL_CHANNELS,
+  worktreeStack: WORKTREE_STACK_CHANNELS,
+  shipUsage: SHIP_USAGE_CHANNELS,
   attention: { GET: 'attention:get', CHANGED: 'attention:changed' },
   ship: { START_PLAN: 'ship:startPlan', GET: 'ship:get', ADVANCE: 'ship:advance', REFRESH: 'ship:refresh', APPROVE: 'ship:approve', STOP: 'ship:stop', CHANGED: 'ship:changed' },
   providerQuotas: { GET: 'providerQuotas:get' },
@@ -46,6 +55,7 @@ export const RPC_CHANNELS = {
     RESPOND_TO_CREDENTIAL: 'sessions:respondToCredential',
     COMMAND: 'sessions:command',
     LIST_CHECKPOINTS: 'sessions:listCheckpoints',
+    ADOPT_CHECKPOINT_WORKTREE: 'sessions:adoptCheckpointWorktree',
     RESTORE_CHECKPOINT: 'sessions:restoreCheckpoint',
     GET_PENDING_PLAN_EXECUTION: 'sessions:getPendingPlanExecution',
     GET_PERMISSION_MODE_STATE: 'sessions:getPermissionModeState',

@@ -69,7 +69,13 @@ export async function resolveRepositoryStart(dir: string, start: RepositoryStart
   if ('repository' in start && start.repository !== undefined && typeof start.repository !== 'string') throw new Error('Invalid reference repository.')
   if (start.kind === 'branch') {
     await validateBranch(dir, start.branch)
-    if (start.copy) return { baseBranch: start.branch }
+    if (start.copy) {
+      const local = start.branch.startsWith('refs/heads/') ? start.branch : `refs/heads/${start.branch}`
+      if (!start.branch.startsWith('refs/remotes/') && await runGit(dir, ['rev-parse', '--verify', '--quiet', '--end-of-options', `${local}^{commit}`])) {
+        return { baseBranch: local }
+      }
+      return { baseBranch: start.branch }
+    }
     await existingBranch(dir, start.branch)
     return { existingBranch: start.branch, taskTitle: start.branch.split('/').pop() }
   }

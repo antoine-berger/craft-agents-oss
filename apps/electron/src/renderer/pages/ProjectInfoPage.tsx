@@ -53,6 +53,8 @@ export default function ProjectInfoPage({ projectSlug }: ProjectInfoPageProps) {
   const [editWorkingDir, setEditWorkingDir] = useState('')
   const [editWorktreeBaseBranch, setEditWorktreeBaseBranch] = useState('')
   const [editWorktreeCleanup, setEditWorktreeCleanup] = useState(false)
+  const [editSetupCommand, setEditSetupCommand] = useState('')
+  const [editSetupVerifyCommand, setEditSetupVerifyCommand] = useState('')
   const [editDetails, setEditDetails] = useState('')
   const [editColor, setEditColor] = useState<string>('')
   const [saving, setSaving] = useState(false)
@@ -77,6 +79,8 @@ export default function ProjectInfoPage({ projectSlug }: ProjectInfoPageProps) {
       setEditWorkingDir(loaded.config.workingDirectory ?? '')
       setEditWorktreeBaseBranch(loaded.config.worktreeSettings?.baseBranch ?? '')
       setEditWorktreeCleanup(loaded.config.worktreeSettings?.cleanupOnArchive === true)
+      setEditSetupCommand(loaded.config.worktreeSettings?.setupCommand ?? '')
+      setEditSetupVerifyCommand(loaded.config.worktreeSettings?.setupVerifyCommand ?? '')
       setEditDetails(loaded.config.details ?? '')
       setEditColor(loaded.config.color ?? '')
     } catch (err) {
@@ -159,6 +163,8 @@ export default function ProjectInfoPage({ projectSlug }: ProjectInfoPageProps) {
           enabled: !!editWorkingDir.trim(),
           baseBranch: editWorktreeBaseBranch.trim() || undefined,
           cleanupOnArchive: editWorktreeCleanup,
+          setupCommand: editSetupCommand.trim() || undefined,
+          setupVerifyCommand: editSetupVerifyCommand.trim() || undefined,
         },
         details: editDetails.trim() || undefined,
         color: editColor.trim() || undefined,
@@ -172,7 +178,7 @@ export default function ProjectInfoPage({ projectSlug }: ProjectInfoPageProps) {
     } finally {
       setSaving(false)
     }
-  }, [workspaceId, project, editName, editDescription, editWorkingDir, editWorktreeBaseBranch, editWorktreeCleanup, editDetails, editColor, t])
+  }, [workspaceId, project, editName, editDescription, editWorkingDir, editWorktreeBaseBranch, editWorktreeCleanup, editSetupCommand, editSetupVerifyCommand, editDetails, editColor, t])
 
   const handleDeleteProject = useCallback(async () => {
     if (!workspaceId || !project) return
@@ -387,6 +393,12 @@ export default function ProjectInfoPage({ projectSlug }: ProjectInfoPageProps) {
                       checked={editWorktreeCleanup}
                       onCheckedChange={setEditWorktreeCleanup}
                     />
+                    <Field label={t('projectInfo.worktree.setupCommand', { defaultValue: 'Setup command' })} hint={t('projectInfo.worktree.setupHint', { defaultValue: 'Runs in every new worktree before the agent starts. Leave empty to use the source repository’s .craft/setup.json or conductor.json.' })}>
+                      <Textarea value={editSetupCommand} onChange={event => setEditSetupCommand(event.target.value)} className="font-mono text-sm" placeholder="pnpm install --frozen-lockfile" maxLength={16_384} />
+                    </Field>
+                    <Field label={t('projectInfo.worktree.setupVerifyCommand', { defaultValue: 'Readiness check' })} hint={t('projectInfo.worktree.setupVerifyHint', { defaultValue: 'Optional command that must succeed after setup, for example checking tools, environment and local services.' })}>
+                      <Input value={editSetupVerifyCommand} onChange={event => setEditSetupVerifyCommand(event.target.value)} placeholder="node --version && test -f .env" maxLength={16_384} />
+                    </Field>
                   </div>
                 )}
                 <Field

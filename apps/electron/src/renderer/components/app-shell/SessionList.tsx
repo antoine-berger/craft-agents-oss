@@ -263,6 +263,7 @@ export function SessionList({
     highlightQuery,
     isSearchingContent,
     isSearchUnavailable,
+    isSearchIncomplete,
     contentSearchResults,
     matchingFilterItems,
     otherResultItems,
@@ -836,6 +837,7 @@ export function SessionList({
                 onBlur={() => setIsSearchInputFocused(false)}
                 isSearching={isSearchingContent}
                 isUnavailable={isSearchUnavailable}
+                isIncomplete={isSearchIncomplete}
                 resultCount={matchingFilterItems.length + otherResultItems.length}
                 exceededLimit={exceededSearchLimit}
                 inputRef={searchInputRef}
@@ -851,9 +853,9 @@ export function SessionList({
         emptyState={
           isSearchMode && !isSearchingContent ? (
             <div className="flex flex-col items-center justify-center py-12 px-4 text-center">
-              <p className="text-label text-secondary">{t("session.noSessionsFound")}</p>
+              <p className="text-label text-secondary">{isSearchUnavailable ? t('session.searchUnavailable') : isSearchIncomplete ? t('session.searchIncomplete', { defaultValue: 'Partial results' }) : t("session.noSessionsFound")}</p>
               <p className="text-label-sm text-tertiary mt-0.5">
-                {t("session.noSessionsFoundDesc")}
+                {isSearchUnavailable || isSearchIncomplete ? t('session.searchIncompleteHint', { defaultValue: 'Search stopped before all chats were checked. Try again or refine your query.' }) : t("session.noSessionsFoundDesc")}
               </p>
               <Button variant="ghost" size="sm" className="mt-2" onClick={() => onSearchChange?.('')}>
                 {t("session.clearSearch")}

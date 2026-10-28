@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, useRef, useMemo } from "react"
 import { isToday, isYesterday, format, startOfDay } from "date-fns"
 
 import { searchLog } from "@/lib/logger"
+import { normalizeSessionSearchResponse, isIncompleteSearch } from '@/lib/session-search-response'
 import { parseLabelEntry, matchesLabelFilter } from "@craft-agent/shared/labels"
 import type { LabelConfig } from "@craft-agent/shared/labels"
 import { fuzzyScore } from "@craft-agent/shared/search"
@@ -77,6 +78,7 @@ export interface UseSessionSearchResult {
   isSearchingContent: boolean
   /** Whether the search service is unavailable (e.g. ripgrep not found on remote server) */
   isSearchUnavailable: boolean
+  isSearchIncomplete: boolean
   /** Raw content search results — needed by SessionItem for `chatMatchCount` */
   contentSearchResults: Map<string, ContentSearchResult>
 
@@ -329,6 +331,7 @@ export function useSessionSearch({
   const [contentSearchResults, setContentSearchResults] = useState<Map<string, ContentSearchResult>>(new Map())
   const [isSearchingContent, setIsSearchingContent] = useState(false)
   const [isSearchUnavailable, setIsSearchUnavailable] = useState(false)
+  const [isSearchIncomplete, setIsSearchIncomplete] = useState(false)
   const [displayLimit, setDisplayLimit] = useState(INITIAL_DISPLAY_LIMIT)
   const searchInputRef = useRef<HTMLInputElement>(null)
 
@@ -341,24 +344,34 @@ export function useSessionSearch({
   useEffect(() => {
     if (!workspaceId || !isSearchMode) {
       setContentSearchResults(new Map())
+      setIsSearchUnavailable(false)
+      setIsSearchIncomplete(false)
+      setIsSearchingContent(false)
       return
     }
 
-    const searchId = Date.now().toString(36)
+    const searchId = crypto.randomUUID()
     searchLog.info('query:change', { searchId, query: searchQuery })
 
     let cancelled = false
+    let requested = false
     setIsSearchingContent(true)
     setIsSearchUnavailable(false)
+    setIsSearchIncomplete(false)
 
     const timer = setTimeout(async () => {
       try {
+        requested = true
         searchLog.info('ipc:call', { searchId })
         const ipcStart = performance.now()
 
-        const results = await window.electronAPI.searchSessionContent(workspaceId, searchQuery, searchId)
+        const rawResponse = await window.electronAPI.searchSessionContent(workspaceId, searchQuery, searchId, { includeStatus: true })
 
         if (cancelled) return
+        const response = normalizeSessionSearchResponse(rawResponse, searchId)
+        const results = response.results
+        setIsSearchUnavailable(response.status === 'unavailable')
+        setIsSearchIncomplete(isIncompleteSearch(response.status))
 
         searchLog.info('ipc:received', {
           searchId,
@@ -380,6 +393,7 @@ export function useSessionSearch({
         })
       } catch (error) {
         if (cancelled) return
+        setIsSearchUnavailable(true)
         // Detect search unavailable (ripgrep not found) vs transient errors
         const message = error instanceof Error ? error.message : String(error)
         if (message.includes('SearchUnavailableError') || message.includes('ripgrep')) {
@@ -399,6 +413,7 @@ export function useSessionSearch({
     return () => {
       cancelled = true
       clearTimeout(timer)
+      if (requested) void window.electronAPI.searchSessionContent(workspaceId, '', searchId, { includeStatus: true, cancel: true }).catch(() => {})
       setIsSearchingContent(false)
     }
   }, [workspaceId, isSearchMode, searchQuery])
@@ -556,6 +571,7 @@ export function useSessionSearch({
     highlightQuery,
     isSearchingContent,
     isSearchUnavailable,
+    isSearchIncomplete,
     contentSearchResults,
     matchingFilterItems,
     otherResultItems,

@@ -30,6 +30,7 @@ export interface SessionSearchHeaderProps {
   isSearching?: boolean
   /** Whether the search service is unavailable (e.g. ripgrep not found) */
   isUnavailable?: boolean
+  isIncomplete?: boolean
   /** Number of results to display (when not searching) */
   resultCount?: number
   /** Whether the result count exceeded the display limit (shows "100+" instead of exact count) */
@@ -51,6 +52,7 @@ export function SessionSearchHeader({
   onBlur,
   isSearching = false,
   isUnavailable = false,
+  isIncomplete = false,
   resultCount,
   exceededLimit = false,
   inputRef,
@@ -91,7 +93,7 @@ export function SessionSearchHeader({
 
       {/* Search status row - shown when search mode is active (2+ characters) */}
       {searchQuery.length >= 2 && (
-        <div className="px-2 pt-2 flex items-center gap-1.5 text-label-sm text-tertiary">
+        <div role="status" className="px-2 pt-2 flex items-center gap-1.5 text-label-sm text-tertiary">
           {isSearching ? (
             <>
               <Spinner className="text-caption text-tertiary" />
@@ -99,6 +101,8 @@ export function SessionSearchHeader({
             </>
           ) : isUnavailable ? (
             <span className="text-destructive">{t('session.searchUnavailable')}</span>
+          ) : isIncomplete ? (
+            <span title={t('session.searchIncompleteHint', { defaultValue: 'Search stopped before all chats were checked. Try again or refine your query.' })}>{t('session.searchIncomplete', { defaultValue: 'Partial results' })} · {resultCount ?? 0}</span>
           ) : (
             <span>{t('session.results', { count: exceededLimit ? '100+' : (resultCount ?? 0) })}</span>
           )}

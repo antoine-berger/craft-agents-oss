@@ -76,6 +76,15 @@ publish: []
 # Disable ASAR to avoid decompression overhead and click delays
 asar: false
 
+extraResources:
+  - from: ../../node_modules/node-pty
+    to: app/node_modules/node-pty
+    filter:
+      - package.json
+      - lib/**/*
+      - prebuilds/**/*
+      - build/Release/**/*
+
 mac:
   category: public.app-category.productivity
   icon: resources/icon.icns

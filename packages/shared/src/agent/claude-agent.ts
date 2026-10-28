@@ -97,7 +97,8 @@ import type {
   SourceChangeCallback,
   SourceActivationCallback,
 } from './backend/types.ts';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import { CONFIG_DIR } from '../config/paths.ts';
 import { stat } from 'node:fs/promises';
 import {
   isExistingDirectory,
@@ -1103,6 +1104,27 @@ export class ClaudeAgent extends BaseAgent {
     return connection?.providerType === 'anthropic' && (connection.authType === 'oauth' || connection.authType === 'api_key');
   }
 
+  /** Verify the selected connection and the endpoint pinned into this SDK subprocess. */
+  private usesShipProxyConnection(): boolean {
+    const connection = this.config.connectionSlug ? getLlmConnection(this.config.connectionSlug) : null;
+    if (connection?.providerType !== 'anthropic' || connection.authType !== 'api_key_with_endpoint') return false;
+    try {
+      const state = JSON.parse(readFileSync(join(CONFIG_DIR, 'cli-proxy', 'state.json'), 'utf8'));
+      if (state.enabled !== true || !Number.isInteger(state.port) || state.port < 1 || state.port > 65535) return false;
+      const managedUrl = `http://127.0.0.1:${state.port}`;
+      // Neither a familiar slug nor a user-defined endpoint proves managed routing.
+      return connection.baseUrl === managedUrl && this.config.envOverrides?.ANTHROPIC_BASE_URL === managedUrl;
+    } catch {
+      return false;
+    }
+  }
+
+  private routeShipTool(toolName: string, toolInput: Record<string, unknown>, cwd: string) {
+    return routeShipReviewer(toolName, toolInput, this.workspaceRootPath,
+      (toolName === 'Agent' || toolName === 'Task') && existsSync(join(cwd, '.context', 'ship')),
+      (toolName === 'Agent' || toolName === 'Task') && this.usesShipProxyConnection());
+  }
+
   /** Native connectors belong to the account selected for this session. */
   private usesClaudeAccountConnectors(): boolean {
     const connection = this.config.connectionSlug ? getLlmConnection(this.config.connectionSlug) : null;
@@ -1566,7 +1588,7 @@ export class ClaudeAgent extends BaseAgent {
       const options: Options = {
         ...getDefaultOptions({
           ...this.config.envOverrides,
-          ...(this.config.connectionSlug?.startsWith('cli-proxy-') ? SHIP_CLAUDE_MODEL_ENV : {}),
+          ...(this.usesShipProxyConnection() ? SHIP_CLAUDE_MODEL_ENV : {}),
           // SessionManager sets process.env.CRAFT_SESSION_DIR for every session it starts, so a
           // subprocess spawned after another session started would inherit that session's dir.
           ...(this.config.session?.id
@@ -1786,10 +1808,9 @@ export class ClaudeAgent extends BaseAgent {
 
               // Resumed chats may still hold a pre-migration Ship skill in their model context.
               if (checkResult.type === 'allow' || checkResult.type === 'modify') {
-                const routed = routeShipReviewer(input.tool_name, checkResult.type === 'modify' ? checkResult.input : toolInput, this.workspaceRootPath,
-                  (input.tool_name === 'Agent' || input.tool_name === 'Task') && existsSync(join(resolvedCwd, '.context', 'ship')));
+                const routed = this.routeShipTool(input.tool_name, checkResult.type === 'modify' ? checkResult.input : toolInput, resolvedCwd);
                 if (routed.type === 'block') {
-                  this.onDebug?.(`[Ship routing] Redirecting ${routed.role} to CLIProxyAPI Codex`);
+                  this.onDebug?.(`[Ship routing] Blocking ${routed.role}: routing requirements not met`);
                   return blockWithReason(routed.reason);
                 }
                 if (routed.type === 'modify') {

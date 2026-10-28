@@ -5,10 +5,11 @@
  * Returns matches with session IDs and context snippets.
  */
 
-import { spawn, ChildProcess } from 'child_process';
+import { spawn } from 'child_process';
 import { existsSync } from 'fs';
 import { resolveBackendHostTooling } from '@craft-agent/shared/agent/backend';
 import { createScopedLogger, CONSOLE_LOGGER, type PlatformServices, type Logger } from '../runtime/platform';
+import type { SessionSearchResponse, SessionSearchStatus } from '@craft-agent/shared/protocol';
 
 /**
  * Thrown when the search service cannot run (e.g. ripgrep binary not found).
@@ -21,8 +22,17 @@ export class SearchUnavailableError extends Error {
   }
 }
 
-// Track current search process to cancel on new search
-let currentSearchProcess: ChildProcess | null = null;
+const searches = new Map<string, { clientId: string; searchId: string; cancel(): void }>();
+
+/** A query in one window must not cancel another window's search. */
+export function cancelSessionSearchesForClient(clientId: string): void {
+  for (const search of searches.values()) if (search.clientId === clientId) search.cancel();
+}
+
+export function cancelSessionSearchRequest(clientId: string, workspaceId: string, searchId: string): void {
+  const search = searches.get(JSON.stringify([clientId, workspaceId]));
+  if (search?.searchId === searchId) search.cancel();
+}
 
 // Module-level platform ref — set once during init via setSearchPlatform()
 let _platform: PlatformServices | null = null;
@@ -48,7 +58,7 @@ export interface SearchMatch {
   /** The matched text snippet with context */
   snippet: string;
   /** The raw matched text (without context) */
-  matchText: string;
+  matchText?: string;
 }
 
 /**
@@ -70,12 +80,15 @@ export interface SearchOptions {
   timeout?: number;
   /** Maximum matches per session. Default: 3 */
   maxMatchesPerSession?: number;
-  /** Maximum total sessions to return. Default: 50 */
+  /** Maximum sessions with extracted snippets; all matching sessions are counted. */
   maxSessions?: number;
   /** Case insensitive search. Default: true */
   ignoreCase?: boolean;
   /** Search ID for correlating logs across stages */
   searchId?: string;
+  scope?: { clientId: string; workspaceId: string };
+  /** Filter before counting/snippet allocation, including hidden imported histories. */
+  allowedSessionIds?: ReadonlySet<string>;
 }
 
 /**
@@ -184,207 +197,97 @@ function extractSnippetFast(rawLine: string, matchText: string, maxLength = 150)
  * @param options - Search options
  * @returns Promise resolving to array of session search results
  */
-export async function searchSessions(
+export async function searchSessions(query: string, sessionsDir: string, options: SearchOptions = {}): Promise<SessionSearchResult[]> {
+  const response = await searchSessionsDetailed(query, sessionsDir, options);
+  if (response.status === 'unavailable') throw new SearchUnavailableError('Session content search is unavailable.');
+  return response.results;
+}
+
+/** A status envelope distinguishes an empty answer from interrupted or unavailable search. */
+export async function searchSessionsDetailed(
   query: string,
   sessionsDir: string,
-  options: SearchOptions = {}
-): Promise<SessionSearchResult[]> {
-  const {
-    timeout = 5000,
-    maxMatchesPerSession = 3,
-    maxSessions = 50,
-    ignoreCase = true,
-    searchId = Date.now().toString(36),
-  } = options;
-
-  if (!query.trim()) {
-    return [];
-  }
-
+  options: SearchOptions = {},
+): Promise<SessionSearchResponse> {
+  const { timeout = 5000, maxMatchesPerSession = 3, maxSessions = 50, ignoreCase = true,
+    searchId = Date.now().toString(36), scope, allowedSessionIds } = options;
+  const empty = (status: SessionSearchStatus): SessionSearchResponse => ({ searchId, results: [], status });
+  if (!query.trim()) return empty('complete');
+  let rgPath: string | undefined;
+  try { rgPath = getRipgrepPath(); } catch { return empty('unavailable'); }
+  if (!rgPath || !existsSync(rgPath)) return empty('unavailable');
+  if (!existsSync(sessionsDir)) return empty('complete');
+  const key = scope ? JSON.stringify([scope.clientId, scope.workspaceId]) : undefined;
+  if (key) searches.get(key)?.cancel();
   const startTime = Date.now();
-  searchLog.info('ripgrep:start', { searchId, query });
-
-  const rgPath = getRipgrepPath();
-  handlerLog.debug('[search] Ripgrep path:', rgPath);
-  if (!rgPath || !existsSync(rgPath)) {
-    handlerLog.error('[search] ripgrep binary not found:', rgPath);
-    throw new SearchUnavailableError(`ripgrep binary not found: ${rgPath ?? 'undefined'}`);
-  }
-
-  handlerLog.debug('[search] Sessions directory:', sessionsDir);
-  if (!existsSync(sessionsDir)) {
-    handlerLog.warn('[search] Sessions directory not found:', sessionsDir);
-    return [];
-  }
-
-  return new Promise((resolve) => {
+  return new Promise(resolve => {
     const results = new Map<string, SessionSearchResult>();
     let buffer = '';
-
-    // Build ripgrep arguments
-    const args = [
-      '--json',           // JSON output format (NDJSON)
-      '--max-count', '10', // Limit matches per file to prevent huge results
-      '-g', '**/session.jsonl', // Only search session.jsonl files
-    ];
-
-    if (ignoreCase) {
-      args.push('-i');
-    }
-
-    // Use regex pattern that:
-    // 1. Only matches user/assistant message lines (skips huge tool_result lines)
-    // 2. Requires the query to appear somewhere in the line
-    // This filters at ripgrep level, avoiding 70x more data being sent to Node.js
-    //
-    // Note: "type" field position varies — messageToStored() uses rest-spread before
-    // adding type, so "type" can appear anywhere in the JSON line, not just after "id".
+    let status: SessionSearchStatus = 'complete';
+    let settled = false;
+    let killTimer: ReturnType<typeof setTimeout> | undefined;
+    const args = ['--json', '-g', '**/session.jsonl'];
+    if (ignoreCase) args.push('-i');
     const escapedQuery = escapeRegex(query);
-    args.push('-e', `"type":"(user|assistant)".*${escapedQuery}|${escapedQuery}.*"type":"(user|assistant)"`);
-    args.push(sessionsDir);
-
-    // Cancel previous search if still running (user typed new query)
-    if (currentSearchProcess) {
-      // Platform-aware termination (SIGTERM doesn't exist on Windows)
-      if (process.platform === 'win32') {
-        currentSearchProcess.kill();
-      } else {
-        currentSearchProcess.kill('SIGTERM');
-      }
-      currentSearchProcess = null;
+    args.push('-e', `"type":"(user|assistant)".*${escapedQuery}|${escapedQuery}.*"type":"(user|assistant)"`, sessionsDir);
+    const rg = spawn(rgPath!, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    const active = { clientId: scope?.clientId ?? '', searchId, cancel: () => stop('cancelled') };
+    if (key) searches.set(key, active);
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (killTimer) clearTimeout(killTimer);
+      if (key && searches.get(key) === active) searches.delete(key);
+      const resultArray = [...results.values()].sort((a, b) => b.matchCount - a.matchCount);
+      searchLog.info('ripgrep:complete', { searchId, status, durationMs: Date.now() - startTime, totalSessions: results.size });
+      resolve({ searchId, results: resultArray, status });
+    };
+    function stop(reason: SessionSearchStatus) {
+      if (settled || status === 'cancelled' || status === 'timed_out') return;
+      status = reason;
+      rg.kill(process.platform === 'win32' ? undefined : 'SIGTERM');
+      // A stuck child cannot hold the RPC indefinitely after cancellation/disconnect.
+      killTimer = setTimeout(() => { rg.kill('SIGKILL'); finish(); }, 500);
     }
-
-    const rg = spawn(rgPath, args, {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      timeout,
-    });
-    currentSearchProcess = rg;
-
-    // Set up timeout
-    const timeoutHandle = setTimeout(() => {
-      // Platform-aware termination (SIGTERM doesn't exist on Windows)
-      if (process.platform === 'win32') {
-        rg.kill();
-      } else {
-        rg.kill('SIGTERM');
-      }
-      handlerLog.warn('[search] Search timed out after', timeout, 'ms');
-    }, timeout);
-
-    rg.stdout.on('data', (chunk: Buffer) => {
-      buffer += chunk.toString();
-
-      // Process complete lines
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || ''; // Keep incomplete line in buffer
-
-      for (const line of lines) {
-        if (!line.trim()) continue;
-
-        try {
-          const result = JSON.parse(line);
-
-          // We only care about 'match' type results
-          if (result.type !== 'match') continue;
-
-          const data = result.data;
-          const filePath = data.path?.text;
-          if (!filePath) continue;
-
-          // Extract session ID from path: .../sessions/{sessionId}/session.jsonl
-          const pathParts = filePath.split(/[/\\]/);
-          const jsonlIndex = pathParts.findIndex((p: string) => p === 'session.jsonl');
-          if (jsonlIndex < 1) continue;
-
-          const sessionId = pathParts[jsonlIndex - 1];
-          if (!sessionId) continue;
-
-          // Skip header line (line 1)
-          const lineNumber = data.line_number;
-          if (lineNumber === 1) continue;
-
-          // Get the raw line content
-          const rawLine = data.lines?.text || '';
-
-          // Skip intermediate messages using fast string search (no JSON.parse needed)
-          // This is much faster than parsing the entire message JSON
-          if (rawLine.includes('"isIntermediate":true')) continue;
-
-          // Skip messages with base64-encoded content (images, attachments)
-          // The query can match inside base64 noise, producing false positives.
-          // Covers both content blocks ("type":"base64") and attachment thumbnails.
-          if (rawLine.includes('base64')) continue;
-
-          // Get or create session result
-          let sessionResult = results.get(sessionId);
-          if (!sessionResult) {
-            sessionResult = {
-              sessionId,
-              matchCount: 0,
-              matches: [],
-            };
-            results.set(sessionId, sessionResult);
-          }
-
-          sessionResult.matchCount += data.submatches?.length || 1;
-
-          // Only extract snippets for first maxSessions (skip expensive work for the rest)
-          // ripgrep continues to count total sessions for "showing X of Y" display
-          if (results.size <= maxSessions && sessionResult.matches.length < maxMatchesPerSession) {
-            const matchText = data.submatches?.[0]?.match?.text || query;
-
-            // Use fast snippet extraction (no JSON.parse)
-            sessionResult.matches.push({
-              sessionId,
-              lineNumber,
-              snippet: extractSnippetFast(rawLine, matchText),
-              matchText,
-            });
-          }
-        } catch (e) {
-          // Skip malformed JSON lines
-          handlerLog.debug('[search] Failed to parse ripgrep output:', e);
+    const timer = setTimeout(() => stop('timed_out'), timeout);
+    const consume = (line: string) => {
+      if (!line.trim()) return;
+      try {
+        const result = JSON.parse(line);
+        if (result.type !== 'match') return;
+        const data = result.data;
+        const pathParts = data.path?.text?.split(/[/\\]/);
+        const jsonlIndex = pathParts?.lastIndexOf('session.jsonl');
+        const sessionId = jsonlIndex > 0 ? pathParts[jsonlIndex - 1] : undefined;
+        if (!sessionId || data.line_number === 1 || (allowedSessionIds && !allowedSessionIds.has(sessionId))) return;
+        const rawLine = data.lines?.text || '';
+        if (rawLine.includes('"isIntermediate":true') || rawLine.includes('base64')) return;
+        let entry = results.get(sessionId);
+        if (!entry) { entry = { sessionId, matchCount: 0, matches: [] }; results.set(sessionId, entry); }
+        entry.matchCount += data.submatches?.length || 1;
+        if (results.size <= maxSessions && entry.matches.length < maxMatchesPerSession) {
+          const matchText = data.submatches?.[0]?.match?.text || query;
+          entry.matches.push({ sessionId, lineNumber: data.line_number,
+            snippet: extractSnippetFast(rawLine, matchText), matchText });
         }
-      }
+      } catch { if (status === 'complete') status = 'partial'; }
+    };
+    rg.stdout.setEncoding('utf8');
+    rg.stdout.on('data', (chunk: string) => {
+      if (settled) return;
+      buffer += chunk.toString();
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      for (const line of lines) consume(line);
     });
-
-    rg.stderr.on('data', (data: Buffer) => {
-      handlerLog.warn('[search] ripgrep stderr:', data.toString());
+    rg.stderr.on('data', () => {});
+    rg.on('close', code => {
+      if (settled) return;
+      if (buffer) consume(buffer);
+      if (status === 'complete' && code !== 0 && code !== 1) status = results.size ? 'partial' : 'unavailable';
+      finish();
     });
-
-    // Log the command being executed
-    handlerLog.debug('[search] Running ripgrep:', rgPath, args.join(' '));
-
-    rg.on('close', (code) => {
-      clearTimeout(timeoutHandle);
-      // Clear reference if this is still the current search
-      if (currentSearchProcess === rg) {
-        currentSearchProcess = null;
-      }
-
-      if (code !== 0 && code !== 1) {
-        // Exit code 1 means no matches found (not an error)
-        handlerLog.debug('[search] ripgrep exited with code:', code);
-      }
-
-      // Convert map to array, sorted by match count (descending)
-      const resultArray = Array.from(results.values());
-      resultArray.sort((a, b) => b.matchCount - a.matchCount);
-
-      searchLog.info('ripgrep:complete', {
-        searchId,
-        durationMs: Date.now() - startTime,
-        totalSessions: results.size,
-        returnedSessions: Math.min(resultArray.length, maxSessions),
-      });
-
-      resolve(resultArray);
-    });
-
-    rg.on('error', (error) => {
-      clearTimeout(timeoutHandle);
-      handlerLog.error('[search] ripgrep error:', error);
-      resolve([]);
-    });
+    rg.on('error', () => { if (status === 'complete') status = results.size ? 'partial' : 'unavailable'; finish(); });
   });
 }

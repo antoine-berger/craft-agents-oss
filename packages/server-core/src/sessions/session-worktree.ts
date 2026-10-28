@@ -57,6 +57,10 @@ export function resolveSessionWorktreePolicy(
     repositoryPath: project.workingDirectory,
     baseBranch: project.worktreeSettings.baseBranch,
     cleanupOnArchive: project.worktreeSettings.cleanupOnArchive === true,
+    setup: {
+      command: project.worktreeSettings.setupCommand,
+      verifyCommand: project.worktreeSettings.setupVerifyCommand,
+    },
   }
 }
 

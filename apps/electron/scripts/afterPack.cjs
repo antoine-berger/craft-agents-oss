@@ -27,6 +27,14 @@ module.exports = async function afterPack(context) {
 
   const appPath = context.appOutDir;
   const resourcesDir = path.join(appPath, 'Craft Agents.app', 'Contents', 'Resources');
+  // The published node-pty archive can lose its helper's executable bit.
+  const ptyRoot = path.join(resourcesDir, 'app', 'node_modules', 'node-pty');
+  for (const arch of ['arm64', 'x64']) {
+    const helper = path.join(ptyRoot, 'prebuilds', `darwin-${arch}`, 'spawn-helper');
+    if (fs.existsSync(helper)) fs.chmodSync(helper, 0o755);
+  }
+  const builtHelper = path.join(ptyRoot, 'build', 'Release', 'spawn-helper');
+  if (fs.existsSync(builtHelper)) fs.chmodSync(builtHelper, 0o755);
   const precompiledAssets = path.join(context.packager.projectDir, 'resources', 'Assets.car');
 
   console.log(`afterPack: projectDir=${context.packager.projectDir}`);

@@ -23,6 +23,13 @@ The same planning deliverables and owner-facing output contract as Antoine's Con
 
 ## Model routing: identical to Conductor
 
+### Explicit reviewer role contract
+
+Every new native Agent reviewer prompt must begin with exactly one first line `Ship-Role: <role>` (plain text in the existing prompt, never an invented SDK argument). Use `external-factcheck`, `performance` or `e2e` for native Claude calls. The finite Codex roles are `factcheck`, `omissions`, `bugs`, `comments` and `light`; execute them with the helper's existing `--role` parameter. A native Agent call declaring a Codex role is blocked and redirected to that helper. Unknown role headers are blocked. Role headers decide routing even when the quoted artifacts discuss other reviewers. Older ongoing chats retain their compatibility recognition; all new calls use the explicit contract.
+
+The helper writes sanitized per-attempt measurements to `.context/ship/reviewers/<key>/usage.jsonl`: requested model, served model only if the response reports it, actual CLI-reported input/output/cache tokens, elapsed time, role and round. Missing values remain unknown. These are Codex helper measurements, not total session usage: native Claude steps and unobserved interrupted helper calls are not included. Pool account attribution remains unknown because CLI JSON events do not expose a verifiable match to CLIProxyAPI's request/auth identifiers. Never infer a selected account from timing, quotas or the latest proxy log entry; never claim cost savings from these records alone.
+
+
 The pilot plans, implements and handles bot feedback in this current Claude chat: `claude-opus-5-5`, high, with the existing 1M context setting. All Claude calls, including native subagents, must inherit the current **CLIProxyAPI connection**. All Codex calls use the helper below, whose only provider is the same local CLIProxyAPI pool. Never use a direct provider, a new login, or a Claude substitute for a failed Codex role. If the required model/connection/tool is unavailable, report the blocked role instead of running it on an inherited model.
 
 | Role | Actual actor | Model | Effort / execution |

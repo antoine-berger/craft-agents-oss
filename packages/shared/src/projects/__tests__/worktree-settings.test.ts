@@ -19,6 +19,11 @@ beforeEach(() => {
 afterEach(() => { rmSync(root, { recursive: true, force: true }); });
 
 describe('project worktree settings persistence', () => {
+  it('captures explicit setup and readiness commands without changing legacy defaults', () => {
+    const project = createProject(workspace, { name: 'Ready checkout', workingDirectory: repo, worktreeSettings: { enabled: true, setupCommand: '  pnpm install --frozen-lockfile  ', setupVerifyCommand: 'test -f .env' } })
+    expect(loadProjectConfig(workspace, project.slug)?.worktreeSettings).toMatchObject({ setupCommand: 'pnpm install --frozen-lockfile', setupVerifyCommand: 'test -f .env' })
+    expect(() => updateProject(workspace, project.slug, { worktreeSettings: { enabled: true, setupCommand: 'bad\0command' } })).toThrow()
+  })
   it('leaves existing projects without a policy unchanged and allows shared repositories', () => {
     const project = createProject(workspace, { name: 'Checkout redesign', workingDirectory: repo });
     const second = createProject(workspace, { name: 'Search improvements', workingDirectory: repo });
