@@ -27,7 +27,7 @@
     "apps/electron/src/main/fork-update.ts": "a2139e259944c76c91e32b3534a121e39890acb588fe8be0dca0beb64fb72cfb",
     "apps/electron/src/transport/thin-client-updates.ts": "bff4691a5a3752391c929f7498d0099731b078a7f67064a992087dd92779b953",
     "apps/electron/src/preload/bootstrap.ts": "254272ca384beee0cb2ba4830d7de6b9f698fe1fa7d074a879b0243ca79b4b75",
-    "scripts/fork-update/verify-release-base.py": "a2bc3760be6d0f1ac855f6e45c8ffee226f3968fa679e52ecda8aa84eb9bd51b",
+    "scripts/fork-update/verify-release-base.py": "ce6c19df60a660012a2b06f7ef66c19eba39fcdd0ec03dab89a1190b9477fa39",
     ".github/workflows/fork-release.yml": "de0e86a34de714123850f1a3095c73ce0ad0e05e5caf68254dbc9a273d9b9b30",
     "apps/electron/src/shared/types.ts": "23ba4d3f2b3ef38c097fec550e265ab302f93fed2eb118fedf2b0274af48e0ce",
     "packages/shared/src/config/theme.ts": "93a3550291250e945a3d6f5f51dad6340438211ff462d3e59d80fad93911fe5d",
@@ -39,7 +39,12 @@
     "apps/electron/src/renderer/atoms/sessions.ts": "b3c9f00d10a5b0bb893679424619f152563df181fd1c423a7bdc44d39958d256",
     "apps/electron/src/renderer/event-processor/handlers/text.ts": "e46a290e9ebb28b647d31799da3cc207e1e4d510a5cc1ddf6ce75f2567b104ca"
   },
-  "compiledNativeFiles": {
-    "bootstrap-preload.cjs": "87fb328adb180cbc2ea671438f6e73b792bda4c086e41aa116c679990e7a50af"
+  "compiledNativeFeatures": {
+    "bootstrap-preload.cjs": [
+      "prWatchRunAction",
+      "prWatch:runAction",
+      "createThinClientUpdateApi",
+      "update:check"
+    ]
   }
 }

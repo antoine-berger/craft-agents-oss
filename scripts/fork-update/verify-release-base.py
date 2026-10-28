@@ -59,6 +59,13 @@ def directory(root):
     return read
 
 
+def verify_native(read, expected, errors):
+    for path, markers in expected.items():
+        raw = read(path)
+        if raw is None or any(marker not in raw.decode('utf-8') for marker in markers):
+            errors.append('compiled native: ' + path)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--lock', type=Path, default=Path(__file__).with_name('release-base.lock.json'))
@@ -76,7 +83,7 @@ def main():
         if args.renderer_dir:
             verify_renderer(directory(args.renderer_dir), lock['compiledClientFiles'], errors)
         if args.native_dir:
-            verify_sources(directory(args.native_dir), lock.get('compiledNativeFiles', {}), errors, 'compiled native')
+            verify_native(directory(args.native_dir), lock['compiledNativeFeatures'], errors)
         if args.server_archive:
             archive = stack.enter_context(tarfile.open(args.server_archive, mode='r|gz'))
             contents = {}
@@ -96,8 +103,8 @@ def main():
             prefix = 'Craft Agents.app/Contents/Resources/app/dist/renderer/'
             verify_renderer(lambda p: archive_mac.read(prefix + p) if prefix + p in names else None, lock['compiledClientFiles'], errors)
             prefix = 'Craft Agents.app/Contents/Resources/app/dist/'
-            verify_sources(lambda p: archive_mac.read(prefix + p) if prefix + p in names else None,
-                           lock.get('compiledNativeFiles', {}), errors, 'compiled native')
+            verify_native(lambda p: archive_mac.read(prefix + p) if prefix + p in names else None,
+                          lock['compiledNativeFeatures'], errors)
     if not any([args.source_root, args.renderer_dir, args.native_dir, args.server_archive, args.mac_archive]):
         parser.error('Select a source, renderer or archive to verify')
     if errors:
