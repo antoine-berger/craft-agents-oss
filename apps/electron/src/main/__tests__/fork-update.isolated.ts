@@ -28,7 +28,7 @@ globalThis.fetch = (async () => {
   return Response.json({ schema: 1, repository: 'antoine-berger/craft-agents-oss', version: '0.15.6', assets: Object.fromEntries([
     ['darwin-arm64', 'Craft-Agents-arm64.zip'], ['server-linux-x64', 'craft-server-linux-x64.tar.gz'],
   ].map(([key, file]) => [key, { url: `https://github.com/antoine-berger/craft-agents-oss/releases/download/fork-v0.15.6/${file}`, sha256: 'a'.repeat(64), size: 100 }])) })
-}) as typeof fetch
+}) as unknown as typeof fetch
 const updater = await import('../fork-update')
 beforeEach(() => { calls.length = 0; answers.length = 0; fetchCount = 0 })
 afterAll(() => {
