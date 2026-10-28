@@ -8,6 +8,20 @@
  * query ({@link SUMMARY_QUERY}) and the pinned-number query ({@link PR_BY_NUMBER_QUERY}) so the two
  * resolution strategies map through the same {@link mapSummary} and can never drift.
  */
+// A superseded cancelled run can leave GitHub's aggregate red after its replacement passed.
+// Share the same check identity/attempt metadata between the summary and the details card.
+const CHECK_CONTEXTS = `contexts(first: 100) {
+  pageInfo { hasNextPage }
+  nodes {
+    __typename
+    ... on CheckRun {
+      databaseId name status conclusion detailsUrl
+      checkSuite { app { id } workflowRun { workflow { id } } }
+    }
+    ... on StatusContext { context state targetUrl }
+  }
+}`
+
 const PR_SUMMARY_FIELDS = `
   id number title url state isDraft headRefName baseRefName headRefOid
   headRepositoryOwner { login }
@@ -15,7 +29,7 @@ const PR_SUMMARY_FIELDS = `
   autoMergeRequest { mergeMethod }
   viewerCanEnableAutoMerge
   baseRepository { autoMergeAllowed viewerDefaultMergeMethod mergeCommitAllowed squashMergeAllowed rebaseMergeAllowed }
-  commits(last: 1) { nodes { commit { committedDate statusCheckRollup { state } } } }
+  commits(last: 1) { nodes { commit { committedDate statusCheckRollup { state ${CHECK_CONTEXTS} } } } }
   reviewThreads(first: 100) { pageInfo { hasNextPage } nodes { id isResolved isOutdated comments(first: 1) { nodes { author { login } url } } } }
   latestOpinionatedReviews(first: 20) { nodes { id state body url author { login } commit { oid } } }
   reviews(last: 20) { nodes { id state body url author { login } commit { oid } } }
@@ -88,11 +102,7 @@ export const DETAILS_QUERY = `query PrDetails($owner: String!, $name: String!, $
       commits(last: 1) { nodes { commit {
         oid messageHeadline committedDate
         author { name user { login } }
-        statusCheckRollup { contexts(first: 100) { nodes {
-          __typename
-          ... on CheckRun { name status conclusion detailsUrl }
-          ... on StatusContext { context state targetUrl }
-        } } }
+        statusCheckRollup { ${CHECK_CONTEXTS} }
       } } }
       latestOpinionatedReviews(first: 20) { nodes { state author { login } } }
       reviewRequests(first: 20) { nodes { requestedReviewer { __typename ... on User { login } ... on Team { slug } ... on Bot { login } } } }
@@ -137,7 +147,7 @@ export interface GqlPullRequestSummary {
   /** GitHub would queue auto-merge for this PR now (false while it's already on) */
   viewerCanEnableAutoMerge: boolean
   baseRepository: GqlRepoMergeSettings | null
-  commits: { nodes: Array<{ commit: { committedDate?: string; statusCheckRollup: { state: GqlRollupState } | null } }> }
+  commits: { nodes: Array<{ commit: { committedDate?: string; statusCheckRollup: GqlCheckRollup | null } }> }
   reviewThreads: { pageInfo?: { hasNextPage: boolean }; nodes: Array<{ isResolved: boolean; id?: string; isOutdated?: boolean; comments?: { nodes: Array<{ author: { login: string } | null; url: string }> } }> }
   latestOpinionatedReviews?: { nodes: Array<{ id: string; state: string; body: string; url: string; author: { login: string } | null; commit: { oid: string } | null }> }
   reviews?: GqlPullRequestSummary['latestOpinionatedReviews']
@@ -176,8 +186,15 @@ export interface GqlAutoMergeMutationResponse {
 }
 
 export type GqlCheckContext =
-  | { __typename: 'CheckRun'; name: string; status: string; conclusion: string | null; detailsUrl: string | null }
+  | { __typename: 'CheckRun'; name: string; status: string; conclusion: string | null; detailsUrl: string | null
+      databaseId?: string | number | null
+      checkSuite?: { app: { id: string } | null; workflowRun: { workflow: { id: string } } | null } | null }
   | { __typename: 'StatusContext'; context: string; state: string; targetUrl: string | null }
+
+export interface GqlCheckRollup {
+  state: GqlRollupState
+  contexts?: { pageInfo?: { hasNextPage: boolean }; nodes: GqlCheckContext[] }
+}
 
 export interface GqlPullRequestDetails {
   additions: number
@@ -190,7 +207,7 @@ export interface GqlPullRequestDetails {
         messageHeadline: string
         committedDate: string
         author: { name: string | null; user: { login: string } | null } | null
-        statusCheckRollup: { contexts: { nodes: GqlCheckContext[] } } | null
+        statusCheckRollup: { contexts: { pageInfo?: { hasNextPage: boolean }; nodes: GqlCheckContext[] } } | null
       }
     }>
   }

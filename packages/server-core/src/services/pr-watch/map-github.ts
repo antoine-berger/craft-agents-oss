@@ -18,7 +18,7 @@ import type {
   ReviewDecision,
   ReviewerState,
 } from '@craft-agent/shared/protocol'
-import type { GqlCheckContext, GqlMergeMethod, GqlPullRequestDetails, GqlPullRequestSummary, GqlRepoMergeSettings, GqlReviewSignaturePr, GqlRollupState } from './github-queries'
+import type { GqlCheckRollup, GqlCheckContext, GqlMergeMethod, GqlPullRequestDetails, GqlPullRequestSummary, GqlRepoMergeSettings, GqlReviewSignaturePr, GqlRollupState } from './github-queries'
 
 /**
  * The branch's PR among GitHub's matches (newest first): `headRefName` alone also matches same-named
@@ -187,7 +187,7 @@ export function mapSummary(node: GqlPullRequestSummary, local: LocalStatus, meta
     state: mapPrState(node),
     headRef: node.headRefName,
     baseRef: node.baseRefName,
-    checks: mapRollup(node.commits.nodes[0]?.commit.statusCheckRollup?.state),
+    checks: mapChecksRollup(node.commits.nodes[0]?.commit.statusCheckRollup),
     reviewDecision: mapReviewDecision(node.reviewDecision),
     mergeState: mapMergeState(node),
     unresolvedThreads: node.reviewThreads.nodes.filter(thread => !thread.isResolved && !thread.isOutdated).length,
@@ -217,6 +217,30 @@ export function mapCheck(context: GqlCheckContext): PrCheck {
     ? 'success'
     : context.state === 'FAILURE' || context.state === 'ERROR' ? 'failure' : 'pending'
   return { name: context.context, status, url: context.targetUrl ?? undefined }
+}
+
+/** Only a provably newer run of the same app/workflow/job supersedes an old result. */
+export function currentCheckContexts(contexts: readonly GqlCheckContext[]): GqlCheckContext[] {
+  const latest = new Map<string, { sequence: bigint; index: number }>()
+  const identities = contexts.map((context, index) => {
+    if (context.__typename !== 'CheckRun' || !context.checkSuite?.app?.id) return null
+    const sequence = String(context.databaseId ?? '')
+    if (!/^\d+$/.test(sequence)) return null
+    const key = JSON.stringify([context.checkSuite.app.id, context.checkSuite.workflowRun?.workflow.id ?? null, context.name])
+    const previous = latest.get(key)
+    if (!previous || BigInt(sequence) > previous.sequence) latest.set(key, { sequence: BigInt(sequence), index })
+    return key
+  })
+  return contexts.filter((_context, index) => identities[index] === null || latest.get(identities[index]!)?.index === index)
+}
+
+/** Recompute from current attempts only when the complete context list was fetched. */
+export function mapChecksRollup(rollup: GqlCheckRollup | null | undefined): ChecksRollup {
+  if (!rollup?.contexts || rollup.contexts.pageInfo?.hasNextPage !== false) return mapRollup(rollup?.state)
+  const checks = currentCheckContexts(rollup.contexts.nodes).map(mapCheck)
+  if (checks.some(check => check.status === 'failure')) return 'failure'
+  if (checks.some(check => check.status === 'pending')) return 'pending'
+  return checks.length ? 'success' : 'none'
 }
 
 const REVIEW_STATE: Record<string, ReviewerState> = {
@@ -252,7 +276,7 @@ export function mapDetails(details: GqlPullRequestDetails): PrDetails | null {
       author: commit.author?.name ?? commit.author?.user?.login ?? 'unknown',
       committedAt: Date.parse(commit.committedDate),
     },
-    checks: (commit.statusCheckRollup?.contexts.nodes ?? []).map(mapCheck),
+    checks: currentCheckContexts(commit.statusCheckRollup?.contexts.nodes ?? []).map(mapCheck),
     reviewers: mapReviewers(details),
     additions: details.additions,
     deletions: details.deletions,

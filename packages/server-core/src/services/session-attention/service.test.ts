@@ -56,3 +56,34 @@ it('preserves simultaneous auth and permission prompts and resolves only the ans
     expect(service.snapshot('w').sessions.s?.reasons.find(r => r.id === 'auth:second')?.createdAt).toBe(1)
   } finally { service.dispose(); rmSync(root, { recursive: true, force: true }) }
 })
+
+it('background recovery respects the registry retry deadline instead of forcing requests each minute', async () => {
+  const { PrWatchRegistry } = await import('../pr-watch/registry')
+  const { GitHubRequestError } = await import('../pr-watch/github-client')
+  const root = mkdtempSync(join(tmpdir(), 'craft-attention-backoff-'))
+  let now = 1_000_000
+  let calls = 0
+  const session = { id: 'limited', workspaceId: 'w', workingDirectory: '/repo' }
+  const registry = new PrWatchRegistry({
+    graphql: async () => { calls++; throw new GitHubRequestError('rate limited', 429, 5 * 60_000) },
+    candidates: async () => [{ id: 'gh', label: 'gh', getToken: async () => 'token' }],
+    push: () => {}, now: () => now,
+    resolveRepo: async () => ({ root: '/repo', gitDir: '/repo/.git', commonDir: '/repo/.git', branch: 'topic', pushRemote: 'origin', remoteBranch: 'topic', repo: { host: 'github.com', owner: 'acme', repo: 'app' }, upstreamRepo: null }),
+    watchRefs: () => () => {}, setTimer: () => 1, clearTimer: () => {},
+  })
+  const manager = {
+    waitForInit: async () => {}, getSessions: () => [session], getSessionSnapshot: () => session,
+    getSessionWorkingDirectory: () => '/repo', getSessionBoundPrs: () => [], getSessionPrMonitors: () => ({}),
+  } as unknown as ISessionManager
+  const service = new SessionAttentionService({ manager, workspaceRoot: () => root, push: () => {} })
+  try {
+    service.start(registry); await service.sync()
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(calls).toBe(1)
+    for (let minute = 1; minute <= 4; minute++) { now += 60_000; await service.sync() }
+    expect(calls).toBe(1)
+    now += 60_000; await service.sync()
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(calls).toBe(2)
+  } finally { service.dispose(); registry.dispose(); rmSync(root, { recursive: true, force: true }) }
+})

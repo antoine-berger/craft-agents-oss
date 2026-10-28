@@ -153,3 +153,12 @@ test('a stale push cannot reopen a merged PR but a different PR remains allowed'
   expect(result!.state.kind === 'pr' && result!.state.summary.number).toBe(102)
   expect(result!.state.kind === 'pr' && result!.state.summary.state).toBe('open')
 })
+
+test('keeps the known PR visible and stale when GitHub fails temporarily', async () => {
+  await mount('github-error')
+  await resolve(0, ready(entry(6173)))
+  await push('github-error', { kind: 'unavailable', reason: 'error' })
+  expect(result!.state.kind).toBe('pr')
+  expect(result!.state.kind === 'pr' && result!.state.summary.number).toBe(6173)
+  expect(result!.state.kind === 'pr' && result!.state.summary.attentionStale).toBe(true)
+})

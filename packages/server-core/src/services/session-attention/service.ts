@@ -128,7 +128,7 @@ export class SessionAttentionService {
         continue
       }
       if (old?.dir === dir) {
-        if (registry.cachedSessionState(session.id)?.kind === 'unavailable') void registry.nudge(session.id).catch(error => this.deps.log?.(error))
+        if (registry.cachedSessionState(session.id)?.kind === 'unavailable') void registry.nudge(session.id, CLIENT, true).catch(error => this.deps.log?.(error))
         continue
       }
       if (old) registry.unsubscribe(old.id)
