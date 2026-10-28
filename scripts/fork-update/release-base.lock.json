@@ -50,9 +50,12 @@
     "apps/electron/src/renderer/hooks/pr-watch-snapshots.ts": "e4b6c4480bb60e3a8f40a673f4371959794ce7bfccf20937c404c5aa3022d67c",
     "apps/electron/src/renderer/atoms/sessions.ts": "b3c9f00d10a5b0bb893679424619f152563df181fd1c423a7bdc44d39958d256",
     "apps/electron/src/renderer/event-processor/handlers/text.ts": "e46a290e9ebb28b647d31799da3cc207e1e4d510a5cc1ddf6ce75f2567b104ca",
-    "apps/electron/src/renderer/components/app-shell/chat-header/pr-watch/ChatHeaderPrChip.tsx": "f74130113f564e1a8c69bc3342bf724d0416d1cac4b348564ae19aafb37104b0",
+    "apps/electron/src/renderer/components/app-shell/chat-header/pr-watch/ChatHeaderPrChip.tsx": "02d745ca79922378a66d013a9672c840fba08ef9a78a61059138cd2cde8943b4",
     "apps/electron/src/renderer/components/app-shell/chat-header/pr-watch/pr-quick-actions.ts": "bd307e4f89f0e8292172e88b74c603c077e590e77e798b86edc694e18dcc22e3",
-    "apps/electron/src/renderer/components/app-shell/chat-header/pr-watch/PrQuickActions.tsx": "5dc45f3e05b97fd5b7c698a3e01907705e551bc40ef7c66d164949e65fde8141"
+    "apps/electron/src/renderer/components/app-shell/chat-header/pr-watch/PrQuickActions.tsx": "5dc45f3e05b97fd5b7c698a3e01907705e551bc40ef7c66d164949e65fde8141",
+    "apps/electron/src/renderer/components/app-shell/SessionStatusIcon.tsx": "8384cbc79ecb868289f73d2507cb3b9b6587669271645c1603f3de59d5b3e35c",
+    "apps/electron/src/renderer/components/app-shell/chat-header/pr-watch/pr-watch-state.ts": "0a8ecf1553517ba3cba5060336badba687b319a2c3689dabac13acda9e86c2b3",
+    "apps/electron/src/renderer/components/app-shell/chat-header/pr-watch/pr-watch-visuals.tsx": "010de4e37229b0aae043d649b8d09c0552b56039a6abcc0fa4086596f623d414"
   },
   "compiledNativeFeatures": {
     "bootstrap-preload.cjs": [
