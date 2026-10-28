@@ -144,6 +144,12 @@ export function usePrWatch(sessionId: string, enabled: boolean, workingDirectory
       setBase(state)
       setRefreshing(false)
     })
+    const refetchOnFocus = () => {
+      if (!cancelled && document.visibilityState !== 'hidden' && subscriptionId) {
+        void api.prWatchRefresh?.(sessionId, true).catch(() => {})
+      }
+    }
+    window.addEventListener('focus', refetchOnFocus)
     api.prWatchSubscribe(sessionId).then(
       (result) => {
         if (cancelled) {
@@ -152,6 +158,8 @@ export function usePrWatch(sessionId: string, enabled: boolean, workingDirectory
         }
         subscriptionId = result.subscriptionId
         subscribed.current = !!subscriptionId
+        // A shared watcher may have answered from cache; ask GitHub again on entry.
+        if (subscriptionId) void api.prWatchRefresh?.(sessionId, true).catch(() => {})
         if (!pushed) {
           setBase(result.state)
         } else if (pushed.kind === 'ready' && pushed.incomplete && result.state.kind === 'ready') {
@@ -180,6 +188,7 @@ export function usePrWatch(sessionId: string, enabled: boolean, workingDirectory
     return () => {
       cancelled = true
       subscribed.current = false
+      window.removeEventListener('focus', refetchOnFocus)
       off()
       if (subscriptionId) void api.prWatchUnsubscribe(subscriptionId)
     }

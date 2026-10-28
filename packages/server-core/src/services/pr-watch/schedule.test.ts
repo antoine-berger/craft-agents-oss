@@ -45,3 +45,16 @@ describe('nextPollDelay', () => {
     expect(at(pr({ checks: 'pending' }), { rateLimit: { remaining: 4000, resetAt } })).toBe(POLL.checksRunning)
   })
 })
+
+describe('foreground polling', () => {
+  it('uses five seconds for displayed PRs while preserving background pacing', () => {
+    expect(at(pr(), { foreground: true })).toBe(5_000)
+    expect(at(pr())).toBe(POLL.quiet)
+    expect(at(pr({ checks: 'pending' }), { foreground: true })).toBe(5_000)
+  })
+  it('retains error, quota and terminal-state safeguards in the foreground', () => {
+    expect(at(pr(), { foreground: true, consecutiveErrors: 1 })).toBe(POLL.errorBase)
+    expect(at(pr(), { foreground: true, rateLimit: { remaining: 5, resetAt: NOW + 60_000 } })).toBe(60_000)
+    expect(at(pr({ state: 'merged' }), { foreground: true })).toBeNull()
+  })
+ })

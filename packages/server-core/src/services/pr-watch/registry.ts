@@ -54,7 +54,7 @@ import {
   pickPullRequest,
 } from './map-github'
 import type { RepoCoordinates } from './remote-url'
-import { nextPollDelay } from './schedule'
+import { nextPollDelay, POLL } from './schedule'
 import { TokenChain, type TokenCandidate } from './token-chain'
 
 /** Details are cached this long, so a card re-asking every 15 s costs at most one query. */
@@ -86,6 +86,7 @@ type WatcherTarget =
   | { kind: 'number'; coords: RepoCoordinates; number: number }
 
 interface Subscription {
+  foreground: boolean
   id: string
   clientId: string
   sessionId: string
@@ -111,6 +112,7 @@ interface Watcher {
   consecutiveErrors: number
   rateLimit?: { remaining: number; resetAt: number }
   retryAfterUntil?: number
+  nextPollAt?: number
   timer: unknown
   inFlight: Promise<void> | null
   stopRefWatch: () => void
@@ -228,10 +230,12 @@ export class PrWatchRegistry {
     workspaceRootPath: string
     boundPrs?: BoundPr[]
     monitors?: Record<string, PrMonitorState>
+    foreground?: boolean
   }): Promise<{ subscriptionId: string; state: PrWatchSessionState }> {
     if (this.disposed) throw new Error('PR registry disposed')
     const subscription: Subscription = {
       id: `prw-${this.nextId++}`,
+      foreground: input.foreground ?? false,
       clientId: input.clientId,
       sessionId: input.sessionId,
       dir: input.dir,
@@ -271,7 +275,7 @@ export class PrWatchRegistry {
    * Something may have changed for a session (agent turn ended, Refresh): re-resolve the branch
    * (switches, `git init`, a new remote) and refetch every target, then push.
    */
-  async nudge(sessionId: string, clientId?: string): Promise<void> {
+  async nudge(sessionId: string, clientId?: string, automatic = false): Promise<void> {
     const subs = this.subsForSession(sessionId).filter(s => !clientId || s.clientId === clientId)
     const refreshed = new Set<string>()
     for (const subscription of subs) {
@@ -280,7 +284,13 @@ export class PrWatchRegistry {
         if (refreshed.has(key)) continue
         refreshed.add(key)
         const watcher = this.watchers.get(key)
-        if (watcher) await this.refresh(watcher)
+        if (watcher) {
+          const now = this.now()
+          const coolingDown = (watcher.retryAfterUntil ?? 0) > now
+            || (watcher.consecutiveErrors > 0 && (watcher.nextPollAt ?? 0) > now)
+            || (watcher.rateLimit && watcher.rateLimit.remaining < POLL.rateLimitFloor && watcher.rateLimit.resetAt > now)
+          if (!automatic || !coolingDown) await this.refresh(watcher)
+        }
       }
     }
     this.pushSession(sessionId)
@@ -584,6 +594,7 @@ export class PrWatchRegistry {
       void this.refresh(watcher)
     } else {
       watcher.subscriptions.add(subscription.id)
+      if (subscription.foreground && !watcher.inFlight) this.schedule(watcher)
     }
   }
 
@@ -594,6 +605,8 @@ export class PrWatchRegistry {
     if (watcher.subscriptions.size === 0) {
       this.stopWatcher(watcher)
       this.watchers.delete(key)
+    } else if (!watcher.inFlight) {
+      this.schedule(watcher)
     }
   }
 
@@ -624,6 +637,7 @@ export class PrWatchRegistry {
   }
 
   private stopWatcher(watcher: Watcher): void {
+    watcher.nextPollAt = undefined
     if (watcher.timer !== null) this.clearTimer(watcher.timer)
     watcher.timer = null
     watcher.stopRefWatch()
@@ -695,6 +709,9 @@ export class PrWatchRegistry {
         return
       }
       const { node, coords, via } = resolved
+      const previous = watcher.state.kind === 'pr' ? watcher.state.summary : undefined
+      // GitHub can briefly return an older snapshot after a merge.
+      if (previous?.state === 'merged' && previous.url === node.url && node.state !== 'MERGED') return
       const local = watcher.target.kind === 'branch' ? await this.localStatus(watcher.target.repo.root, node.headRefOid) : NO_LOCAL
       if (watcher.pr?.number !== node.number || watcher.pr.headOid !== node.headRefOid) watcher.details = null
       watcher.pr = { coords, number: node.number, headOid: node.headRefOid, nodeId: node.id }
@@ -782,10 +799,16 @@ export class PrWatchRegistry {
   }
 
   private schedule(watcher: Watcher): void {
+    watcher.nextPollAt = undefined
+    if (watcher.timer !== null) {
+      this.clearTimer(watcher.timer)
+      watcher.timer = null
+    }
     if (watcher.subscriptions.size === 0) return
     const now = this.now()
     let delay = nextPollDelay({
       state: watcher.state,
+      foreground: [...watcher.subscriptions].some(id => this.subscriptions.get(id)?.foreground),
       now,
       lastChangeAt: watcher.lastChangeAt,
       consecutiveErrors: watcher.consecutiveErrors,
@@ -793,8 +816,10 @@ export class PrWatchRegistry {
     })
     if (delay === null) return
     if (watcher.retryAfterUntil && watcher.retryAfterUntil > now) delay = Math.max(delay, watcher.retryAfterUntil - now)
+    watcher.nextPollAt = now + delay
     watcher.timer = this.setTimer(() => {
       watcher.timer = null
+      watcher.nextPollAt = undefined
       void this.refresh(watcher)
     }, delay)
   }

@@ -15,6 +15,12 @@ export class PrWatchSnapshots {
     const transient = next.kind === 'loading' || (next.kind === 'unavailable' && next.reason === 'error')
     if (transient && this.values.get(key)?.kind === 'ready') return this.read(key)
     if (!transient) {
+      const previous = this.values.get(key)
+      if (previous?.kind === 'ready' && next.kind === 'ready') {
+        const merged = new Map(previous.prs.filter(pr => pr.summary.state === 'merged').map(pr => [pr.id, pr.summary]))
+        next = { ...next, prs: next.prs.map(pr => merged.has(pr.id) && pr.summary.state !== 'merged'
+          ? { ...pr, summary: merged.get(pr.id)! } : pr) }
+      }
       this.values.delete(key)
       this.values.set(key, next)
       if (this.values.size > 100) this.values.delete(this.values.keys().next().value!)

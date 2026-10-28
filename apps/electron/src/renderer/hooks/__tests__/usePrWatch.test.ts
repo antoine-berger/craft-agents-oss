@@ -19,6 +19,7 @@ let reconnected: Set<(stale:boolean)=>void>
 let active: Set<string>
 let unsubscribed: string[]
 let refreshes: number
+let automaticRefreshes: Array<boolean | undefined>
 let originalWindow: PropertyDescriptor | undefined
 let originalDocument: PropertyDescriptor | undefined
 function Probe({session,dir='/repo'}:{session:string;dir?:string}) { result=usePrWatch(session,true,dir); return null }
@@ -31,15 +32,15 @@ async function push(session:string,state:PrWatchSessionState) { await act(async(
 beforeEach(()=>{
  originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window')
  originalDocument = Object.getOwnPropertyDescriptor(globalThis, 'document')
- requests=[];listeners=new Set();reconnected=new Set();active=new Set();unsubscribed=[];refreshes=0
+ requests=[];listeners=new Set();reconnected=new Set();active=new Set();unsubscribed=[];refreshes=0;automaticRefreshes=[]
  const documentMock=new EventTarget();Object.assign(documentMock,{visibilityState:'visible'});(globalThis as any).document=documentMock
- ;(globalThis as any).window={electronAPI:{
+ ;(globalThis as any).window=Object.assign(new EventTarget(), {electronAPI:{
   onPrWatchChanged:(cb:any)=>{listeners.add(cb);return ()=>listeners.delete(cb)},
   prWatchSubscribe:(session:string)=>{const next=deferred<any>();requests.push({session,result:next});return next.promise},
   prWatchUnsubscribe:async(id:string)=>{active.delete(id);unsubscribed.push(id)},
-  prWatchRefresh:async()=>{refreshes++},
+  prWatchRefresh:async(_session:string,automatic?:boolean)=>{refreshes++;automaticRefreshes.push(automatic)},
   onReconnected:(cb:any)=>{reconnected.add(cb);return()=>reconnected.delete(cb)},
- }}
+ }})
 })
 afterEach(async () => {
  if (root) await act(async () => root!.unmount())
@@ -125,4 +126,30 @@ test('a newer partial branch push replaces the old branch from the subscribe sna
   await resolve(0, ready(entry(81), entry(83, 'bound')))
   expect(result!.nav.entries.map(e => e.summary.number)).toEqual([82, 83])
   expect(result!.state.kind === 'pr' && result!.state.summary.number).toBe(82)
+})
+
+test('reads GitHub again after subscribing, on return, and when the window regains focus', async () => {
+  await mount('focus-refresh')
+  await resolve(0, ready(entry(91)))
+  expect(refreshes).toBe(1)
+  await act(async () => { window.dispatchEvent(new Event('focus')) })
+  expect(refreshes).toBe(2)
+  await update('focus-other')
+  await resolve(1, ready(entry(92)))
+  await update('focus-refresh')
+  await resolve(2, ready(entry(91)))
+  expect(refreshes).toBe(4)
+  expect(automaticRefreshes).toEqual([true, true, true, true])
+})
+
+test('a stale push cannot reopen a merged PR but a different PR remains allowed', async () => {
+  await mount('merged-guard')
+  const merged = entry(101)
+  merged.summary.state = 'merged'
+  await resolve(0, ready(merged))
+  await push('merged-guard', ready(entry(101)))
+  expect(result!.state.kind === 'pr' && result!.state.summary.state).toBe('merged')
+  await push('merged-guard', ready(entry(102)))
+  expect(result!.state.kind === 'pr' && result!.state.summary.number).toBe(102)
+  expect(result!.state.kind === 'pr' && result!.state.summary.state).toBe('open')
 })

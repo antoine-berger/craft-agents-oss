@@ -672,7 +672,7 @@ export interface ElectronAPI extends ShipWorkflowAPI {
   // PR watcher (PRs): subscribe per session, then receive pushes; see protocol/pr-watch.ts
   prWatchSubscribe(sessionId: string): Promise<{ subscriptionId: string | null; state: import('@craft-agent/shared/protocol').PrWatchSessionState }>
   prWatchUnsubscribe(subscriptionId: string): Promise<void>
-  prWatchRefresh(sessionId: string): Promise<void>
+  prWatchRefresh(sessionId: string, automatic?: boolean): Promise<void>
   /** Card details for one carousel entry (by its stable PR id) */
   prWatchGetDetails(sessionId: string, prId: string): Promise<import('@craft-agent/shared/protocol').PrDetails | null>
   /** Pin a PR to the session by URL or number (verifies before persisting) */

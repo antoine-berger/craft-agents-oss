@@ -51,7 +51,7 @@ function firstPr(state: PrWatchSessionState | undefined): PrEntry | undefined {
   return entriesOf(state)[0]
 }
 
-function setup(options: { repos?: Record<string, RepoInfo | null>; prs?: GqlPullRequestSummary[]; byNumber?: Record<number, GqlPullRequestSummary>; local?: LocalStatus } = {}) {
+function setup(options: { repos?: Record<string, RepoInfo | null>; prs?: GqlPullRequestSummary[]; byNumber?: Record<number, GqlPullRequestSummary>; local?: LocalStatus; rateLimit?: { remaining: number; resetAt: string } } = {}) {
   let now = 1_000_000
   let nextTimer = 1
   const timers = new Map<number, { at: number; fn: () => void }>()
@@ -116,9 +116,9 @@ function setup(options: { repos?: Record<string, RepoInfo | null>; prs?: GqlPull
       }
       if (query.includes('PrByNumber')) {
         const node = byNumber[variables.number as number] ?? null
-        return { rateLimit: { remaining: 4000, resetAt: '2030-01-01T00:00:00Z' }, repository: node ? { pullRequest: node } : { pullRequest: null } } as T
+        return { rateLimit: options.rateLimit ?? { remaining: 4000, resetAt: '2030-01-01T00:00:00Z' }, repository: node ? { pullRequest: node } : { pullRequest: null } } as T
       }
-      return { rateLimit: { remaining: 4000, resetAt: '2030-01-01T00:00:00Z' }, repository: { pullRequests: { nodes: prs } } } as T
+      return { rateLimit: options.rateLimit ?? { remaining: 4000, resetAt: '2030-01-01T00:00:00Z' }, repository: { pullRequests: { nodes: prs } } } as T
     },
     candidates: async () => [{ id: 'gh', label: 'gh', getToken: async () => 'token' }],
     push: (clientId, sessionId, state) => pushes.push({ clientId, sessionId, state }),
@@ -498,4 +498,74 @@ describe('server attention observers', () => {
       expect(peak).toBe(4)
     } finally { registry.dispose(); for (const resolve of release) resolve() }
   })
+})
+
+describe('foreground freshness', () => {
+  it('detects a merge performed on GitHub within the next foreground poll', async () => {
+    const t = setup()
+    await t.registry.subscribe({ ...sub(), foreground: true })
+    await t.flush()
+    expect(t.nextDelay()).toBe(5_000)
+    t.setPrs([{ ...PR, state: 'MERGED' }])
+    await t.advance(5_000)
+    expect(firstPr(t.pushes.at(-1)?.state)?.summary.state).toBe('merged')
+    expect(t.timers.size).toBe(0)
+    t.registry.dispose()
+  })
+  it('promotes an existing background watcher and restores its pace when the chat leaves', async () => {
+    const t = setup()
+    await t.registry.subscribe(sub('background', 'internal'))
+    await t.flush()
+    expect(t.nextDelay()).toBe(POLL.recentChange)
+    const foreground = await t.registry.subscribe({ ...sub(), foreground: true })
+    expect(t.nextDelay()).toBe(5_000)
+    t.registry.unsubscribe(foreground.subscriptionId)
+    expect(t.nextDelay()).toBe(POLL.recentChange)
+    t.registry.dispose()
+  })
+  it('ignores a stale open snapshot of a merged PR, but accepts a new PR on the branch', async () => {
+    const t = setup({ prs: [{ ...PR, state: 'MERGED' }] })
+    await t.registry.subscribe(sub())
+    await t.flush()
+    t.setPrs([PR])
+    await t.registry.nudge('s1')
+    expect(firstPr(t.registry.cachedSessionState('s1')!)?.summary.state).toBe('merged')
+    t.setPrs([{ ...PR, number: 8, url: 'https://github.com/acme/app/pull/8', id: 'PR_8' }])
+    await t.registry.nudge('s1')
+    expect(firstPr(t.registry.cachedSessionState('s1')!)?.summary.number).toBe(8)
+    expect(firstPr(t.registry.cachedSessionState('s1')!)?.summary.state).toBe('open')
+    t.registry.dispose()
+  })
+ })
+
+it('automatic focus refresh honors Retry-After and error backoff', async () => {
+  const t = setup()
+  await t.registry.subscribe({ ...sub(), foreground: true })
+  await t.flush()
+  t.failNextWith(new GitHubRequestError('rate limited', 429, 60_000))
+  await t.registry.nudge('s1')
+  const count = t.calls.length
+  await t.registry.nudge('s1', 'c1', true)
+  expect(t.calls.length).toBe(count)
+  expect(t.nextDelay()).toBe(60_000)
+  await t.advance(60_000)
+  expect(t.calls.length).toBe(count + 1)
+  t.failNextWith(new GitHubRequestError('offline'))
+  await t.registry.nudge('s1')
+  const failed = t.calls.length
+  await t.registry.nudge('s1', 'c1', true)
+  expect(t.calls.length).toBe(failed)
+  expect(t.nextDelay()).toBe(POLL.errorBase)
+  t.registry.dispose()
+})
+
+it('automatic focus refresh respects the remaining GitHub quota', async () => {
+  const t = setup({ rateLimit: { remaining: 5, resetAt: new Date(1_060_000).toISOString() } })
+  await t.registry.subscribe({ ...sub(), foreground: true })
+  await t.flush()
+  expect(t.nextDelay()).toBe(60_000)
+  const count = t.calls.length
+  await t.registry.nudge('s1', 'c1', true)
+  expect(t.calls.length).toBe(count)
+  t.registry.dispose()
 })

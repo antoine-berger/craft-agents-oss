@@ -121,6 +121,7 @@ export function registerPrWatchHandlers(server: RpcServer, deps: HandlerDeps): v
     if (!dir || !workspaceRootPath) return { subscriptionId: null, state: { kind: 'unavailable', reason: 'not-git' } }
     return current.subscribe({
       clientId: ctx.clientId,
+      foreground: true,
       sessionId,
       dir,
       workspaceRootPath,
@@ -133,8 +134,8 @@ export function registerPrWatchHandlers(server: RpcServer, deps: HandlerDeps): v
     current.unsubscribe(subscriptionId)
   })
 
-  server.handle(RPC_CHANNELS.prWatch.REFRESH, async (ctx, sessionId: string) => {
-    await current.nudge(sessionId, ctx.clientId)
+  server.handle(RPC_CHANNELS.prWatch.REFRESH, async (ctx, sessionId: string, automatic = false) => {
+    await current.nudge(sessionId, ctx.clientId, automatic)
   })
 
   server.handle(RPC_CHANNELS.prWatch.GET_DETAILS, async (ctx, sessionId: string, prId: string): Promise<PrDetails | null> => {
