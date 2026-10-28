@@ -62,6 +62,7 @@ describe('session runtime recovery', () => {
     await loading
     const session = store.get(sessionAtomFamily('session-1'))!
     expect(session.messages.map(m => m.content)).toEqual(['prefix suffix'])
+    expect(store.get(sessionMetaMapAtom).get('session-1')?.lastFinalMessageId).toBeUndefined()
     expect(session.hasUnread).toBe(false)
     expect(session.isFlagged).toBe(true)
     expect(store.get(backgroundTasksAtomFamily('session-1'))).toEqual([task])
