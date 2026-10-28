@@ -3,8 +3,8 @@ import { useTranslation } from 'react-i18next'
 import { useAppShellContext } from '@/context/AppShellContext'
 import { cn } from '@/lib/utils'
 import type { PrWatchNav } from '@/hooks/usePrWatch'
-import { mostUrgentStatus, prChipStatus, sidebarPrTone, type PrChipStatus, type PrSummary, type PrWatchState } from './pr-watch-state'
-import { PR_STATE_ICON, TONE_TEXT } from './pr-watch-visuals'
+import { mostUrgentStatus, prChipStatus, prIconState, sidebarPrTone, type PrChipStatus, type PrSummary, type PrWatchState } from './pr-watch-state'
+import { PR_STATUS_ICON, TONE_TEXT } from './pr-watch-visuals'
 
 export const PR_CHIP_RESERVE_PAD = 12
 
@@ -26,18 +26,22 @@ export function ChatHeaderPrChip({ state, nav, onReserveElChange }: ChatHeaderPr
   const others = multi ? nav.entries.filter((_, index) => index !== nav.index).map(entry => entry.summary) : []
   const othersStatus = mostUrgentStatus(others)
   const othersStatusSummary = othersStatus ? others.find(other => prChipStatus(other) === othersStatus) : undefined
-  const StateIcon = PR_STATE_ICON[summary.state]
+  const iconState = prIconState(summary)
+  const StateIcon = PR_STATUS_ICON[iconState]
+  const stateLabel = iconState === 'behind' ? t('chat.prWatch.merge.behind')
+    : iconState === 'queued' ? t('chat.queuedBadge')
+    : t(`chat.prWatch.state.${summary.state}`)
 
   return (
     <span ref={onReserveElChange} className="inline-flex shrink-0 items-center">
       <button
         type="button"
         onClick={() => onOpenUrl(summary.url)}
-        title={[t('chat.prWatch.openOnGitHub'), freshness].filter(Boolean).join(' · ')}
+        title={[t('chat.prWatch.openOnGitHub'), stateLabel, freshness].filter(Boolean).join(' · ')}
         aria-label={[
           t('chat.prWatch.openOnGitHub'),
           t('chat.prWatch.chipLabel', { number: summary.number, title: summary.title }),
-          t(`chat.prWatch.state.${summary.state}`),
+          stateLabel,
           freshness,
           status && statusLabel(status, summary, t),
           multi && t('chat.prWatch.otherPrs', { count: nav.count - 1 }),

@@ -3,8 +3,8 @@ import { SessionActivity } from "./session-activity/SessionActivity"
 import { useTranslation } from "react-i18next"
 import { cn } from "@/lib/utils"
 import { usePrWatch } from "@/hooks/usePrWatch"
-import { PR_STATE_ICON, TONE_TEXT } from "./chat-header/pr-watch/pr-watch-visuals"
-import { sidebarPrTone } from "./chat-header/pr-watch/pr-watch-state"
+import { PR_STATUS_ICON, TONE_TEXT } from "./chat-header/pr-watch/pr-watch-visuals"
+import { prIconState, sidebarPrTone } from "./chat-header/pr-watch/pr-watch-state"
 import type { SessionMeta } from "@/atoms/sessions"
 
 interface SessionStatusIconProps {
@@ -20,11 +20,15 @@ export function SessionStatusIcon({ item, needsAttention = false, isWorking = fa
   const { t } = useTranslation()
   const { state } = usePrWatch(item.id, true, item.workingDirectory)
   const pr = state.kind === 'pr' ? state.summary : undefined
-  const Icon = pr ? PR_STATE_ICON[pr.state] : GitBranch
+  const iconState = pr ? prIconState(pr) : undefined
+  const Icon = iconState ? PR_STATUS_ICON[iconState] : GitBranch
+  const prStateLabel = iconState === 'behind' ? t('chat.prWatch.merge.behind')
+    : iconState === 'queued' ? t('chat.queuedBadge')
+    : pr ? t(`chat.prWatch.state.${pr.state}`) : ''
   const label = needsAttention ? attentionDescription || t("attention.needsYou")
     : isWaitingForSubagents ? t("session.runState.subagents", { defaultValue: 'Waiting for subagents' })
     : isWorking ? t("session.runState.working")
-    : pr ? `#${pr.number} · ${t(`chat.prWatch.state.${pr.state}`)} · ${pr.title}`
+    : pr ? `#${pr.number} · ${prStateLabel} · ${pr.title}`
     : item.worktree?.owned?.branch ?? 'Git branch'
 
   return (

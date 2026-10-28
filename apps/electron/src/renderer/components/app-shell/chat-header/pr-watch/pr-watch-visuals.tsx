@@ -10,15 +10,17 @@ import {
   CircleX,
   GitMerge,
   GitPullRequest,
+  GitPullRequestArrow,
   GitPullRequestClosed,
   GitPullRequestDraft,
   MessageSquareWarning,
+  ListOrdered,
   MinusCircle,
   type LucideIcon,
 } from 'lucide-react'
 import { Spinner } from '@craft-agent/ui'
 import { cn } from '@/lib/utils'
-import type { CheckStatus, PrChipStatus, PrState, PrTone } from './pr-watch-state'
+import type { CheckStatus, PrChipStatus, PrIconState, PrState, PrTone } from './pr-watch-state'
 
 export const TONE_TEXT: Record<PrTone, string> = {
   success: 'text-success',
@@ -33,6 +35,12 @@ export const PR_STATE_ICON: Record<PrState, LucideIcon> = {
   draft: GitPullRequestDraft,
   merged: GitMerge,
   closed: GitPullRequestClosed,
+}
+
+export const PR_STATUS_ICON: Record<PrIconState, LucideIcon> = {
+  ...PR_STATE_ICON,
+  behind: GitPullRequestArrow,
+  queued: ListOrdered,
 }
 
 const STATUS_GLYPH: Record<Exclude<PrChipStatus, 'pending'>, { icon: LucideIcon; tone: string }> = {

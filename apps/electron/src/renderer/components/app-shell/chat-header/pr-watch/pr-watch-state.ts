@@ -52,6 +52,15 @@ export {
 /** Semantic tone; the components map it to role tokens (`merged` to GitHub's fixed purple). */
 export type PrTone = 'success' | 'merged' | 'destructive' | 'info' | 'neutral'
 
+export type PrIconState = PrState | 'behind' | 'queued'
+
+export function prIconState(summary: PrSummary): PrIconState {
+  if (summary.state !== 'open' || summary.attentionStale) return summary.state
+  if (summary.quickActions?.queued) return 'queued'
+  if (summary.mergeState === 'behind') return 'behind'
+  return summary.state
+}
+
 /**
  * The chip renders only when an active PR is known (open, draft, merged or closed). Everything
  * else — not a repo, no PR, not GitHub, no credential, first lookup still running — renders nothing.
