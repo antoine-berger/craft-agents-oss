@@ -64,7 +64,7 @@ function toToolStatus(id: string, origin: 'branch' | 'bound', summary: PrSummary
 
 function toStatusResult(sessionId: string, state: PrWatchSessionState, cached: boolean, monitors: Record<string, PrMonitorState>): PrToolStatusResult {
   if (state.kind === 'ready') {
-    return { kind: 'ready', sessionId, prs: state.prs.map(e => toToolStatus(e.id, e.origin, e.summary, monitors[e.id])), cached }
+    return { kind: 'ready', sessionId, prs: state.prs.map(e => toToolStatus(e.id, e.origin, e.summary, monitors[e.id])), cached: cached || state.prs.some(e => e.summary.attentionStale) }
   }
   if (state.kind === 'unavailable') return { kind: 'unavailable', sessionId, reason: state.reason, prs: [] }
   return { kind: state.kind, sessionId, prs: [] }

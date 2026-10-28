@@ -56,6 +56,21 @@ function firstPr(state: PrWatchSessionState | undefined): PrEntry | undefined {
 }
 
 describe('durable PR associations across cold starts', () => {
+  it('restores an on-demand agent lookup from disk without creating a live watcher', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'craft-pr-once-'))
+    const input = { dir: '/work/app', workspaceRootPath: dir, boundPrs: [] }
+    const warm = setup({ associations: diskPrAssociations })
+    const cold = setup({ associations: diskPrAssociations })
+    try {
+      expect(firstPr(await warm.registry.fetchOnce(input))?.summary.number).toBe(7)
+      warm.registry.dispose()
+      cold.failNextWith(new GitHubRateLimitError(403, 60_000))
+      expect(firstPr(await cold.registry.fetchOnce(input))).toMatchObject({ origin: 'branch', summary: { number: 7, attentionStale: true, checks: 'none' } })
+      expect(cold.timers.size).toBe(0)
+      expect(cold.registry.cachedSessionState('s1')).toBeNull()
+    } finally { warm.registry.dispose(); cold.registry.dispose(); rmSync(dir, { recursive: true, force: true }) }
+  })
+
   it('restores the primary link before GitHub answers and keeps it through quota/network failures', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'craft-pr-restart-'))
     const input = { ...sub(), workspaceRootPath: dir }

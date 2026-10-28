@@ -20,13 +20,13 @@ const BRANCH_AND_PINNED: PrWatchSessionState = {
   ],
 }
 
-function fakes(options: { verifyThrows?: boolean; boundPrs?: BoundPr[]; cached?: PrWatchSessionState | null; monitors?: Record<string, PrMonitorState>; checkout?: RepoInfo | null } = {}) {
+function fakes(options: { verifyThrows?: boolean; boundPrs?: BoundPr[]; fetched?: PrWatchSessionState; cached?: PrWatchSessionState | null; monitors?: Record<string, PrMonitorState>; checkout?: RepoInfo | null } = {}) {
   const calls = { verifyPr: 0, fetchOnce: 0, bind: [] as BoundPr[], unbind: 0, setSessionBoundPrs: 0, setSessionMonitors: 0, setAutoMerge: 0, nudge: 0, monitorsChanged: [] as string[] }
   let bound: BoundPr[] = options.boundPrs ?? []
   let monitors: Record<string, PrMonitorState> = options.monitors ?? {}
   const registry = {
     verifyPr: async () => { calls.verifyPr++; if (options.verifyThrows) throw new Error('PR #7 not found in acme/app.'); return SUMMARY },
-    fetchOnce: async (): Promise<PrWatchSessionState> => { calls.fetchOnce++; return { kind: 'ready', prs: [{ id: 'github.com/acme/app#7', origin: 'branch', summary: SUMMARY }] } },
+    fetchOnce: async (): Promise<PrWatchSessionState> => { calls.fetchOnce++; return options.fetched ?? { kind: 'ready', prs: [{ id: 'github.com/acme/app#7', origin: 'branch', summary: SUMMARY }] } },
     setSessionBoundPrs: () => { calls.setSessionBoundPrs++ },
     setSessionMonitors: () => { calls.setSessionMonitors++ },
     cachedSessionState: () => options.cached ?? null,
@@ -105,6 +105,11 @@ describe('PR watch operations', () => {
     expect(result.kind).toBe('ready')
     expect(result.cached).toBe(false)
     expect(calls.fetchOnce).toBe(1)
+  })
+
+  it('labels an on-demand disk fallback as cached, not live', async () => {
+    const { ops } = fakes({ fetched: { kind: 'ready', prs: [{ id: 'github.com/acme/app#7', origin: 'branch', summary: { ...SUMMARY, attentionStale: true } }] } })
+    expect(await ops.status('s1', { forceFetch: true })).toMatchObject({ kind: 'ready', cached: true })
   })
 
   it('cross-session status is cache-only — never fetches (R3)', async () => {

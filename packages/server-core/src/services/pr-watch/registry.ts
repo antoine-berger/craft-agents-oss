@@ -342,7 +342,9 @@ export class PrWatchRegistry {
    */
   async verifyPr(input: { coords: RepoCoordinates; number: number; workspaceRootPath: string }): Promise<PrSummary> {
     const node = await this.fetchByNumber(input)
-    return mapSummary(node, NO_LOCAL, { fetchedAt: this.now(), via: node.__via })
+    const summary = mapSummary(node, NO_LOCAL, { fetchedAt: this.now(), via: node.__via })
+    this.saveAssociation(input.workspaceRootPath, numberKeyOf(input.workspaceRootPath, input.coords, input.number), input.coords, summary)
+    return summary
   }
 
   /**
@@ -356,6 +358,7 @@ export class PrWatchRegistry {
   }): Promise<PrWatchSessionState> {
     const entries: PrEntry[] = []
     const seen = new Set<string>()
+    let fetchFailed = false
 
     // Branch PR first (gated exactly like a live branch watcher)
     const repo = await this.resolveRepo(input.dir)
@@ -363,14 +366,22 @@ export class PrWatchRegistry {
     if (!repo) branchUnavailable = { kind: 'unavailable', reason: 'not-git' }
     else if (!isWatchable(repo)) branchUnavailable = !repo.branch ? { kind: 'none' } : { kind: 'unavailable', reason: 'not-github' }
     else {
-      const branch = await this.resolveBranchPr(repo, input.workspaceRootPath).catch(() => null)
+      const key = branchKeyOf(repo), target: WatcherTarget = { kind: 'branch', repo }
+      const branch = await this.resolveBranchPr(repo, input.workspaceRootPath).catch(() => { fetchFailed = true; return null })
       if (branch && branch !== 'no-token') {
         const id = entryId(branch.coords, branch.node.number)
         seen.add(id)
         const local = await this.localStatus(repo.root, branch.node.headRefOid)
-        entries.push({ id, origin: 'branch', summary: mapSummary(branch.node, local, { fetchedAt: this.now(), via: branch.via }) })
+        const summary = mapSummary(branch.node, local, { fetchedAt: this.now(), via: branch.via })
+        this.saveAssociation(input.workspaceRootPath, key, branch.coords, summary)
+        entries.push({ id, origin: 'branch', summary })
       } else {
         branchUnavailable = branch === 'no-token' ? { kind: 'unavailable', reason: 'no-token' } : { kind: 'none' }
+        const saved = this.loadAssociation(input.workspaceRootPath, key, target)
+        if (saved) {
+          seen.add(entryId(saved.coords, saved.number))
+          entries.push({ id: entryId(saved.coords, saved.number), origin: 'branch', summary: savedPrSummary(saved) })
+        }
       }
     }
 
@@ -379,13 +390,21 @@ export class PrWatchRegistry {
       const coords = { host: bp.host, owner: bp.owner, repo: bp.repo }
       const id = entryId(coords, bp.number)
       if (seen.has(id)) continue
-      const node = await this.fetchByNumber({ coords, number: bp.number, workspaceRootPath: input.workspaceRootPath }).catch(() => null)
-      if (!node) continue
+      const key = numberKeyOf(input.workspaceRootPath, coords, bp.number)
+      const node = await this.fetchByNumber({ coords, number: bp.number, workspaceRootPath: input.workspaceRootPath }).catch(() => { fetchFailed = true; return null })
+      if (!node) {
+        const saved = this.loadAssociation(input.workspaceRootPath, key, { kind: 'number', coords, number: bp.number })
+        if (saved) { seen.add(id); entries.push({ id, origin: 'bound', summary: savedPrSummary(saved) }) }
+        continue
+      }
       seen.add(id)
-      entries.push({ id, origin: 'bound', summary: mapSummary(node, NO_LOCAL, { fetchedAt: this.now(), via: node.__via }) })
+      const summary = mapSummary(node, NO_LOCAL, { fetchedAt: this.now(), via: node.__via })
+      this.saveAssociation(input.workspaceRootPath, key, coords, summary)
+      entries.push({ id, origin: 'bound', summary })
     }
 
     if (entries.length > 0) return { kind: 'ready', prs: entries }
+    if (fetchFailed) return { kind: 'unavailable', reason: 'error' }
     return branchUnavailable ?? { kind: 'none' }
   }
 
@@ -671,13 +690,11 @@ export class PrWatchRegistry {
       stopRefWatch: () => {},
       details: null,
     }
-    try {
-      const saved = this.deps.associations?.load(workspaceRootPath, key)
-      if (saved && associationMatches(target, saved)) {
-        watcher.pr = { coords: saved.coords, number: saved.number, headOid: saved.headOid }
-        watcher.state = { kind: 'pr', summary: savedPrSummary(saved) }
-      }
-    } catch (error) { this.log(`[pr-association] read failed: ${(error as Error).message}`) }
+    const saved = this.loadAssociation(workspaceRootPath, key, target)
+    if (saved) {
+      watcher.pr = { coords: saved.coords, number: saved.number, headOid: saved.headOid }
+      watcher.state = { kind: 'pr', summary: savedPrSummary(saved) }
+    }
     // A commit, checkout or push moves a ref: re-resolve the branch and refetch (branch targets only).
     if (target.kind === 'branch') {
       watcher.stopRefWatch = this.watchRefs(target.repo, () => {
@@ -714,6 +731,18 @@ export class PrWatchRegistry {
   }
 
   // ── credentials ─────────────────────────────────────────────────────────
+
+  private loadAssociation(root: string, key: string, target: WatcherTarget): PrAssociation | null {
+    try {
+      const saved = this.deps.associations?.load(root, key)
+      return saved && associationMatches(target, saved) ? saved : null
+    } catch (error) { this.log(`[pr-association] read failed: ${(error as Error).message}`); return null }
+  }
+
+  private saveAssociation(root: string, key: string, coords: RepoCoordinates, summary: PrSummary): void {
+    try { this.deps.associations?.save(root, key, associatePr(coords, summary)) }
+    catch (error) { this.log(`[pr-association] write failed: ${(error as Error).message}`) }
+  }
 
   private canPoll(host: string, foreground: boolean): boolean {
     const budget = this.hostBudgets.get(host)
@@ -824,8 +853,7 @@ export class PrWatchRegistry {
       if (watcher.pr?.number !== node.number || watcher.pr.headOid !== node.headRefOid) watcher.details = null
       const summary = mapSummary(node, local, { fetchedAt: this.now(), via })
       watcher.pr = { coords, number: node.number, headOid: node.headRefOid }
-      try { this.deps.associations?.save(watcher.workspaceRootPath, watcher.key, associatePr(coords, summary)) }
-      catch (error) { this.log(`[pr-association] write failed: ${(error as Error).message}`) }
+      this.saveAssociation(watcher.workspaceRootPath, watcher.key, coords, summary)
       this.setState(watcher, { kind: 'pr', summary })
     } catch (error) {
       if (error instanceof PollingPaused) return
