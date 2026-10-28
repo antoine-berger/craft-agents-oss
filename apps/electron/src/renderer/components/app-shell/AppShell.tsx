@@ -668,6 +668,7 @@ function AppShellContent({
     () => projects.map(p => ({ id: p.config.id, slug: p.config.slug, name: p.config.name, color: p.config.color, pilotSessionId: p.config.pilotSessionId })),
     [projects],
   )
+  const isPilotSession = useCallback((id: string) => projects.some(p => p.config.pilotSessionId === id), [projects])
   const handleSessionProjectChange = useCallback(async (sessionId: string, projectId: string | null) => {
     try {
       await window.electronAPI.sessionCommand(sessionId, { type: 'setProjectId', projectId })
@@ -1254,12 +1255,13 @@ function AppShellContent({
     }
     // Count sessions
     for (const s of activeSessionMetas) {
+      if (isPilotSession(s.id)) continue
       const state = (s.sessionStatus || 'todo') as SessionStatusId
       // Increment count (initialize to 0 if status not in effectiveSessionStatuses yet)
       counts[state] = (counts[state] || 0) + 1
     }
     return counts
-  }, [activeSessionMetas, effectiveSessionStatuses])
+  }, [activeSessionMetas, effectiveSessionStatuses, isPilotSession])
 
   // Count sources by type for the Sources dropdown subcategories
   const sourceTypeCounts = useMemo(() => {
@@ -1306,8 +1308,8 @@ function AppShellContent({
         result = workspaceSessionMetas.filter(s => s.isArchived)
         break
       case 'state':
-        // Filter by specific todo state (excludes archived)
-        result = activeSessionMetas.filter(s => (s.sessionStatus || 'todo') === sessionFilter.stateId)
+        // Pilots have their own project slot, outside task-status lists and counts.
+        result = activeSessionMetas.filter(s => !isPilotSession(s.id) && (s.sessionStatus || 'todo') === sessionFilter.stateId)
         break
       case 'label': {
         // Shared predicate (handles '__all__', descendant labels, and the optional
@@ -1397,7 +1399,7 @@ function AppShellContent({
     }
 
     return result
-  }, [workspaceSessionMetas, activeSessionMetas, sessionFilter, listFilter, labelFilter, projectFilter, labelConfigs])
+  }, [workspaceSessionMetas, activeSessionMetas, sessionFilter, listFilter, labelFilter, projectFilter, labelConfigs, isPilotSession])
 
   // Derive "pinned" (non-removable) filters from the current sessionFilter path.
   // These represent filters that are implicit in the current deeplink/route and
