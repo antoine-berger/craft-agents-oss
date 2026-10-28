@@ -517,6 +517,8 @@ export class ClaudeAgent extends BaseAgent {
    * or it is unknown (an update failed or timed out and may still land), so the next turn applies.
    */
   private persistentThinkingKey: string | null = null;
+  private persistentMcpServers: NonNullable<Options['mcpServers']> | null = null;
+  private persistentMcpKeys: Record<string, string> | null = null;
   /** True while the single always-on consumer loop is running. */
   /** The iterator the running consumer drains; a consumer only ever serves its own query. */
   private persistentConsumerIterator: AsyncIterator<SDKMessage> | null = null;
@@ -623,6 +625,8 @@ export class ClaudeAgent extends BaseAgent {
     this.persistentIterator = null;
     this.persistentAbortController = null;
     this.persistentThinkingKey = null;
+    this.persistentMcpServers = null;
+    this.persistentMcpKeys = null;
     this.activeTurnChannel = null;
     this.activeTurnState = null;
     if (this.stoppedTurn) clearTimeout(this.stoppedTurn.fallback);
@@ -643,7 +647,7 @@ export class ClaudeAgent extends BaseAgent {
    * thinking (the session level, or a per-turn override) is applied to the live
    * query before its message is pushed.
    */
-  private async beginPersistentTurn(prompt: SDKUserMessage, options: Options, thinking: Partial<Options>): Promise<AsyncIterable<SDKMessage>> {
+  private async beginPersistentTurn(prompt: SDKUserMessage | (() => SDKUserMessage), options: Options, thinking: Partial<Options>): Promise<AsyncIterable<SDKMessage>> {
     if (!this.persistentInput || !this.currentQuery) {
       // First turn: create the persistent query + consumer.
       this.persistentInput = createPushableInputStream<SDKUserMessage>();
@@ -651,6 +655,8 @@ export class ClaudeAgent extends BaseAgent {
       this.currentQueryAbortController = this.persistentAbortController;
       this.currentQuery = query({ prompt: this.persistentInput.stream, options });
       this.persistentThinkingKey = claudeThinkingKey(thinking);
+      this.persistentMcpServers = options.mcpServers ?? {};
+      this.persistentMcpKeys = this.mcpServerKeys(this.persistentMcpServers);
       this.persistentIterator = this.currentQuery[Symbol.asyncIterator]();
       this.startPersistentConsumer();
     } else {
@@ -659,23 +665,26 @@ export class ClaudeAgent extends BaseAgent {
       if (this.persistentAbortController) {
         this.currentQueryAbortController = this.persistentAbortController;
       }
+      if (this.hasPendingBackgroundTurn()) throw new BackgroundTurnPendingError();
+      await this.syncPersistentMcpServers(options.mcpServers);
       await this.syncPersistentThinking(thinking);
       // Stopped meanwhile (forceAbort drops currentQuery at once; the SDK rejects the pending
       // settings call before the query itself finishes): do not start the turn on a dying query.
       if (!this.persistentInput || !this.currentQuery) throw new AbortError('Persistent query closed while preparing the turn');
     }
     if (this.hasPendingBackgroundTurn()) throw new BackgroundTurnPendingError();
+    const message = typeof prompt === 'function' ? prompt() : prompt;
     const channel = createPushableInputStream<SDKMessage>();
     this.activeTurnChannel = channel;
     this.activeTurnState = { aborted: false };
     this.persistentUserMessage = this.getCurrentTurnUserMessage() ?? this.persistentUserMessage;
-    this.persistentInput.push(prompt);
+    this.persistentInput.push(message);
     return channel.stream;
   }
 
   /** Drain output already produced before atomically assigning a channel to new input. */
   private async *beginPersistentTurnAfterBackground(
-    prompt: SDKUserMessage, options: Options, thinking: Partial<Options>, userMessage: string,
+    prompt: SDKUserMessage | (() => SDKUserMessage), options: Options, thinking: Partial<Options>, userMessage: string,
   ): AsyncGenerator<AgentEvent, AsyncIterable<SDKMessage> | null> {
     while (true) {
       while (this.hasPendingBackgroundTurn()) {
@@ -683,6 +692,70 @@ export class ClaudeAgent extends BaseAgent {
       }
       try { return await this.beginPersistentTurn(prompt, options, thinking); }
       catch (error) { if (!(error instanceof BackgroundTurnPendingError)) throw error; }
+    }
+  }
+
+  private mcpServerKeys(servers: NonNullable<Options['mcpServers']>): Record<string, string> {
+    return Object.fromEntries(Object.keys(servers).sort().map(name => {
+      const server = servers[name]!;
+      const tools = this.config.mcpPool?.getTools(name);
+      return [name, JSON.stringify(tools ?? (server.type === 'sdk' ? { type: server.type, name: server.name } : server))];
+    }));
+  }
+
+  /** Refresh the live SDK's tools, without replacing the query or its background agents. */
+  private async syncPersistentMcpServers(servers: Options['mcpServers']): Promise<void> {
+    const live = this.currentQuery;
+    if (!live || !servers) return;
+    const keys = this.mcpServerKeys(servers);
+    const names = Object.keys(servers);
+    const intended = [...this.sourceManager.getIntendedSlugs()];
+    try {
+      let status = await live.mcpServerStatus();
+      if (JSON.stringify(keys) !== JSON.stringify(this.persistentMcpKeys)
+        || names.some(name => !status.some(server => server.name === name))) {
+        const changed = names.filter(name => this.persistentMcpKeys?.[name] !== undefined
+          && this.persistentMcpKeys[name] !== keys[name]);
+        // SDK 0.3.302 keeps the original in-process instance for an existing name.
+        // Remove only schema-changed servers first; keep the session tools and all others.
+        if (changed.length) {
+          await live.setMcpServers(Object.fromEntries(Object.entries(this.persistentMcpServers ?? {})
+            .filter(([name]) => name in servers && !changed.includes(name))));
+        }
+        const next = Object.fromEntries(Object.entries(servers).map(([name, server]) =>
+          [name, this.persistentMcpKeys?.[name] === keys[name] ? this.persistentMcpServers?.[name] ?? server : server]));
+        const result = await live.setMcpServers(next);
+        if (this.currentQuery !== live) throw new AbortError('Query closed while updating connectors');
+        this.persistentMcpServers = next;
+        this.persistentMcpKeys = keys;
+        status = await live.mcpServerStatus();
+        console.info('[connectors] Live SDK catalog updated', { sessionId: this.config.session?.id,
+          added: result.added, removed: result.removed, failed: Object.keys(result.errors) });
+      }
+      const failed = status.filter(server => names.includes(server.name)
+        && (server.status === 'failed' || server.status === 'needs-auth'));
+      if (failed.length) {
+        await Promise.allSettled(failed.map(server => live.reconnectMcpServer(server.name)));
+        status = await live.mcpServerStatus();
+      }
+      // setMcpServers returns before the CLI finishes its in-process handshake.
+      // Wait locally on control messages, never by sending another model prompt.
+      const deadline = Date.now() + 5_000;
+      while (this.currentQuery === live && Date.now() < deadline
+        && status.some(server => names.includes(server.name) && server.status === 'pending')) {
+        await new Promise(resolve => setTimeout(resolve, 50));
+        status = await live.mcpServerStatus();
+      }
+      if (this.currentQuery !== live) throw new AbortError('Query closed while updating connectors');
+      const connected = status.filter(server => names.includes(server.name) && server.status === 'connected').map(server => server.name);
+      this.sourceManager.updateActiveState(connected, [], intended);
+      const unavailable = intended.filter(name => !connected.includes(name));
+      if (unavailable.length) console.warn('[connectors] Tools unavailable in live chat', { sessionId: this.config.session?.id, sources: unavailable });
+    } catch (error) {
+      if (this.currentQuery !== live) throw new AbortError('Query closed while updating connectors');
+      this.sourceManager.updateActiveState([], [], intended);
+      console.warn('[connectors] Live SDK synchronization failed; retrying next turn', {
+        sessionId: this.config.session?.id, reason: error instanceof Error ? error.name : 'unknown' });
     }
   }
 
@@ -2127,7 +2200,7 @@ This is a branched conversation. All prior messages in this conversation are par
         turnMessageSource = source;
         persistentTurn = this.activeTurnState;
       } else if (this.keepBackgroundTasksAlive && !isSlashCommand) {
-        const sdkMessage = this.buildSDKUserMessage(effectiveUserMessage, attachments);
+        const sdkMessage = () => this.buildSDKUserMessage(effectiveUserMessage, attachments);
         const source = yield* this.beginPersistentTurnAfterBackground(sdkMessage, optionsWithAbort, thinkingOptions, userMessage);
         if (!source) return; // Source activation replays this owner request through the host.
         turnMessageSource = source;
