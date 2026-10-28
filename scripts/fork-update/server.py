@@ -26,6 +26,10 @@ RELEASES = Path('/home/craft/releases')
 DATA = Path('/home/craft/.craft-agent')
 DROPIN = Path('/etc/systemd/system/craft-agents.service.d/zz-fork-updater.conf')
 SERVICE = 'craft-agents'
+
+
+class ServerBusyError(ValueError):
+    pass
 BUN = '/home/craft/.bun/bin/bun'
 
 
@@ -168,14 +172,17 @@ const {CliRpcClient} = await import(process.env.FORK_CURRENT + '/apps/cli/src/cl
 const host = process.env.CRAFT_RPC_HOST || '127.0.0.1';
 const c = new CliRpcClient('ws://' + host + ':' + (process.env.CRAFT_RPC_PORT || '9100'), {token:process.env.CRAFT_SERVER_TOKEN});
 try {await c.connect(); const active = await c.invoke('server:getActiveSessions');
-if (!Array.isArray(active) || (process.env.FORK_REQUIRE_IDLE === '1' && active.length)) process.exitCode = 2;
+if (!Array.isArray(active)) process.exitCode = 1;
+else if (process.env.FORK_REQUIRE_IDLE === '1' && active.length) {console.log('ACTIVE:' + active.length); process.exitCode = 2;}
 else console.log('IDLE');} finally {c.destroy()}
 """
     try:
         if run(BUN, '-e', script, env=env, cwd=root, timeout=25) != 'IDLE':
             raise ValueError('Cannot verify that all sessions are idle')
-    except subprocess.CalledProcessError:
-        raise ValueError('A session is active or the idle check failed; restart refused') from None
+    except subprocess.CalledProcessError as error:
+        if re.fullmatch(r'ACTIVE:\d+', (error.stdout or '').strip()):
+            raise ServerBusyError('Agents actifs : attends leur fin avant de redémarrer le serveur.') from None
+        raise ValueError('Impossible de vérifier que le serveur est inactif ; redémarrage refusé.') from None
     return pid
 
 
@@ -193,7 +200,7 @@ def assert_idle():
             except FileNotFoundError:
                 continue
             if exe not in ('cli-proxy-api', 'CLIProxyAPI', 'cliproxyapi'):
-                raise ValueError('An agent or command still has a process in Craft; restart refused')
+                raise ServerBusyError('Un agent ou une commande a encore un processus actif ; redémarrage refusé.')
     return pid
 
 
@@ -280,5 +287,5 @@ if __name__ == '__main__':
         main()
     except Exception as error:
         # Don't forward subprocess output: it can contain provider credentials.
-        print(json.dumps({'error': str(error) if not isinstance(error, subprocess.CalledProcessError) else 'Update command failed; inspect the staged release on disk'}), file=sys.stderr)
+        print(json.dumps({'code': 'server_busy' if isinstance(error, ServerBusyError) else 'update_failed', 'error': str(error) if not isinstance(error, subprocess.CalledProcessError) else 'La préparation a échoué ; inspecter la copie isolée sur disque.'}), file=sys.stderr)
         sys.exit(1)

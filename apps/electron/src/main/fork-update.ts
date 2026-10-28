@@ -7,6 +7,7 @@ import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { execFile, spawn } from 'node:child_process'
 import { promisify } from 'node:util'
+import { serverUpdateError } from '../shared/update-errors'
 import type { UpdateInfo } from '../shared/types'
 import type { EventSink } from '@craft-agent/server-core/transport'
 import { FORK_RELEASE_URL, isNewerVersion, parseForkRelease, type ForkAsset, type ForkRelease } from './fork-release'
@@ -54,8 +55,10 @@ async function serverCommand(action: 'check' | 'stage' | 'apply', target: ForkRe
   const args = ['-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes', '-o', 'ConnectTimeout=10', '-J', config.jump, config.host,
     '/usr/local/sbin/craft-fork-update', action, target.version, target.assets['server-linux-x64'].sha256]
   if (action === 'apply') args.push('--authorize-restart')
-  const result = await exec('/usr/bin/ssh', args, { timeout: action === 'check' ? 30_000 : 30 * 60_000, maxBuffer: 1024 * 1024 })
-  return JSON.parse(result.stdout)
+  try {
+    const result = await exec('/usr/bin/ssh', args, { timeout: action === 'check' ? 30_000 : 30 * 60_000, maxBuffer: 1024 * 1024 })
+    return JSON.parse(result.stdout)
+  } catch (error) { throw serverUpdateError(error) }
 }
 
 async function verifyFile(file: string, asset: ForkAsset): Promise<void> {
@@ -205,7 +208,14 @@ export async function installUpdate(): Promise<void> {
         detail: 'Le serveur refusera si des agents ou des commandes tournent encore. Les données seront sauvegardées et la version précédente conservée. Cette action redémarre le serveur.',
         buttons: ['Annuler', 'Installer et redémarrer le serveur'], defaultId: 0, cancelId: 0, noLink: true })
       if (consent.response === 1) {
-        server = await serverCommand('apply', release)
+        try { server = await serverCommand('apply', release) }
+        catch (error) {
+          if (error instanceof Error && error.name === 'ServerUpdateBusy') {
+            await dialog.showMessageBox({ type: 'info', title: 'Mise à jour en attente', message: 'Le serveur est encore occupé', detail: error.message, buttons: ['OK'] })
+            return
+          }
+          throw error
+        }
         await dialog.showMessageBox({ type: 'info', message: `Serveur mis à jour : ${server?.currentVersion}`, buttons: ['OK'] })
         publish({ available: !!preparedApp, downloadState: preparedApp ? 'ready' : 'idle' })
       }

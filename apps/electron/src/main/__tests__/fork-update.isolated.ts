@@ -11,17 +11,20 @@ writeFileSync(join(root, 'fork-update.json'), JSON.stringify({ host: 'root@10.0.
 const calls: string[][] = []
 const answers: number[] = []
 let fetchCount = 0
+let busy = false
+const shownDialogs: any[] = []
 const originalFetch = globalThis.fetch
 const fakeExec = Object.assign(() => { throw new Error('Unexpected callback exec') }, {
   [promisify.custom]: async (_file: string, args: string[]) => {
     calls.push(args)
+    if (busy && args.includes('apply')) throw Object.assign(new Error('Command failed: ssh apply'), { stderr: '{"code":"server_busy","error":"Agents actifs"}' })
     return { stdout: JSON.stringify({ currentVersion: args.includes('apply') ? '0.15.6' : '0.15.5', available: !args.includes('apply'), staged: true }), stderr: '' }
   },
 })
 mock.module('node:child_process', () => ({ execFile: fakeExec, spawn: () => { throw new Error('Must not spawn a client installer') } }))
 mock.module('electron', () => ({
   app: { getVersion: () => '0.15.6', getPath: () => root, exit: () => { throw new Error('Must not exit the client') } },
-  dialog: { showMessageBox: async () => ({ response: answers.shift() ?? 0 }) },
+  dialog: { showMessageBox: async (spec: any) => { shownDialogs.push(spec); return { response: answers.shift() ?? 0 } } },
 }))
 globalThis.fetch = (async () => {
   fetchCount++
@@ -30,7 +33,7 @@ globalThis.fetch = (async () => {
   ].map(([key, file]) => [key, { url: `https://github.com/antoine-berger/craft-agents-oss/releases/download/fork-v0.15.6/${file}`, sha256: 'a'.repeat(64), size: 100 }])) })
 }) as unknown as typeof fetch
 const updater = await import('../fork-update')
-beforeEach(() => { calls.length = 0; answers.length = 0; fetchCount = 0 })
+beforeEach(() => { calls.length = 0; answers.length = 0; fetchCount = 0; busy = false; shownDialogs.length = 0 })
 afterAll(() => {
   globalThis.fetch = originalFetch
   if (previousConfig === undefined) delete process.env.CRAFT_CONFIG_DIR
@@ -60,4 +63,13 @@ test('only explicit native restart confirmation sends apply authorization', asyn
   expect(calls).toHaveLength(1)
   expect(calls[0]).toContain('apply'); expect(calls[0]).toContain('--authorize-restart')
   expect(calls[0]).toContain('StrictHostKeyChecking=yes')
+})
+
+test('an occupied server stays ready and shows a useful message instead of a generic install failure', async () => {
+  await updater.checkForUpdates(); calls.length = 0; busy = true
+  answers.push(1, 1, 0)
+  await updater.installUpdate()
+  expect(shownDialogs.at(-1).message).toBe('Le serveur est encore occupé')
+  expect(shownDialogs.at(-1).detail).not.toContain('ssh')
+  expect(updater.getUpdateInfo().downloadState).toBe('ready')
 })

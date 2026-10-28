@@ -1274,7 +1274,8 @@ async function performQuitCleanup(): Promise<void> {
   }
 
   // Stop all model refresh timers
-  getModelRefreshService().stopAll()
+  // Thin clients never initialize the embedded model service.
+  if (sessionManager) getModelRefreshService().stopAll()
 
   // Stop messaging gateways so the WhatsApp worker subprocess exits cleanly.
   if (messagingHandle) {
