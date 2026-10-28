@@ -7,7 +7,7 @@
     "packages/server-core/src/services/session-attention/service.ts": "b2e86b54b86fb6c38c05f34c536b02fe8e327814b1d8caba81772a7c2b79e903",
     "packages/server-core/src/services/pr-watch/registry.ts": "489576a9e381e661f842bee68fbd7f7ac60f6bd1f291bb4a4ac5d074eb584f15",
     "packages/server-core/src/services/pr-watch/schedule.ts": "a749e55f0b8b3f1dd26409c61f7b048ba62702518b7cc226afb465a8ac76dc30",
-    "packages/server-core/src/handlers/rpc/pr-watch.ts": "4c0c8b2cc8a4ed3b172a659e4bda6e8b995b539c4f722d608d64c40a830bff2e",
+    "packages/server-core/src/handlers/rpc/pr-watch.ts": "84bb2209c052bba977aca14796d55f0eee63254161079055189bf59f402bccb6",
     "packages/server-core/src/services/pr-watch/github-client.ts": "edd0eaeae392852bb17bd96eb87a5ec2044e06eebb8ec9d3e9256976bf4228dc",
     "packages/server-core/src/services/pr-watch/token-chain.ts": "e0b1771a304402d5a2e6dd9eba0d1db8c1e583d13833537aebce8ac3ab3aa8f0",
     "apps/electron/src/renderer/hooks/usePrWatch.ts": "0e2af447e5cee777cc0ddd62810a02faa91369e2bb2fbf85ac4caf454d85bbf8",
@@ -51,7 +51,8 @@
     "apps/electron/src/renderer/atoms/sessions.ts": "b3c9f00d10a5b0bb893679424619f152563df181fd1c423a7bdc44d39958d256",
     "apps/electron/src/renderer/event-processor/handlers/text.ts": "e46a290e9ebb28b647d31799da3cc207e1e4d510a5cc1ddf6ce75f2567b104ca",
     "apps/electron/src/renderer/components/app-shell/chat-header/pr-watch/ChatHeaderPrChip.tsx": "f74130113f564e1a8c69bc3342bf724d0416d1cac4b348564ae19aafb37104b0",
-    "apps/electron/src/renderer/components/app-shell/chat-header/pr-watch/pr-quick-actions.ts": "bd307e4f89f0e8292172e88b74c603c077e590e77e798b86edc694e18dcc22e3"
+    "apps/electron/src/renderer/components/app-shell/chat-header/pr-watch/pr-quick-actions.ts": "bd307e4f89f0e8292172e88b74c603c077e590e77e798b86edc694e18dcc22e3",
+    "apps/electron/src/renderer/components/app-shell/chat-header/pr-watch/PrQuickActions.tsx": "5dc45f3e05b97fd5b7c698a3e01907705e551bc40ef7c66d164949e65fde8141"
   },
   "compiledNativeFeatures": {
     "bootstrap-preload.cjs": [

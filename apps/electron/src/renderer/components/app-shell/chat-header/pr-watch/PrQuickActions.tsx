@@ -2,7 +2,7 @@ import * as React from 'react'
 import { ArrowDown, ArrowUp, Archive, Check, ChevronDown, FlaskConical, GitMerge, GitPullRequestArrow, GitPullRequestDraft, GitPullRequestCreateArrow, LoaderCircle, RotateCw, Wrench } from 'lucide-react'
 import { toast } from 'sonner'
 import type { PrEntry, PrMergeMethod, PrQuickOperation, PrWatchState } from '@craft-agent/shared/protocol'
-import { useAppShellContext, useSession } from '@/context/AppShellContext'
+import { useAppShellContext } from '@/context/AppShellContext'
 import { DropdownMenu, DropdownMenuTrigger, StyledDropdownMenuContent, StyledDropdownMenuItem } from '@/components/ui/styled-dropdown'
 import { cn } from '@/lib/utils'
 import type { PrAutoMergeChange } from '@/hooks/usePrWatch'
@@ -28,12 +28,11 @@ export function PrQuickActions({ sessionId, state, origin, onRefresh, onSetAutoM
   onSetAutoMerge?: (ref: string, enabled: boolean, method?: PrMergeMethod) => Promise<PrAutoMergeChange>
 }) {
   const { onSendMessage, onArchiveSession } = useAppShellContext()
-  const session = useSession(sessionId)
   const [pending, setPending] = React.useState(false)
   const running = React.useRef(false)
   const primary = nextPrQuickAction(state, origin)
   const pr = state.kind === 'pr' ? state.summary : undefined
-  const busy = pending || !!session?.isProcessing || !!session?.isAsyncOperationOngoing
+  const busy = pending
   const run = async (action: PrQuickAction, method?: PrMergeMethod) => {
     if (running.current || busy || action === 'queued') return
     running.current = true

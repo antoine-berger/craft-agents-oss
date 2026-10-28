@@ -169,7 +169,6 @@ export function registerPrWatchHandlers(server: RpcServer, deps: HandlerDeps): v
       if (!session) throw new Error('Session not found.')
       const root = resolveWorkspaceRootPath(session.workspaceId)
       if (!root || (ctx.workspaceId && resolveWorkspaceRootPath(ctx.workspaceId) !== root)) throw new Error('Session is in another workspace.')
-      if (session.isProcessing || session.isAsyncOperationOngoing) throw new Error('Wait for the session to finish before changing its PR.')
       const state = current.cachedSessionState(sessionId)
       const entry = state?.kind === 'ready' ? state.prs.find(pr => pr.summary.url === ref) : undefined
       const coords = parsePrReference(ref)
