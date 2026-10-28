@@ -3,25 +3,25 @@ import { Archive, ArchiveRestore, Flag } from "lucide-react"
 import { useActionLabel } from "@/actions"
 import { cn } from "@/lib/utils"
 import { rendererPerf } from "@/lib/perf"
-import { Spinner } from "@craft-agent/ui"
 import { EntityRow } from "@/components/ui/entity-row"
 import { EntityListBadge } from "@/components/ui/entity-list-badge"
 import { SessionMenu } from "./SessionMenu"
 import { BatchSessionMenu } from "./BatchSessionMenu"
 import { CompactSessionMenu } from "./CompactSessionMenu"
 import { SessionStatusIcon } from "./SessionStatusIcon"
-import { SessionBadges } from "./SessionBadges"
+import { RepositoryAvatar, sessionRepositoryIdentity } from "./input/RepositoryAvatar"
+import { hasPendingBackgroundWork, hasPendingSubagentWork } from "./background-task-chip-state"
 import { SessionProjectColorWrapper } from "./SessionProjectColorWrapper"
 import { hasTransferTargets } from "./transfer-targets"
 import { useProjectColorTreatment } from "@/hooks/useProjectColorTreatment"
-import { getSessionTitle, getSessionPreviewText, highlightMatch, hasUnreadMeta, formatShortAge } from "@/utils/session"
+import { getSessionTitle, highlightMatch, hasUnreadMeta } from "@/utils/session"
 import { useSessionListContext } from "@/context/SessionListContext"
 import { useAppShellContext } from "@/context/AppShellContext"
 import { navigate, routes } from "@/lib/navigate"
 import type { SessionMeta } from "@/atoms/sessions"
+import { backgroundTasksAtomFamily } from "@/atoms/sessions"
 import { messagingBindingsBySessionAtom } from "@/atoms/messaging"
 import { useAtomValue } from "jotai"
-import { extractLabelId } from "@craft-agent/shared/labels"
 
 /** Messaging bindings are labelled by platform name; the chip itself is neutral (labels are taxonomy, not status). */
 const PLATFORM_LABEL: Record<'telegram' | 'whatsapp', string> = {
@@ -42,11 +42,7 @@ export interface SessionItemProps {
 }
 
 /**
- * One session row (design spec §2.4 "one slot, one meaning", §7.2):
- * - leading glyph = the user's workflow status (click to change it)
- * - title (600 when unread) · age (unread: led by an 8px accent dot, age in accent)
- * - subtitle = run state with its own shape and color (needs you · working · failed · plan ready),
- *   else the labels (chips tinted with each label's color), else the session preview
+ * Compact session row: one status glyph and one truncated title, bold when unread.
  */
 export function SessionItem({
   item,
@@ -72,31 +68,29 @@ export function SessionItem({
   const ripgrepMatchCount = ctx.contentSearchResults.get(item.id)?.matchCount
   const chatMatchCount = isActiveSession ? activeMatch!.count : ripgrepMatchCount
   const hasMatch = chatMatchCount != null && chatMatchCount > 0
-  const hasLabels = !!(item.labels && item.labels.length > 0 && ctx.flatLabels.length > 0 && item.labels.some(entry => {
-    const labelId = extractLabelId(entry)
-    return ctx.flatLabels.some(l => l.id === labelId)
-  }))
   const attention = ctx.attention?.[item.id]
   const hasServerAttention = attention?.status === 'needs-human'
   const hasPendingPrompt = ctx.hasPendingPrompt?.(item.id) ?? false
   const isUnread = hasUnreadMeta(item)
+  const backgroundTasks = useAtomValue(backgroundTasksAtomFamily(item.id))
+  const hasPendingSubagents = hasPendingSubagentWork(backgroundTasks, item.backgroundAgentCount)
+  const isWorking = !!item.isProcessing || attention?.status === 'working'
+    || hasPendingBackgroundWork(backgroundTasks, item.backgroundAgentCount)
   const messagingBindingsBySession = useAtomValue(messagingBindingsBySessionAtom)
   const sessionBindings = messagingBindingsBySession.get(item.id) ?? []
   const hasMessagingBinding = sessionBindings.length > 0
 
-  // Attention replaces the leading status glyph; ordinary working/preview content stays in its row.
-  const runState: 'needs-you' | 'working' | 'failed' | 'plan' | null = (hasPendingPrompt || hasServerAttention)
-    ? 'needs-you'
-    : (item.isProcessing || attention?.status === 'working')
-      ? 'working'
+  // Activity wins while background tasks run; retain attention for when they finish.
+  const runState: 'needs-you' | 'working' | 'failed' | 'plan' | null = isWorking
+    ? 'working'
+    : (hasPendingPrompt || hasServerAttention)
+      ? 'needs-you'
       : item.lastMessageRole === 'error'
         ? 'failed'
         : item.lastMessageRole === 'plan'
           ? 'plan'
           : null
   const needsAttention = runState === 'needs-you' || runState === 'failed' || runState === 'plan'
-  // Keep the normal preview/labels instead of adding a second attention indicator.
-  const previewText = runState === 'working' || hasLabels ? null : getSessionPreviewText(item)
 
   // Resolve the bound project so the row can show a project-themed stripe /
   // tint and reveal the project name on hover. Treatment is a user preference
@@ -107,6 +101,8 @@ export function SessionItem({
     : undefined
   const projectColor = boundProject?.color
   const projectName = boundProject?.name
+  const showProjectName = projectName && ctx.scopedProjectId !== item.projectId
+  const isPilot = boundProject?.pilotSessionId === item.id
 
   const handleClick = (e: React.MouseEvent) => {
     ctx.onFocusZone()
@@ -135,17 +131,10 @@ export function SessionItem({
     onSelect()
   }
 
-  const subtitle = runState === 'working' ? (
-    <span className="flex items-center gap-1.5 min-w-0">
-      <Spinner className="text-label text-accent shrink-0" />
-      <span className="truncate">{t("session.runState.working")}</span>
-    </span>
-  ) : previewText
-
   return (
     <SessionProjectColorWrapper color={projectColor} treatment={projectColorTreatment}>
     <EntityRow
-      className="session-item"
+      className="session-item px-1.5 [&>div]:after:hidden"
       dataAttributes={{ 'data-session-id': item.id }}
       isSelected={isSelected}
       isInMultiSelect={isInMultiSelect}
@@ -156,6 +145,7 @@ export function SessionItem({
       onMouseDown={handleClick}
       buttonProps={{
         ...itemProps,
+        className: cn(itemProps.className as string | undefined, "items-center rounded-md py-2 pl-2.5 pr-10"),
         onKeyDown: (e: React.KeyboardEvent) => {
           ;(itemProps as { onKeyDown: (event: React.KeyboardEvent) => void }).onKeyDown(e)
           ctx.onKeyDown(e, item)
@@ -213,20 +203,23 @@ export function SessionItem({
           onDelete={() => ctx.onDelete(item.id)}
         />
       )}
-      icon={<SessionStatusIcon item={item} needsAttention={needsAttention} attentionDescription={attention?.reasons.map(reason => reason.title).join("; ")} />}
+      icon={<>
+        {(!isPilot || (!needsAttention && runState !== 'working')) &&
+          <RepositoryAvatar nameWithOwner={sessionRepositoryIdentity(item)} repositoryPath={item.worktree?.repositoryPath ?? item.workingDirectory} />}
+        {(!isPilot || needsAttention || runState === 'working') &&
+          <SessionStatusIcon item={item} needsAttention={needsAttention} isWorking={runState === 'working'} isWaitingForSubagents={hasPendingSubagents && !item.isProcessing} attentionDescription={attention?.reasons.map(reason => reason.title).join("; ")} />}
+      </>}
       title={ctx.searchQuery ? highlightMatch(title, ctx.searchQuery) : title}
-      titleClassName={cn(isUnread && "font-semibold", item.isAsyncOperationOngoing && "animate-shimmer-text")}
-      subtitle={subtitle}
-      subtitleTrailing={hasLabels ? <SessionBadges item={item} /> : undefined}
+      titleClassName={cn("truncate line-clamp-none", isUnread && !isWorking && "font-semibold")}
       titleSuffix={
-        (projectName || hasMessagingBinding) ? (
+        (showProjectName || hasMessagingBinding) ? (
           <div className="flex items-center gap-1">
-            {projectName && (
+            {showProjectName && (
               // Revealed on hover/focus only, and out of the layout otherwise: an invisible (opacity-0)
               // name still reserved its width and cut the title short for nothing. Solved tertiary
               // text, not the raw project color (purple text failed AA); the stripe carries the color.
               <span
-                className="hidden group-hover:inline group-focus-within:inline text-label-sm text-tertiary whitespace-nowrap truncate max-w-[120px]"
+                className="hidden group-hover:block group-focus-within:block text-label-sm leading-none text-tertiary whitespace-nowrap truncate max-w-[120px]"
                 title={projectName}
               >
                 {projectName}
@@ -249,19 +242,7 @@ export function SessionItem({
           </div>
         ) : undefined
       }
-      titleTrailing={isUnread && !hasMatch ? (
-        // Unread: an accent dot leads the meta and the age turns accent, so the signal sits on the
-        // row's own grid (the trailing slot) instead of floating in the bleed past the gutter.
-        <span className="inline-flex items-center gap-1.5 text-accent">
-          <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-accent-solid" />
-          <span className="sr-only">{t("session.unreadIndicator")}</span>
-          {item.isFlagged ? (
-            <Flag className="size-3.5 text-info" aria-label={t("sidebar.flagged")} />
-          ) : item.lastMessageAt ? (
-            formatShortAge(item.lastMessageAt)
-          ) : null}
-        </span>
-      ) : hasMatch ? (
+      titleTrailing={hasMatch ? (
         <span
           className="inline-flex h-[18px] min-w-6 items-center justify-center rounded-xs px-1 text-caption tabular-nums bg-info-tint text-info"
           title={`Matches found (${nextHotkey} next, ${prevHotkey} prev)`}
@@ -270,10 +251,6 @@ export function SessionItem({
         </span>
       ) : item.isFlagged ? (
         <Flag className="size-3.5 text-info" aria-label={t("sidebar.flagged")} />
-      ) : item.lastMessageAt ? (
-        <span>
-          {formatShortAge(item.lastMessageAt)}
-        </span>
       ) : undefined}
     />
     </SessionProjectColorWrapper>

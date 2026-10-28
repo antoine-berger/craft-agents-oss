@@ -1,9 +1,10 @@
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
-import { Check, MessageSquareText } from 'lucide-react'
+import { Check, ChevronRight } from 'lucide-react'
 import { cn } from '../../../lib/utils'
 import { Spinner } from '../../ui/LoadingIndicator'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../../tooltip'
+import { Markdown } from '../../markdown'
 import type { ActivityItem } from '../TurnCard'
 import { formatDuration } from '../turn-utils'
 import { ResultGlyph, ToolIcon } from './ActivityIcons'
@@ -88,28 +89,23 @@ export function ActivityRow({
   const { t } = useTranslation()
   const depth = activity.depth || 0
 
-  // Intermediate messages (LLM commentary): "Thinking..." while streaming, the stripped text after
-  if (activity.type === 'intermediate') {
+  // Keep reasoning/commentary readable without making the whole tool log noisy.
+  if (activity.type === 'intermediate' || activity.type === 'thinking') {
     const isThinking = activity.status === 'running'
-    const isComplete = activity.status === 'completed'
-    const displayContent = isThinking ? t('chat.processing.thinking') : stripMarkdown(activity.content || '')
     return (
-      <RowShell
-        depth={depth}
-        onClick={onOpenDetails && isComplete ? onOpenDetails : undefined}
-        wrapperClassName={className}
-        wrapperStyle={style}
-      >
-        <span className={ROW_ICON_SLOT}>
-          {isThinking ? (
-            <Spinner className={cn(SIZE_CONFIG.spinnerSize, 'text-accent')} />
-          ) : (
-            // A text bubble, not a dashed circle: at 14px that read as the "Todo" status glyph
-            <MessageSquareText aria-hidden className={cn(SIZE_CONFIG.iconSize, 'text-tertiary')} />
-          )}
-        </span>
-        <span className="min-w-0 flex-1 truncate">{displayContent}</span>
-      </RowShell>
+      <details className={cn('group/reasoning min-w-0', className)} style={{ ...style, marginInlineStart: depth * 16 }}>
+        <summary className={cn(WORK_LOG_ROW, WORK_LOG_ROW_INTERACTIVE, 'cursor-pointer list-none [&::-webkit-details-marker]:hidden')}>
+          <span className={ROW_ICON_SLOT}>
+            {isThinking ? <Spinner className={SIZE_CONFIG.spinnerSize} />
+              : <ChevronRight aria-hidden className={cn(SIZE_CONFIG.iconSize, 'group-open/reasoning:rotate-90')} />}
+          </span>
+          <span className="shrink-0">{t('chat.processing.thinking')}</span>
+          <span className="min-w-0 truncate text-tertiary">{stripMarkdown(activity.content || '')}</span>
+        </summary>
+        <div className="ml-6 pb-2 text-[12px] leading-5 text-secondary select-text">
+          <Markdown mode="minimal">{activity.content || ''}</Markdown>
+        </div>
+      </details>
     )
   }
 
@@ -136,7 +132,7 @@ export function ActivityRow({
   // - Params: Remaining tool input summary (detailed mode)
   const toolDisplay = formatToolDisplay(activity)
   const fullDisplayName = toolDisplay.name
-    || (activity.type === 'thinking' ? t('chat.processing.thinking') : t('turnCard.processing'))
+    || t('turnCard.processing')
 
   // MCP/API tools: "ClickUp: clickup_search" -> source name + tool slug
   const isMcpOrApiTool = activity.toolName?.startsWith('mcp__') ?? false

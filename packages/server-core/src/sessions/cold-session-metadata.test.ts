@@ -118,6 +118,25 @@ describe('cold-session metadata persistence', () => {
     expect(reloaded?.sessionStatus).toBe('done')
   })
 
+  it('persists PR-derived status, keeps a manual choice until the PR changes, and preserves the transcript', async () => {
+    const id = 'derived-status'
+    seedColdSession(id, { messages: [makeUserMessage('original', 'Keep this conversation')] })
+    await sm.setDerivedSessionStatus(id, 'needs-review')
+    expect(readDiskHeader(id).derivedSessionStatus).toBe('needs-review')
+    await sm.setSessionStatus(id, 'backlog')
+    await sm.setDerivedSessionStatus(id, 'needs-review')
+    expect(loadSession(tmpRoot, id)?.sessionStatus).toBe('backlog')
+    const loaded = loadSession(tmpRoot, id)!
+    const reopened = new SessionManager()
+    const { messages: _messages, ...metadata } = loaded
+    ;(reopened as any).sessions.set(id, createManagedSession(metadata, buildWorkspace()))
+    await reopened.setDerivedSessionStatus(id, 'needs-review')
+    expect(loadSession(tmpRoot, id)?.sessionStatus).toBe('backlog')
+    await reopened.setDerivedSessionStatus(id, 'done')
+    expect(loadSession(tmpRoot, id)?.sessionStatus).toBe('done')
+    expect(readDiskMessageIds(id)).toEqual(['original'])
+  })
+
   it('setSessionLabels on a cold session is on disk after flushSession resolves', async () => {
     const sessionId = 'cold-labels'
     seedColdSession(sessionId, { labels: [] })

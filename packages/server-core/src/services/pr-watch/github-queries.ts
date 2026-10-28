@@ -27,8 +27,9 @@ const PR_SUMMARY_FIELDS = `
   headRepositoryOwner { login }
   reviewDecision mergeable mergeStateStatus
   autoMergeRequest { mergeMethod }
-  viewerCanEnableAutoMerge
-  baseRepository { autoMergeAllowed viewerDefaultMergeMethod mergeCommitAllowed squashMergeAllowed rebaseMergeAllowed }
+  viewerCanEnableAutoMerge isMergeQueueEnabled
+  mergeQueueEntry { state position }
+  baseRepository { viewerPermission autoMergeAllowed viewerDefaultMergeMethod mergeCommitAllowed squashMergeAllowed rebaseMergeAllowed }
   commits(last: 1) { nodes { commit { committedDate statusCheckRollup { state ${CHECK_CONTEXTS} } } } }
   reviewThreads(first: 100) { pageInfo { hasNextPage } nodes { id isResolved isOutdated comments(first: 1) { nodes { author { login } url } } } }
   latestOpinionatedReviews(first: 20) { nodes { id state body url author { login } commit { oid } } }
@@ -119,6 +120,7 @@ export type GqlMergeMethod = 'MERGE' | 'SQUASH' | 'REBASE'
 
 /** The base repository's merge settings: whether it has auto-merge, and the methods it allows. */
 export interface GqlRepoMergeSettings {
+  viewerPermission?: string
   autoMergeAllowed: boolean
   /** The viewer's last-used method there, else the repository's default */
   viewerDefaultMergeMethod: GqlMergeMethod
@@ -146,6 +148,8 @@ export interface GqlPullRequestSummary {
   autoMergeRequest: { mergeMethod: GqlMergeMethod } | null
   /** GitHub would queue auto-merge for this PR now (false while it's already on) */
   viewerCanEnableAutoMerge: boolean
+  isMergeQueueEnabled?: boolean
+  mergeQueueEntry?: { state: string; position: number } | null
   baseRepository: GqlRepoMergeSettings | null
   commits: { nodes: Array<{ commit: { committedDate?: string; statusCheckRollup: GqlCheckRollup | null } }> }
   reviewThreads: { pageInfo?: { hasNextPage: boolean }; nodes: Array<{ isResolved: boolean; id?: string; isOutdated?: boolean; comments?: { nodes: Array<{ author: { login: string } | null; url: string }> } }> }

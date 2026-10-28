@@ -18,13 +18,18 @@ import type { Session, Message } from '../../shared/types'
  * Used by SessionList to avoid re-rendering on message changes
  */
 export interface SessionMeta {
+  importedFrom?: Session['importedFrom']
+  boundPrs?: Session['boundPrs']
+  recovery?: Session['recovery']
   id: string
+  worktree?: Session['worktree']
   name?: string
   /** Preview of first user message (for title fallback) */
   preview?: string
   workspaceId: string
   lastMessageAt?: number
   isProcessing?: boolean
+  backgroundAgentCount?: number
   isFlagged?: boolean
   lastReadMessageId?: string
   workingDirectory?: string
@@ -100,7 +105,7 @@ function findLastFinalMessageId(messages: Message[]): string | undefined {
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i]
     // Include plan messages as final responses (they're AI-generated content)
-    if ((msg.role === 'assistant' || msg.role === 'plan') && !msg.isIntermediate) {
+    if ((msg.role === 'assistant' || msg.role === 'plan') && !msg.isIntermediate && !msg.isStreaming && !msg.isPending) {
       return msg.id
     }
   }
@@ -234,6 +239,7 @@ export const replaceLoadedSessionAtom = atom(
   null,
   (get, set, session: Session) => {
     set(sessionAtomFamily(session.id), session)
+    if (session.backgroundTasks) set(backgroundTasksAtomFamily(session.id), session.backgroundTasks)
 
     const metaMap = get(sessionMetaMapAtom)
     const newMetaMap = new Map(metaMap)
@@ -319,6 +325,7 @@ export const initializeSessionsAtom = atom(
     // Set individual session atoms
     for (const session of sessions) {
       set(sessionAtomFamily(session.id), session)
+      if (session.backgroundTasks) set(backgroundTasksAtomFamily(session.id), session.backgroundTasks)
     }
 
     // Build metadata map
@@ -385,6 +392,7 @@ export const refreshSessionsMetadataAtom = atom(
         : session
 
       set(sessionAtomFamily(session.id), nextSession)
+      if (session.backgroundTasks) set(backgroundTasksAtomFamily(session.id), session.backgroundTasks)
 
       // Track sessions that lost their messages so lazy-loading re-fetches them
       if (!shouldPreserveMessages && loadedSessionIds.has(session.id)) {
@@ -428,6 +436,7 @@ export const addSessionAtom = atom(
   (get, set, session: Session) => {
     // Set session atom
     set(sessionAtomFamily(session.id), session)
+    if (session.backgroundTasks) set(backgroundTasksAtomFamily(session.id), session.backgroundTasks)
 
     // Add to metadata map
     const metaMap = get(sessionMetaMapAtom)
@@ -618,36 +627,33 @@ async function loadSessionMessages(
     const mergedSession = existingSession
       ? {
           ...existingSession,
-          // CRITICAL: Don't clobber messages if session is actively streaming
-          // AND already has messages in the atom. Streaming events update the atom
-          // directly and may contain messages the IPC response doesn't know about
-          // (race window between IPC request and response).
-          // The `messages.length > 0` guard ensures Cmd+R reload works: after reload,
-          // the atom starts with messages=[] from getSessions(), so IPC response
-          // (which has full history from main process memory) must be used.
-          // Also guard against sleep/wake edge case: the server may return
-          // empty messages if the session subprocess hasn't finished lazy-loading.
+          // The server flushes deltas before its snapshot, which includes their full prefix.
+          // Preserve local history only for an unexpectedly empty recovery response.
           messages: preservedStaleMessages
             ? existingSession.messages
-            : existingSession.isProcessing && existingSession.messages.length > 0
-              ? existingSession.messages
-              : loadedSession.messages,
+            : loadedSession.messages,
+          isProcessing: loadedSession.isProcessing,
           tokenUsage: loadedSession.tokenUsage ?? existingSession.tokenUsage,
           sessionFolderPath: loadedSession.sessionFolderPath ?? existingSession.sessionFolderPath,
         }
       : loadedSession
     set(sessionAtomFamily(sessionId), mergedSession)
+    if (loadedSession.backgroundTasks) set(backgroundTasksAtomFamily(sessionId), loadedSession.backgroundTasks)
 
     // Update only lastFinalMessageId in metadata (now computable from loaded messages).
     // Don't replace the full meta entry — other fields are maintained through
     // optimistic updates and IPC events, and may be ahead of disk state.
     const lastFinalMessageId = findLastFinalMessageId(loadedSession.messages)
-    if (lastFinalMessageId) {
+    {
       const metaMap = get(sessionMetaMapAtom)
       const existingMeta = metaMap.get(sessionId)
-      if (existingMeta && existingMeta.lastFinalMessageId !== lastFinalMessageId) {
+      if (existingMeta) {
         const newMetaMap = new Map(metaMap)
-        newMetaMap.set(sessionId, { ...existingMeta, lastFinalMessageId })
+        newMetaMap.set(sessionId, {
+          ...existingMeta,
+          isProcessing: mergedSession.isProcessing,
+          ...(lastFinalMessageId ? { lastFinalMessageId } : {}),
+        })
         set(sessionMetaMapAtom, newMetaMap)
       }
     }
@@ -713,6 +719,8 @@ export interface BackgroundTask {
   id: string
   /** Task type. 'workflow' = a fan-out Workflow launch (many sub-agents). */
   type: 'agent' | 'shell' | 'workflow'
+  /** Generic background tasks (for example Monitor) are not sub-agents. */
+  isSubagent?: boolean
   /** Tool use ID for correlation with messages */
   toolUseId: string
   /** Workflow run id (wf_...) — set for type 'workflow'; correlates agent-completed updates. */

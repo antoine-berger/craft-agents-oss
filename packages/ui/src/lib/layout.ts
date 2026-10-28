@@ -25,28 +25,28 @@ export const OVERLAY_LAYOUT = {
 
 /**
  * Chat layout configuration (design spec §4/§7.4, mockup `.column` / `.tx`):
- * a 720px text column with 24px gutters (14px in compact), turns 20px apart.
+ * an 896px column with 28px gutters, turns 16px apart.
  * The composer zone shares `maxWidth`, so it lines up with the transcript.
  */
 export const CHAT_LAYOUT = {
-  /** Max width for chat content area: 720px column + 2 × 24px gutters */
-  maxWidth: 'max-w-[768px]',
+  /** Desktop transcript and composer share the same width. */
+  maxWidth: 'max-w-4xl',
 
   /** Horizontal padding for main container */
-  containerPaddingX: 'px-6',
+  containerPaddingX: 'px-7',
 
   /** Vertical padding for main container (clears the 32px edge fade of the scroll area) */
   containerPaddingY: 'pt-6 pb-8',
 
   /** Combined container padding */
-  containerPadding: 'px-6 pt-6 pb-8',
+  containerPadding: 'px-7 pt-6 pb-8',
 
   /** Container padding in compact layouts (compact shell ≤ 767px, popovers): the 16px panel gutter,
    *  shared with the compact header's glyphs and the composer card, so the screen has one left edge */
   compactContainerPadding: 'px-gutter pt-4 pb-6',
 
-  /** Vertical spacing between messages/turns (20px) */
-  messageSpacing: 'flex flex-col gap-5',
+  /** Vertical spacing between messages/turns (16px) */
+  messageSpacing: 'flex flex-col gap-4',
 
   /** Extra padding for user messages — none: the column rhythm separates turns */
   userMessagePadding: '',

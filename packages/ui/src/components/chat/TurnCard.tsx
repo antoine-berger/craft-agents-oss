@@ -129,6 +129,8 @@ export interface ResponseContent {
   text: string
   isStreaming: boolean
   streamStartTime?: number
+  timestamp?: number
+  durationMs?: number
   /** Whether this response is a plan (renders with plan variant) */
   isPlan?: boolean
   /** ID of the underlying message (for branching + annotations) */
@@ -211,6 +213,8 @@ export interface TurnCardProps {
   compactMode?: boolean
   /** Callback to branch the session from a specific message */
   onBranch?: (messageId: string, options?: { newPanel?: boolean }) => void
+  restoreUserMessageId?: string
+  onRestore?: (userMessageId: string) => void
   /** Callback to add an annotation to a response message */
   onAddAnnotation?: (messageId: string, annotation: AnnotationV1) => void
   /** Callback to remove a persisted annotation from a response message */
@@ -390,6 +394,8 @@ export interface ResponseCardProps {
   isStreaming: boolean
   /** When streaming started - used for buffering timeout calculation */
   streamStartTime?: number
+  timestamp?: number
+  durationMs?: number
   /** Callback to open file in editor */
   onOpenFile?: (path: string) => void
   /** Callback to open URL */
@@ -417,6 +423,7 @@ export interface ResponseCardProps {
   compactMode?: boolean
   /** Callback to branch the session from this response */
   onBranch?: (options?: { newPanel?: boolean }) => void
+  onRestore?: () => void
   /** Callback to add annotation from selected text */
   onAddAnnotation?: (messageId: string, annotation: AnnotationV1) => void
   /** Callback to remove persisted annotation */
@@ -612,6 +619,8 @@ export function ResponseCard({
   text,
   isStreaming,
   streamStartTime,
+  timestamp,
+  durationMs,
   onOpenFile,
   onOpenUrl,
   onPopOut,
@@ -625,6 +634,7 @@ export function ResponseCard({
   showAcceptPlan = true,
   compactMode = false,
   onBranch,
+  onRestore,
   onAddAnnotation,
   onRemoveAnnotation,
   onUpdateAnnotation,
@@ -1422,11 +1432,14 @@ export function ResponseCard({
   const footer = isSettled && !compactMode ? (
     <ResponseFooter
       variant={isPlan ? 'plan' : 'answer'}
+      timestamp={timestamp}
+      durationMs={durationMs}
       copied={copied}
       onCopy={handleCopy}
       onPopOut={onPopOut}
       onViewFullscreen={() => setIsFullscreen(true)}
       onBranch={onBranch}
+      onRestore={onRestore}
       trailing={canAcceptPlan ? (
         <div
           className={cn(
@@ -1549,6 +1562,8 @@ export const TurnCard = React.memo(function TurnCard({
   animateResponse = false,
   compactMode = false,
   onBranch,
+  onRestore,
+  restoreUserMessageId,
   onAddAnnotation,
   onRemoveAnnotation,
   onUpdateAnnotation,
@@ -1724,6 +1739,8 @@ export const TurnCard = React.memo(function TurnCard({
       text={resp.text}
       isStreaming={resp.isStreaming}
       streamStartTime={resp.streamStartTime}
+      timestamp={resp.timestamp}
+      durationMs={resp.durationMs}
       sessionId={sessionId}
       onOpenFile={onOpenFile}
       onOpenUrl={onOpenUrl}
@@ -1740,6 +1757,7 @@ export const TurnCard = React.memo(function TurnCard({
       isLastResponse={isLastResponse}
       compactMode={compactMode}
       onBranch={onBranch && resp.messageId ? (options?: { newPanel?: boolean }) => onBranch(resp.messageId!, options) : undefined}
+      onRestore={onRestore && restoreUserMessageId ? () => onRestore(restoreUserMessageId) : undefined}
       sendMessageKey={sendMessageKey}
       hasActiveFollowUpAnnotations={hasActiveFollowUpAnnotations}
       openAnnotationRequest={openAnnotationRequest}
@@ -1851,6 +1869,7 @@ export const TurnCard = React.memo(function TurnCard({
 
   // Re-render if isLastResponse changed (for Accept Plan button visibility)
   if (prev.isLastResponse !== next.isLastResponse) return false
+  if (prev.onRestore !== next.onRestore || prev.restoreUserMessageId !== next.restoreUserMessageId) return false
 
   // Re-render if displayMode changed
   if (prev.displayMode !== next.displayMode) return false

@@ -74,6 +74,7 @@ export interface ISessionManager {
   unarchiveSession(sessionId: string): Promise<void>
   renameSession(sessionId: string, name: string): Promise<void>
   setSessionStatus(sessionId: string, status: SessionStatus): Promise<void>
+  setDerivedSessionStatus(sessionId: string, status: SessionStatus): Promise<void>
   markSessionRead(sessionId: string): Promise<void>
   markSessionUnread(sessionId: string): Promise<void>
   markAllSessionsRead(workspaceId: string): Promise<void>
@@ -146,6 +147,7 @@ export interface ISessionManager {
     rpcContext?: { callerClientId?: string },
   ): Promise<void>
   cancelProcessing(sessionId: string, silent?: boolean): Promise<void>
+  resumeFailedSession(sessionId: string): void
   /** What a background task of the session has written so far, digested; null when there is nothing to read. */
   getBackgroundTaskOutput(sessionId: string, taskId: string, kind?: 'agent' | 'shell' | 'workflow'): Promise<BackgroundTaskOutput | null>
   /** Stop one background task (shell, agent or workflow) of the session through its live agent. */

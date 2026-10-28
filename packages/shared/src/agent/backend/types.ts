@@ -389,6 +389,11 @@ export interface AgentBackend {
    */
   setBackgroundEventSink?(sink: ((event: AgentEvent) => void) | null): void;
 
+  /** Adopt output already emitted by a persistent query, without sending a prompt. */
+  setBackgroundTurnReadyHandler?(handler: (() => void) | null): void;
+  hasPendingBackgroundTurn?(): boolean;
+  resumeBackgroundTurn?(): AsyncGenerator<AgentEvent>;
+
   /**
    * Stop one background task (shell, agent or workflow) by its task id. Resolves false when there is
    * no live query to ask, so the task cannot still be running. Backends without background tasks
@@ -501,6 +506,9 @@ export interface AgentBackend {
    * can wait for child process exit here to avoid transient process leaks.
    */
   disposeForRestart?(): Promise<void>;
+
+  /** Opt-in: a persistent runtime is between turns and has no SDK operation awaiting input. */
+  canReleaseIdleRuntime?(): boolean;
 
   /** Get current thinking level */
   getThinkingLevel(): ThinkingLevel;

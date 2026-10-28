@@ -409,8 +409,8 @@ function AppShellContent({
 
   // Derive current view's project filter as a Map<projectId, FilterMode>
   const projectFilter = useMemo(() => {
-    if (!sessionFilterKey) return new Map<string, FilterMode>()
-    const entry = viewFiltersMap[sessionFilterKey]?.projects ?? {}
+    // Visiting Skills/Sources must not discard the project used for new chats.
+    const entry = viewFiltersMap[sessionFilterKey ?? 'allSessions']?.projects ?? {}
     return new Map<string, FilterMode>(Object.entries(entry) as [string, FilterMode][])
   }, [viewFiltersMap, sessionFilterKey])
 
@@ -472,23 +472,28 @@ function AppShellContent({
   }, [sessionFilterKey])
 
   // Jump to All Sessions filtered by a single project. Used by the Projects list
-  // context menu — sets the allSessions view's project filter (preserving its
-  // other filters), then navigates.
+  // context menu. Open a chat from that project instead of reusing the last
+  // workspace-wide selection, and clear unrelated filters that could hide it.
   const handleJumpToProjectSessions = useCallback((projectId: string) => {
     setViewFiltersMap(prev => {
       const existing = prev['allSessions']
       return {
         ...prev,
         allSessions: {
-          statuses: existing?.statuses ?? {},
-          labels: existing?.labels ?? {},
+          statuses: {},
+          labels: {},
           projects: { [projectId]: 'include' },
           groupingMode: existing?.groupingMode,
         }
       }
     })
-    navigate(routes.view.allSessions())
-  }, [])
+    const projectSessions = Array.from(store.get(sessionMetaMapAtom).values()).filter(session =>
+      session.projectId === projectId && !session.isArchived && !session.hidden
+    )
+    const selected = projectSessions.find(meta => meta.id === (focusedSessionId ?? session.selected))
+      ?? projectSessions[0]
+    navigate(routes.view.allSessions(selected?.id), { skipAutoSelect: !selected })
+  }, [store, focusedSessionId, session.selected, navigate])
 
   const setNewSessionProjectView = useCallback((projectId: string, statuses: FilterEntry = {}, labels: FilterEntry = {}) => {
     setViewFiltersMap(previous => ({
@@ -645,6 +650,19 @@ function AppShellContent({
   } = useAutomations(activeWorkspaceId)
 
   const { projects } = useProjects(activeWorkspaceId)
+  const openProjectByIndex = useCallback((index: number) => {
+    const project = projects[index]
+    if (project) handleJumpToProjectSessions(project.config.id)
+  }, [projects, handleJumpToProjectSessions])
+  useAction('project.open1', () => openProjectByIndex(0), { enabled: () => projects.length >= 1 })
+  useAction('project.open2', () => openProjectByIndex(1), { enabled: () => projects.length >= 2 })
+  useAction('project.open3', () => openProjectByIndex(2), { enabled: () => projects.length >= 3 })
+  useAction('project.open4', () => openProjectByIndex(3), { enabled: () => projects.length >= 4 })
+  useAction('project.open5', () => openProjectByIndex(4), { enabled: () => projects.length >= 5 })
+  useAction('project.open6', () => openProjectByIndex(5), { enabled: () => projects.length >= 6 })
+  useAction('project.open7', () => openProjectByIndex(6), { enabled: () => projects.length >= 7 })
+  useAction('project.open8', () => openProjectByIndex(7), { enabled: () => projects.length >= 8 })
+  useAction('project.open9', () => openProjectByIndex(8), { enabled: () => projects.length >= 9 })
   const { pages } = usePages(activeWorkspaceId)
   const projectMenuOptions = useMemo(
     () => projects.map(p => ({ id: p.config.id, slug: p.config.slug, name: p.config.name, color: p.config.color, pilotSessionId: p.config.pilotSessionId })),
@@ -1494,8 +1512,12 @@ function AppShellContent({
   }, [collapsedItems, activeWorkspaceId])
 
   const handleAllSessionsClick = useCallback(() => {
+    setViewFiltersMap(previous => ({
+      ...previous,
+      allSessions: { ...previous.allSessions, statuses: {}, labels: {}, projects: {} },
+    }))
     navigate(routes.view.allSessions())
-  }, [])
+  }, [navigate])
 
   const handleFlaggedClick = useCallback(() => {
     navigate(routes.view.flagged())
@@ -2647,6 +2669,7 @@ function AppShellContent({
                   labels={displayLabelConfigs}
                   onLabelsChange={handleSessionLabelsChange}
                   projects={projectMenuOptions}
+                  scopedProjectId={projectFilter.size === 1 ? [...projectFilter].find(([, mode]) => mode === 'include')?.[0] : undefined}
                   onSetProjectId={handleSessionProjectChange}
                   groupingMode={chatGroupingMode}
                   workspaceId={activeWorkspaceId ?? undefined}

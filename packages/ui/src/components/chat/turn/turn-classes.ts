@@ -31,7 +31,7 @@ export const SIZE_CONFIG = {
  * the summary chevron.
  */
 export const WORK_LOG_ROW =
-  'flex min-h-7 in-data-compact:min-h-9 min-w-0 flex-1 -ml-1.5 items-center gap-2 rounded-sm px-1.5 py-0.5 text-left text-label text-secondary'
+  'flex min-h-7 in-data-compact:min-h-9 min-w-0 flex-1 -ml-1.5 items-center gap-2 rounded-sm px-1.5 py-1.5 text-left text-[12px] text-secondary'
 
 /** Wrapper of one row: hosts the depth indent and the insert animation. */
 export const WORK_LOG_ROW_WRAPPER = 'flex min-w-0'
@@ -47,7 +47,7 @@ export const ROW_ICON_SLOT = 'flex size-4 shrink-0 items-center justify-center'
  * The expanded work log body: an inset hairline under the summary chevron (spec §7.4).
  * ml-1.75 (7px) centres the hairline under the 14px chevron.
  */
-export const WORK_LOG_BODY = 'ml-1.75 flex min-w-0 flex-col border-l border-default pl-3.5'
+export const WORK_LOG_BODY = 'ml-1.75 flex min-w-0 flex-col border-l border-subtle pl-3.5'
 
 /**
  * Insert animation for rows created after the card mounted: 150ms fade + 4px drop, driven by
@@ -71,13 +71,15 @@ export const CHIP_NEUTRAL =
   'inline-flex h-5 shrink-0 items-center gap-1 whitespace-nowrap rounded-xs bg-fill-hover px-1.5 text-label-sm text-secondary'
 
 /**
- * Answer typography (spec §7.4 "Answer", mockup `.answer`): copy 15/24 (16/26 in the compact
+ * Answer typography: copy 14/24 (16/26 in the compact
  * shell), blocks 12px apart, flush first/last block, inline code 14px in the compact shell.
  * Scoped to the answer so other Markdown hosts keep their own rhythm.
  */
 export const ANSWER_PROSE = [
-  'text-copy text-foreground in-data-compact:text-copy-lg',
-  '[&_.markdown-content_p]:my-3 [&_.markdown-content_p]:leading-[inherit]',
+  'text-[14px] leading-6 text-foreground in-data-compact:text-copy-lg',
+  '[&_.markdown-content_p]:my-2 [&_.markdown-content_p]:leading-[inherit]',
+  '[&_.markdown-content_h1]:text-base [&_.markdown-content_h2]:text-base [&_.markdown-content_h3]:text-[14px]',
+  '[&_.markdown-content_h1]:font-semibold [&_.markdown-content_h2]:font-semibold [&_.markdown-content_h3]:font-semibold',
   '[&_.markdown-content>:first-child]:mt-0 [&_.markdown-content>:last-child]:mb-0',
   'in-data-compact:[&_.inline-code]:text-label-lg',
 ].join(' ')

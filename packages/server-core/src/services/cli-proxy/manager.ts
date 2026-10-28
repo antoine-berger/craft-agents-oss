@@ -237,12 +237,13 @@ export class CliProxyManager {
   async connectorAccount(): Promise<{ id: string; email?: string; name: string }> {
     await this.initialize()
     if (this.phase !== 'running') throw new Error('The integrated account service is unavailable')
-    const status = await this.status()
+    // Connector identity must not depend on the model catalog being available.
+    const accounts = publicAccounts((await this.management('/credentials')).files ?? [])
     const nativeEmail = getLlmConnections().find(connection => connection.providerType === 'anthropic' && connection.authType === 'oauth')?.oauthAccountEmail
     const account = this.state.connectorAccountId
-      ? status.accounts.find(account => account.id === this.state.connectorAccountId && account.provider === 'claude' && !account.disabled)
-      : status.accounts.find(account => account.provider === 'claude' && !account.disabled && account.email === nativeEmail)
-        ?? status.accounts.find(account => account.provider === 'claude' && !account.disabled)
+      ? accounts.find(account => account.id === this.state.connectorAccountId && account.provider === 'claude' && !account.disabled)
+      : accounts.find(account => account.provider === 'claude' && !account.disabled && account.email === nativeEmail)
+        ?? accounts.find(account => account.provider === 'claude' && !account.disabled)
     if (!account) throw new Error('Enable the selected Claude account to use its MCP connectors')
     if (!this.state.connectorAccountId) { this.state.connectorAccountId = account.id; await this.saveState() }
     return { id: account.id, email: account.email, name: account.name }

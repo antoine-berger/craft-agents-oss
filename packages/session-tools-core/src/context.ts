@@ -852,6 +852,7 @@ export interface DecisionToolCallbacks {
 
 export interface SessionInfo {
   id: string;
+  isArchived?: boolean;
   name: string;
   labels: string[];
   status: string;

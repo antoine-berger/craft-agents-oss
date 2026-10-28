@@ -14,11 +14,10 @@ import { cn } from '@/lib/utils'
 import {
   DEFAULT_THEME,
   resolveTheme,
-  resolveThemeRoleInput,
+  resolveThemeRoles,
   type ThemeFile,
   type ThemeOverrides,
 } from '@config/theme'
-import { backgroundIsDark, deriveThemeRoles } from '@config/theme-roles'
 
 export interface ThemeGridOption {
   /** Value passed to onValueChange ('default' for the built-in theme) */
@@ -67,8 +66,7 @@ function solveSwatch(theme: ThemeFile | undefined, mode: 'light' | 'dark', overr
     const resolved = resolveTheme(theme ?? null, overrides)
     const scenic = resolved.mode === 'scenic' && !!resolved.backgroundImage
     const dark = mode === 'dark' || isDarkOnly(theme) || scenic
-    const input = resolveThemeRoleInput(resolved, dark)
-    const { vars } = deriveThemeRoles(input, backgroundIsDark(input.background) ? 'dark' : 'light')
+    const vars = resolveThemeRoles(resolved, dark)
     return {
       navigator: vars['--surface-navigator'],
       paper: vars['--surface-paper'],

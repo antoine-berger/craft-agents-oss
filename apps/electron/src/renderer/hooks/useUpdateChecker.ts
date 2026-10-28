@@ -13,6 +13,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import type { UpdateInfo } from '../../shared/types'
+import { updateErrorMessage } from '../../shared/update-errors'
 
 interface UseUpdateCheckerResult {
   /** Current update info */
@@ -68,15 +69,11 @@ export function useUpdateChecker(): UseUpdateCheckerResult {
     try {
       // Dismiss the update toast first
       toast.dismiss(UPDATE_TOAST_ID)
-      toast.info(t('toast.installingUpdate'), {
-        description: t('toast.appWillRestart'),
-        duration: 5000,
-      })
       await window.electronAPI.installUpdate()
     } catch (error) {
       console.error('[useUpdateChecker] Install failed:', error)
       toast.error(t('toast.failedToInstallUpdate'), {
-        description: error instanceof Error ? error.message : 'Unknown error',
+        description: updateErrorMessage(error),
       })
     }
   }, [])
@@ -86,6 +83,7 @@ export function useUpdateChecker(): UseUpdateCheckerResult {
     const checkAndNotify = async (info: UpdateInfo) => {
       if (!info.available || !info.latestVersion) return
       if (info.downloadState !== 'ready') return
+      if (info.error) return
 
       // Check if this version was dismissed
       const dismissedVersion = await window.electronAPI.getDismissedUpdateVersion()
@@ -139,7 +137,7 @@ export function useUpdateChecker(): UseUpdateCheckerResult {
     } catch (error) {
       console.error('[useUpdateChecker] Check failed:', error)
       toast.error(t('toast.failedToCheckUpdates'), {
-        description: error instanceof Error ? error.message : 'Unknown error',
+        description: updateErrorMessage(error),
       })
     }
   }, [showUpdateToast, installUpdate])

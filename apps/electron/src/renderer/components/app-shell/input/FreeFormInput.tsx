@@ -42,6 +42,7 @@ import { ANTHROPIC_MODELS, getModelContextWindow } from '@config/models'
 import {
   resolveEffectiveConnectionSlug,
   isCompatProvider,
+  isAnthropicProvider,
   isClaudeAccountConnection,
   modelSupportsImages,
 } from '@config/llm-connections'
@@ -183,6 +184,7 @@ export interface FreeFormInputProps {
   worktreeLocked?: boolean
   worktreeRepository?: string
   worktreeBranch?: string
+  importedRepository?: string
   /** Context status for showing compaction indicator and token usage */
   contextStatus?: ContextStatus
   /** Follow-up annotations shown as context chips above the input */
@@ -275,6 +277,7 @@ export function FreeFormInput({
   pendingRepository,
   worktreeRepository,
   worktreeBranch,
+  importedRepository,
   contextStatus,
   followUpItems = [],
   onFollowUpClick,
@@ -1439,12 +1442,13 @@ export function FreeFormInput({
     <form onSubmit={handleSubmit}>
       <div
         ref={containerRef}
+        data-craft-composer={!unstyled || undefined}
         className={cn(
           // Own the panel query boundary: standalone/playground composers must collapse chips
           // at the input's width too, not depend on an AppShell ancestor being present.
           '@container/panel flex flex-col min-h-0 overflow-hidden transition-colors',
           // Container styling - only when not wrapped by InputContainer
-          !unstyled && 'rounded-xl bg-raised shadow-elev-2',
+          !unstyled && 'rounded-xl border border-subtle bg-raised',
           // Drop target: inset focus ring + accent tint (never clipped by the card)
           isDraggingOver && 'ring-2 ring-inset ring-focus bg-accent-tint'
         )}
@@ -1571,11 +1575,11 @@ export function FreeFormInput({
           skills={skills}
           sources={sources}
           workspaceId={workspaceSlug}
-          // Copy type (15/24; 16/26 in compact so iOS never zooms), placeholder in tertiary.
+          // Copy type (14/24; 16/26 in compact so iOS never zooms), placeholder in tertiary.
           // Narrow panels reserve two lines so a wrapped rotating tip is never clipped.
           className={cn(
             'px-3.5 pt-3.5 pb-3.5',
-            compactMode ? 'text-copy-lg min-h-[80px]' : 'text-copy @max-panel-medium/panel:min-h-[76px]',
+            compactMode ? 'text-copy-lg min-h-[80px]' : 'text-[14px] @max-panel-medium/panel:min-h-[76px]',
           )}
           style={{ lineHeight: compactMode ? 'var(--lh-copy-lg)' : 'var(--lh-copy)' }}
           data-tutorial="chat-input"
@@ -1629,10 +1633,11 @@ export function FreeFormInput({
           />
 
           {/* Working directory chip */}
-          {(requireWorktree && (isEmptySession || worktreeChoicePending || !!worktreeRepository)) || worktreeLocked ? (
+          {(requireWorktree && (isEmptySession || worktreeChoicePending || !!worktreeRepository)) || worktreeLocked || importedRepository ? (
             <ComposerRepositorySelector key={sessionId} workspaceId={workspaceId} sessionId={sessionId}
-              repository={worktreeLocked ? undefined : selectedRepository}
-              repositoryPath={worktreeRepository} worktreePath={workingDirectory} branch={worktreeBranch} locked={worktreeLocked || (!isEmptySession && !worktreeChoicePending)} disabled={disabled}
+              repository={worktreeLocked || importedRepository ? undefined : selectedRepository}
+              nameWithOwner={importedRepository}
+              repositoryPath={worktreeRepository ?? (importedRepository ? workingDirectory : undefined)} worktreePath={workingDirectory} branch={worktreeBranch} locked={!!importedRepository || worktreeLocked || (!isEmptySession && !worktreeChoicePending)} disabled={disabled}
               onChoose={setSelectedRepository} />
           ) : onWorkingDirectoryChange && (compactMode ? (
             <CompactWorkingDirectorySelector
@@ -1676,6 +1681,7 @@ export function FreeFormInput({
           <ContextUsageIndicator
             snapshot={contextStatus?.contextUsage}
             reportedContextWindow={contextStatus?.contextWindow}
+            useClaudeSettings={!!effectiveConnectionDetails && isAnthropicProvider(effectiveConnectionDetails.providerType)}
             modelName={currentModelDisplayName}
             modelContextWindow={getModelContextWindow(currentModel)}
             isProcessing={isProcessing}

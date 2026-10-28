@@ -11,7 +11,6 @@ import { ActivityStatusIcon } from './ActivityIcons'
 import { ActivityRow } from './ActivityRow'
 import { TurnIconButton } from './TurnIconButton'
 import {
-  CHIP_NEUTRAL,
   HOVER_REVEAL,
   ROW_ICON_SLOT,
   SIZE_CONFIG,
@@ -21,6 +20,7 @@ import {
   WORK_LOG_ROW_WRAPPER,
 } from './turn-classes'
 import { useRowReveal } from './use-row-reveal'
+import { countWorkLogActivities } from './work-log-summary'
 
 interface ActivityGroupRowProps {
   group: ActivityGroup
@@ -107,6 +107,7 @@ export function ActivityGroupRow({
   const hasError = group.parent.status === 'error'
   const taskOutput = group.taskOutputData
   const hasTokens = taskOutput && (taskOutput.inputTokens !== undefined || taskOutput.outputTokens !== undefined)
+  const counts = countWorkLogActivities(group.children)
 
   return (
     <div className={cn('flex min-w-0 flex-col', className)} style={style}>
@@ -126,7 +127,7 @@ export function ActivityGroupRow({
             <ChevronRight aria-hidden className={SIZE_CONFIG.iconSize} />
           </motion.span>
           <ActivityStatusIcon status={group.parent.status} toolName={group.parent.toolName} />
-          <span className={cn(CHIP_NEUTRAL, 'font-medium')}>{group.continued ? t('turnCard.subagent') : subagentType || 'Task'}</span>
+          <span className="shrink-0 text-secondary">{group.continued ? t('turnCard.subagent') : subagentType || t('turnCard.subagent')}</span>
           {group.continued ? (
             // A subagent launched in an earlier turn: its rows are grouped here, collapsed
             <span className="min-w-0 truncate text-tertiary">{t('turnCard.subagentContinued', { count: group.children.length })}</span>
@@ -143,6 +144,7 @@ export function ActivityGroupRow({
             </span>
           )}
           <span className="flex-1" />
+          {counts.tools > 0 && <span className="shrink-0 tabular-nums text-tertiary">{t('turnCard.toolCallsCount', { count: counts.tools, defaultValue: `${counts.tools} tool ${counts.tools === 1 ? 'call' : 'calls'}` })}</span>}
         </button>
         {onOpenActivityDetails && isComplete && !group.continued && (
           <TurnIconButton

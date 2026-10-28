@@ -61,7 +61,7 @@ export function SidebarQuotaIndicator({ getQuotas, className }: SidebarQuotaIndi
     const timeout = setTimeout(() => invalidateClock(value => value + 1), Math.min(next - Date.now() + 10, 2_147_483_647))
     return () => clearTimeout(timeout)
   }, [snapshot])
-  const accounts = (snapshot?.accounts ?? []).map(account => account.freshness === 'fresh' && expiresAt(account) <= Date.now()
+  const accounts = (snapshot?.accounts ?? []).filter(account => !account.disabled).map(account => account.freshness === 'fresh' && expiresAt(account) <= Date.now()
     ? { ...account, freshness: 'stale' as const, availability: 'unknown' as const } : account)
   const selected = accounts.find(account => account.accountId === selectedId) ?? accounts.find(account => !account.disabled) ?? accounts[0]
   const fiveHour = selectedWindow(selected, 'five_hour')
@@ -89,7 +89,7 @@ export function SidebarQuotaIndicator({ getQuotas, className }: SidebarQuotaIndi
     </PopoverTrigger>
     <PopoverContent side="right" align="end" sideOffset={10} className="w-[320px] p-0 text-sm">
       <div className="flex items-center justify-between px-4 py-3 border-b border-foreground/5">
-        <div><div className="font-medium text-foreground">Account usage</div><div className="text-xs text-tertiary mt-0.5">Outer ring 5h · Inner ring weekly</div></div>
+        <div className="font-medium text-foreground">Usage</div>
         <button type="button" onClick={() => void refresh()} disabled={busy} className="rounded-md p-1.5 text-tertiary hover:bg-foreground/5 hover:text-foreground disabled:opacity-40" aria-label="Refresh account quotas" title="Refresh quotas">
           <RefreshCw className={cn('size-3.5', busy && 'animate-spin')} />
         </button>
@@ -101,23 +101,29 @@ export function SidebarQuotaIndicator({ getQuotas, className }: SidebarQuotaIndi
             try { localStorage.setItem(SELECTION_KEY, account.accountId) } catch { /* Private browser storage may be disabled. */ }
           }} aria-label={`Monitor ${account.name}`} aria-pressed={selected?.accountId === account.accountId}>
             <QuotaRings account={account} className="size-5" />
-            <span className="min-w-0 flex-1"><span className="block truncate text-foreground font-medium">{account.name}</span><span className="text-xs text-tertiary">{account.provider === 'claude' ? 'Claude' : 'GPT'}{account.plan ? ` · ${account.plan}` : ''}</span></span>
+            <span className="min-w-0 flex-1 truncate text-foreground font-medium" title={`${account.name} · ${account.provider === 'claude' ? 'Claude' : 'GPT'}${account.plan ? ` · ${account.plan}` : ''}`}>{account.name}</span>
             {selected?.accountId === account.accountId && <Check className="size-3.5 text-tertiary" />}
           </button>
-          <div className="mt-2.5 space-y-2">
+          <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2">
             {(['five_hour', 'weekly'] as const).map(period => {
               const window = selectedWindow(account, period)
               if (!window || window.usedPercent === null) return null
-              return <div key={period}>
-                <div className="flex items-center justify-between text-xs"><span className="text-secondary">{period === 'five_hour' ? '5 hours' : 'Weekly'}</span><span className="tabular-nums text-secondary">{formatPercent(window.usedPercent)} used{account.freshness === 'stale' ? ' · stale' : ''}</span></div>
-                <div className="mt-1 h-1 rounded-full bg-foreground/5 overflow-hidden"><div className={cn('h-full rounded-full bg-foreground/40', account.freshness !== 'fresh' && 'opacity-40')} style={{ width: `${window.usedPercent}%` }} /></div>
-                <div className="mt-1 text-[11px] text-tertiary">Resets {dateLabel(window.resetsAt)}</div>
+              const label = period === 'five_hour' ? '5h' : 'Weekly'
+              return <div key={period} title={`${label}: ${formatPercent(window.usedPercent)} used${window.resetsAt === null ? '' : ` · Resets ${dateLabel(window.resetsAt)}`}`}>
+                <div className="flex items-center justify-between text-xs"><span className="text-tertiary">{label}</span><span className={cn('tabular-nums text-secondary', window.usedPercent >= 100 && 'text-amber-500')}>{formatPercent(window.usedPercent)}</span></div>
+                <div role="meter" aria-label={`${label} usage for ${account.name}`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={window.usedPercent} aria-valuetext={`${formatPercent(window.usedPercent)} used${window.resetsAt === null ? '' : ` · Resets ${dateLabel(window.resetsAt)}`}`} className="mt-1.5 h-1 rounded-full bg-foreground/5 overflow-hidden"><div className={cn('h-full rounded-full', window.usedPercent >= 100 ? 'bg-amber-500/70' : 'bg-foreground/40', account.freshness !== 'fresh' && 'opacity-40')} style={{ width: `${Math.min(100, Math.max(0, window.usedPercent))}%` }} /></div>
               </div>
             })}
-            {account.windows.filter(window => (window.scope || window.period === 'other') && window.usedPercent !== null).map(window => <div key={window.id} className="flex justify-between gap-3 text-xs text-tertiary"><span>{window.label}</span><span className="tabular-nums" title={`Resets ${dateLabel(window.resetsAt)}`}>{formatPercent(window.usedPercent)}</span></div>)}
           </div>
-          <div className="mt-2.5 flex justify-between gap-2 text-[11px] text-tertiary"><span>{availabilityLabel(account)}</span><span>{account.observedAt ? `Updated ${new Date(account.observedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : 'Refresh to check'}</span></div>
-          {account.nextRefreshAt !== null && account.nextRefreshAt > snapshot!.generatedAt && account.state !== 'ready' && <div className="mt-1 text-[11px] text-tertiary">Retry after {new Date(account.nextRefreshAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' })}</div>}
+          {availabilityLabel(account) !== 'Available' && <div className={cn('mt-2 text-[11px]', account.availability === 'exhausted' && account.freshness === 'fresh' ? 'text-amber-500' : 'text-tertiary')}>{availabilityLabel(account)}</div>}
+          <details className="mt-2 text-[11px] text-tertiary">
+            <summary className="w-fit cursor-pointer select-none hover:text-foreground">Details</summary>
+            <div className="mt-2 space-y-1.5">
+              <div>{account.provider === 'claude' ? 'Claude' : 'GPT'}{account.plan ? ` · ${account.plan}` : ''}{account.observedAt ? ` · Updated ${new Date(account.observedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : ' · Refresh to check'}</div>
+              {account.windows.filter(window => window.usedPercent !== null).map(window => <div key={window.id} className="flex justify-between gap-3"><span>{window.label}{window.scope || window.period === 'other' ? ` · ${formatPercent(window.usedPercent)}` : ''}</span><span className="text-right">{window.resetsAt === null ? 'Reset time unavailable' : `Resets ${dateLabel(window.resetsAt)}`}</span></div>)}
+              {account.nextRefreshAt !== null && account.nextRefreshAt > snapshot!.generatedAt && account.state !== 'ready' && <div>Retry after {new Date(account.nextRefreshAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' })}</div>}
+            </div>
+          </details>
         </div>)}
         {!accounts.length && <div className="px-4 py-5 text-xs text-tertiary">{failed ? 'Unable to read account usage.' : snapshot?.serviceAvailable === false ? 'Account service unavailable.' : 'No connected account available.'}</div>}
       </div>

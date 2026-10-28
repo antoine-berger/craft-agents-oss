@@ -70,6 +70,17 @@ export function prStateTone(state: PrState): PrTone {
   }
 }
 
+/** The sidebar uses green only when the branch PR is ready to merge. */
+export function sidebarPrTone(summary: PrSummary): PrTone {
+  if (summary.state !== 'open') return prStateTone(summary.state)
+  return summary.mergeState === 'clean'
+    && (summary.reviewDecision === 'approved' || summary.reviewDecision === 'none')
+    && prChipStatus(summary) === 'ok'
+    && !summary.attentionStale
+    && summary.headMatchesLocal !== false
+    ? 'success' : 'neutral'
+}
+
 export function checksTone(rollup: ChecksRollup): PrTone {
   switch (rollup) {
     case 'success': return 'success'

@@ -36,7 +36,27 @@ export type PrAutoMergeBlock = 'repo-disabled' | 'draft' | 'mergeable' | 'unavai
  * What the poll fetches: everything the chip's status glyph and the card's action depend on, so the
  * two always agree (see {@link prCardAction}). One small GraphQL query.
  */
+export type PrQuickOperation = 'merge' | 'ready' | 'rerun'
+export interface PrQuickOperationRequest {
+  operation: PrQuickOperation
+  expectedHeadOid: string
+  method?: PrMergeMethod
+}
+export interface PrQuickOperationResult {
+  ok: boolean
+  error?: string
+  outcome?: 'merged' | 'queued' | 'ready' | 'rerun'
+}
+
 export interface PrSummary {
+  /** Present only on servers supporting direct header actions. */
+  quickActions?: {
+    canMerge: boolean
+    methods: PrMergeMethod[]
+    defaultMethod: PrMergeMethod | null
+    mergeQueue: boolean
+    queued?: { state: string; position: number }
+  }
   /** Exact PR commit and freshness, used by durable attention. */
   headOid?: string
   headMatchesLocal?: boolean | null

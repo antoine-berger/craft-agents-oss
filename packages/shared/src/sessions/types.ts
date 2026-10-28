@@ -31,7 +31,7 @@ export const SESSION_PERSISTENT_FIELDS = [
   // Timestamps
   'createdAt', 'lastUsedAt', 'lastMessageAt',
   // Display
-  'name', 'isFlagged', 'sessionStatus', 'labels', 'hidden',
+  'name', 'isFlagged', 'sessionStatus', 'derivedSessionStatus', 'labels', 'hidden',
   // Read tracking
   'lastReadMessageId', 'hasUnread',
   // Config
@@ -64,6 +64,7 @@ export const SESSION_PERSISTENT_FIELDS = [
   // Project binding (workspace-scoped grouping)
   'projectId',
   'importedFrom',
+  'recovery',
   // Kanban: task/subtask hierarchy + board column
   'parentSessionId',
   'kanbanColumn',
@@ -131,7 +132,10 @@ export interface OwnedWorktree {
   branchPrefix?: string;
   /** Legacy hash branches omit this; task/existing names retain durable ownership markers. */
   branchNaming?: 'task' | 'existing';
+  /** Initial branch anchors the durable directory allocation; Git may subsequently switch branches. */
   branch: string;
+  /** Last verified checkout, retained in the owner journal for archive/restoration. */
+  checkout?: { branch: string | null; commit: string };
   base: string;
   baseCommit: string;
   status: 'pending' | 'ready' | 'removed';
@@ -156,8 +160,17 @@ export interface SessionWorktreeMetadata {
 /**
  * Session configuration (persisted metadata)
  */
+/** Durable marker for a request that did not finish normally. */
+export interface SessionRecovery {
+  status: 'running' | 'failed';
+  at: number;
+  message?: string;
+  lastFinalMessageId?: string;
+}
+
 export interface SessionConfig {
   importedFrom?: ConductorImportOrigin;
+  recovery?: SessionRecovery | null;
   id: string;
   /** SDK session ID (captured after first message) */
   sdkSessionId?: string;
@@ -178,6 +191,8 @@ export interface SessionConfig {
   previousPermissionMode?: PermissionMode;
   /** User-controlled session status - determines inbox vs completed */
   sessionStatus?: SessionStatus;
+  /** Last PR-derived status; a manual choice lasts until this changes. */
+  derivedSessionStatus?: SessionStatus;
   /** Labels applied to this session (bare IDs or "id::value" entries) */
   labels?: string[];
   /** ID of last message user has read */
@@ -308,6 +323,7 @@ export interface StoredSession extends SessionConfig {
  */
 export interface SessionHeader {
   importedFrom?: ConductorImportOrigin;
+  recovery?: SessionRecovery | null;
   id: string;
   /** SDK session ID (captured after first message) */
   sdkSessionId?: string;
@@ -327,6 +343,8 @@ export interface SessionHeader {
   previousPermissionMode?: PermissionMode;
   /** User-controlled session status - determines inbox vs completed */
   sessionStatus?: SessionStatus;
+  /** Last PR-derived status; a manual choice lasts until this changes. */
+  derivedSessionStatus?: SessionStatus;
   /** Labels applied to this session (bare IDs or "id::value" entries) */
   labels?: string[];
   /** ID of last message user has read */
@@ -431,6 +449,7 @@ export interface SessionHeader {
  */
 export interface SessionMetadata {
   importedFrom?: ConductorImportOrigin;
+  recovery?: SessionRecovery | null;
   id: string;
   workspaceRootPath: string;
   name?: string;
@@ -446,6 +465,8 @@ export interface SessionMetadata {
   isFlagged?: boolean;
   /** User-controlled session status */
   sessionStatus?: SessionStatus;
+  /** Last PR-derived status; a manual choice lasts until this changes. */
+  derivedSessionStatus?: SessionStatus;
   /** Labels applied to this session (bare IDs or "id::value" entries) */
   labels?: string[];
   /** Explicit per-session source selection (absent = follow workspace defaults) */

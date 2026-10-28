@@ -344,7 +344,7 @@ export function ThemeProvider({
     const supportedModes = presetTheme?.supportedModes
     const currentMode = isDarkFromMode ? 'dark' : 'light'
     const themeModeUnsupported = supportedModes && supportedModes.length > 0 && !supportedModes.includes(currentMode)
-    const translucent = !!windowVibrancy && !isScenic && !themeModeUnsupported && resolvedMode === systemPreference
+    const translucent = !!windowVibrancy && !resolvedTheme.opaque && !isScenic && !themeModeUnsupported && resolvedMode === systemPreference
     if (translucent) {
       root.dataset.vibrancy = windowVibrancy
     } else {

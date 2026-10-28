@@ -379,6 +379,7 @@ export const CHANNEL_MAP = {
   prWatchUnbind: invoke(RPC_CHANNELS.prWatch.UNBIND),
   prWatchSetAutoMerge: invoke(RPC_CHANNELS.prWatch.SET_AUTO_MERGE),
   prWatchSetAutoFix: invoke(RPC_CHANNELS.prWatch.SET_AUTO_FIX),
+  prWatchRunAction: invoke(RPC_CHANNELS.prWatch.RUN_ACTION),
   onPrWatchChanged: listener(RPC_CHANNELS.prWatch.CHANGED),
   checkGitBash: invoke(RPC_CHANNELS.gitbash.CHECK),
   browseForGitBash: invoke(RPC_CHANNELS.gitbash.BROWSE),

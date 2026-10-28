@@ -135,7 +135,7 @@ export function useActionRegistry() {
 // Utility functions
 // ─────────────────────────────────────────────
 
-function matchesHotkey(e: KeyboardEvent, hotkey: string): boolean {
+export function matchesHotkey(e: KeyboardEvent, hotkey: string): boolean {
   const parts = hotkey.toLowerCase().split('+')
   const key = parts[parts.length - 1]
   const needsMod = parts.includes('mod')
@@ -161,12 +161,11 @@ function matchesHotkey(e: KeyboardEvent, hotkey: string): boolean {
 
   const specialCode = specialKeys[key]
 
-  // Important: for text shortcuts (A-Z/0-9), match logical key only.
-  // Mixing in physical code (e.g. KeyQ) causes AZERTY/QWERTZ collisions such as
-  // Cmd+A incorrectly matching a Cmd+Q binding.
+  // Letters use the logical key to avoid AZERTY/QWERTZ collisions (A versus Q).
+  // Number-row shortcuts also accept physical digits, including Option-modified keys.
   const codeMatches = specialCode
     ? e.code === specialCode
-    : logicalKeyMatches
+    : logicalKeyMatches || (/^[0-9]$/.test(key) && e.code === `Digit${key}`)
 
   // Check modifier requirements
   const modCorrect = needsMod ? modPressed : !modPressed

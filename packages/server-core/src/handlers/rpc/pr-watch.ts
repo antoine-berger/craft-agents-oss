@@ -7,7 +7,7 @@
  * holds its own registry subscriptions, so it runs whether or not a window shows the session.
  */
 
-import { RPC_CHANNELS, type PrAutoFixResult, type PrDetails, type PrMergeMethod, type PrWatchSessionState } from '@craft-agent/shared/protocol'
+import { RPC_CHANNELS, type PrAutoFixResult, type PrQuickOperationRequest, type PrQuickOperationResult, type PrDetails, type PrMergeMethod, type PrWatchSessionState } from '@craft-agent/shared/protocol'
 import { getWorkspaceByNameOrId } from '@craft-agent/shared/config'
 import type {
   PrBindToolResult,
@@ -20,6 +20,8 @@ import { AUTO_FIX_CLIENT_ID, createAutoFixMonitor, type AutoFixMonitor } from '.
 import { createPrWatchOps } from '../../pr-watch/operations'
 import { githubGraphql } from '../../services/pr-watch/github-client'
 import { PrWatchRegistry } from '../../services/pr-watch/registry'
+import { syncSessionTitleFromPr } from '../../services/pr-watch/session-title'
+import { parsePrReference } from '../../services/pr-watch/pr-ref'
 import { tokenCandidates, type GitHubSourceLike } from '../../services/pr-watch/token-chain'
 
 export const HANDLED_CHANNELS = [
@@ -31,6 +33,7 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.prWatch.UNBIND,
   RPC_CHANNELS.prWatch.SET_AUTO_MERGE,
   RPC_CHANNELS.prWatch.SET_AUTO_FIX,
+  RPC_CHANNELS.prWatch.RUN_ACTION,
 ] as const
 
 let registry: PrWatchRegistry | null = null
@@ -92,6 +95,10 @@ export function registerPrWatchHandlers(server: RpcServer, deps: HandlerDeps): v
     log: message => log.info(message),
   })
   registry = current
+  current.onSessionState((sessionId, state) => {
+    void syncSessionTitleFromPr(deps.sessionManager, sessionId, state)
+      .catch(error => log.warn?.(`[pr-title] ${sessionId}: ${error instanceof Error ? error.message : String(error)}`))
+  })
   monitor = createAutoFixMonitor({
     getRegistry: () => current,
     sessionManager: deps.sessionManager,
@@ -152,6 +159,28 @@ export function registerPrWatchHandlers(server: RpcServer, deps: HandlerDeps): v
 
   server.handle(RPC_CHANNELS.prWatch.SET_AUTO_MERGE, async (_ctx, sessionId: string, ref: string, enabled: boolean, method?: PrMergeMethod): Promise<PrAutoMergeToolResult> => {
     return ops.setAutoMerge(sessionId, ref, enabled, method)
+  })
+
+  server.handle(RPC_CHANNELS.prWatch.RUN_ACTION, async (ctx, sessionId: string, ref: string, request: PrQuickOperationRequest): Promise<PrQuickOperationResult> => {
+    try {
+      const session = deps.sessionManager.getSessionSnapshot(sessionId)
+      if (!session) throw new Error('Session not found.')
+      const root = resolveWorkspaceRootPath(session.workspaceId)
+      if (!root || (ctx.workspaceId && resolveWorkspaceRootPath(ctx.workspaceId) !== root)) throw new Error('Session is in another workspace.')
+      if (session.isProcessing || session.isAsyncOperationOngoing) throw new Error('Wait for the session to finish before changing its PR.')
+      const state = current.cachedSessionState(sessionId)
+      const entry = state?.kind === 'ready' ? state.prs.find(pr => pr.summary.url === ref) : undefined
+      const coords = parsePrReference(ref)
+      if (!entry || !coords) throw new Error('Refresh this session’s PR before trying again.')
+      if (request?.operation === 'merge' && entry.origin !== 'branch') throw new Error('Open this PR’s own session before merging.')
+      const dir = deps.sessionManager.getSessionWorkingDirectory(sessionId) ?? session.workingDirectory
+      if (!dir) throw new Error('This session has no working directory.')
+      const result = await current.runAction({ coords, number: coords.number, workspaceRootPath: root, dir, request })
+      await current.nudge(sessionId)
+      return result
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : 'PR action failed.' }
+    }
   })
 
   server.handle(RPC_CHANNELS.prWatch.SET_AUTO_FIX, async (_ctx, sessionId: string, prId: string, enabled: boolean): Promise<PrAutoFixResult> => {

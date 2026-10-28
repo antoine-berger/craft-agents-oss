@@ -12,6 +12,17 @@ export interface WorkLogPreview {
   text?: string
 }
 
+/** Count distinct kinds of work instead of calling every entry a "step". */
+export function countWorkLogActivities(activities: readonly ActivityItem[]) {
+  return activities.reduce((counts, activity) => {
+    if (activity.type === 'tool') {
+      if (isParentTaskTool(activity.toolName ?? '')) counts.subagents++
+      else counts.tools++
+    } else if (activity.type === 'intermediate' || activity.type === 'thinking') counts.messages++
+    return counts
+  }, { tools: 0, messages: 0, subagents: 0 })
+}
+
 /** Activities whose status is `error` — shown as a "N failed" chip on the collapsed row. */
 export function countFailedActivities(activities: ActivityItem[]): number {
   let failed = 0

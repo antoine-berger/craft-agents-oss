@@ -3,7 +3,7 @@ import type { PrWatchRegistry } from '../pr-watch/registry'
 import type { ISessionManager } from '../../handlers/session-manager-interface'
 import { SessionAttentionStore } from './store'
 import { reconcileGithubAttention } from './github'
-import { findShipState } from '../ship-workflow/store'
+import { deriveSessionStatus } from './derived-status'
 
 const CLIENT = '__session_attention__'
 /** Persistent server-owned attention for every non-archived session, independent of open projects/windows. */
@@ -33,6 +33,8 @@ export class SessionAttentionService {
       if (!session || session.isArchived || this.disposed) return
       const store = this.store(session.workspaceId)
       if (!store) return
+      const derivedStatus = deriveSessionStatus(state)
+      if (derivedStatus) void this.deps.manager.setDerivedSessionStatus(sessionId, derivedStatus).catch(error => this.deps.log?.(error))
       const next = reconcileGithubAttention(state, store.get(sessionId)?.reasons ?? [], Date.now(), this.activeAutoFix.get(sessionId))
       store.setGitHubState(sessionId, next.reasons, next.stale)
     })
@@ -73,7 +75,7 @@ export class SessionAttentionService {
     if (prId) this.activeAutoFix.set(sessionId, prId)
     else this.activeAutoFix.delete(sessionId)
     const session = this.deps.manager.getSessionSnapshot(sessionId)
-    if (session) this.setWorking(sessionId, !!session.isProcessing)
+    if (session) this.setWorking(sessionId, !!session.isProcessing || (session.backgroundAgentCount ?? 0) > 0)
   }
   setWorking(sessionId: string, working: boolean): void {
     const session = this.deps.manager.getSessionSnapshot(sessionId)
@@ -109,17 +111,9 @@ export class SessionAttentionService {
     for (const session of sessions) {
       if (this.disposed || this.registry !== registry || session.isArchived) continue
       const store = this.store(session.workspaceId)
-      const rootForShip = this.deps.workspaceRoot(session.workspaceId)
-      const ship = (() => { try { return rootForShip ? findShipState(rootForShip, session.id) : null } catch (error) { this.deps.log?.(error); return undefined } })()
-      store?.setWorking(session.id, !!session.isProcessing || ship?.status === 'running')
-      const previousShip = store?.get(session.id)?.reasons.filter(r => r.source === 'ship') ?? []
-      const shipReasons: AttentionReason[] = ship && (ship.status === 'waiting' || ship.status === 'blocked')
-        ? (ship.reasons.length ? ship.reasons : [ship.phase === 'discussion' ? 'Plan ready for your decision' : ship.phase === 'human_review' ? 'Review the pull request before merging' : `Ship is waiting at ${ship.phase}`]).map((title, index) => ({
-          id: `ship:${ship.id}:${ship.phase}:${index}`, source: 'ship', kind: 'ship', title,
-          detail: `Ship · ${ship.phase}`, createdAt: previousShip[index]?.createdAt ?? Date.parse(ship.updatedAt),
-          action: { type: 'session' },
-        })) : []
-      if (ship !== undefined) store?.setReasons(session.id, 'ship', shipReasons)
+      store?.setWorking(session.id, !!session.isProcessing || (session.backgroundAgentCount ?? 0) > 0)
+      // Native /ship is a skill now; old orchestrator files cannot keep a chat "working".
+      store?.setReasons(session.id, 'ship', [])
       const dir = this.deps.manager.getSessionWorkingDirectory(session.id) ?? session.workingDirectory
       const root = this.deps.workspaceRoot(session.workspaceId)
       const old = this.subscriptions.get(session.id)

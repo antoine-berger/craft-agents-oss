@@ -259,13 +259,12 @@ export function InputContainer({
         </div>
       )}
 
-      {/* Visible animated container — ONE raised card (spec §7.5): radius 16, a quiet elev-1 lift
-          (hairline only in an unfocused panel; the large elev-2 blur read as a cheap drop shadow),
-          focus shown instantly as a tint ring; decision prompts swap in their status ring. */}
+      {/* One light frame; focus and decision prompts keep their existing status rings. */}
       <motion.div
+        data-craft-composer
         className={cn(
-          "input-container relative overflow-hidden rounded-xl bg-raised",
-          isFocusedPanel ? "shadow-elev-1" : "shadow-elev-0",
+          "input-container relative overflow-hidden rounded-xl border bg-raised",
+          isFocusedPanel ? "border-default" : "border-subtle",
           decisionTone
             ? decisionRingClass(decisionTone)
             : "focus-within:ring-1 focus-within:ring-focus/55",

@@ -401,6 +401,7 @@ export const RPC_CHANNELS = {
     SET_AUTO_MERGE: 'prWatch:setAutoMerge',
     /** Turn auto-fix (the card's Fix toggle) on/off for one of the session's PRs: (sessionId, prId, enabled) */
     SET_AUTO_FIX: 'prWatch:setAutoFix',
+    RUN_ACTION: 'prWatch:runAction',
     /** Server → client push: (sessionId, PrWatchSessionState) */
     CHANGED: 'prWatch:changed',
   },

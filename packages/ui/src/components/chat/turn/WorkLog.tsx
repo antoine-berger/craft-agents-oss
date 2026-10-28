@@ -12,11 +12,12 @@ import { ThinkingRow } from './ThinkingRow'
 import { TodoList } from './TodoList'
 import { CHIP_DESTRUCTIVE, HOVER_REVEAL, SIZE_CONFIG, WORK_LOG_BODY } from './turn-classes'
 import { useRowReveal } from './use-row-reveal'
-import type { WorkLogPreview } from './work-log-summary'
+import { countWorkLogActivities, type WorkLogPreview } from './work-log-summary'
 
 export interface WorkLogHeaderProps {
   /** Number of activities in the turn (the former step-count pill, now the summary lead) */
   activityCount: number
+  counts?: ReturnType<typeof countWorkLogActivities>
   preview: WorkLogPreview
   /** Activities with status `error`: shown as a destructive "N failed" chip */
   failedCount: number
@@ -33,6 +34,7 @@ export interface WorkLogHeaderProps {
  */
 export function WorkLogHeader({
   activityCount,
+  counts,
   preview,
   failedCount,
   isExpanded,
@@ -40,9 +42,14 @@ export function WorkLogHeader({
   actionsMenu,
 }: WorkLogHeaderProps) {
   const { t } = useTranslation()
-  const lead = preview.text === undefined
+  const summary = counts ? [
+    counts.tools > 0 ? t('turnCard.toolCallsCount', { count: counts.tools, defaultValue: `${counts.tools} tool ${counts.tools === 1 ? 'call' : 'calls'}` }) : null,
+    counts.messages > 0 ? t('turnCard.messagesCount', { count: counts.messages, defaultValue: `${counts.messages} ${counts.messages === 1 ? 'message' : 'messages'}` }) : null,
+    counts.subagents > 0 ? t('turnCard.subagentsCount', { count: counts.subagents, defaultValue: `${counts.subagents} ${counts.subagents === 1 ? 'subagent' : 'subagents'}` }) : null,
+  ].filter(Boolean).join(' · ') : ''
+  const lead = summary || (preview.text === undefined
     ? t('turnCard.stepsCompletedCount', { count: activityCount })
-    : t('turnCard.stepCount', { count: activityCount })
+    : t('turnCard.stepCount', { count: activityCount }))
 
   return (
     <div className="group/wl flex min-w-0 items-center gap-1">
@@ -61,7 +68,7 @@ export function WorkLogHeader({
           <ChevronRight aria-hidden className="size-3.5" />
         </motion.span>
         <span className="min-w-0 flex-1 truncate">
-          <span className="font-medium text-foreground">{lead}</span>
+          <span>{lead}</span>
           {preview.text && (
             <>
               <span aria-hidden className="text-tertiary"> · </span>
@@ -176,11 +183,12 @@ function WorkLogRows({
  * Excluded from transcript search (matches ripgrep behavior).
  */
 export function WorkLog({ todos, ...props }: WorkLogProps) {
-  const { activityCount, preview, failedCount, isExpanded, onToggle, actionsMenu, ...rowProps } = props
+  const { activityCount, counts, preview, failedCount, isExpanded, onToggle, actionsMenu, ...rowProps } = props
   return (
     <div className="group min-w-0 select-none" data-search-exclude="true">
       <WorkLogHeader
         activityCount={activityCount}
+        counts={counts ?? countWorkLogActivities(rowProps.activities)}
         preview={preview}
         failedCount={failedCount}
         isExpanded={isExpanded}

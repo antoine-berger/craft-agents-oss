@@ -40,6 +40,7 @@ import {
   FolderOpen,
   Globe,
   Info,
+  History,
   Link2Off,
   MailOpen,
   MessageSquare,
@@ -104,6 +105,7 @@ export interface CompactSessionMenuProps {
   onDelete: () => void
   /** Adds a "Session info" row (the chat header moves its Info button in here on phones). */
   onShowInfo?: () => void
+  onShowHistory?: () => void
 
   // ---------------------------------------------------------------------------
   // Controlled-component shim — used by SessionItem and the chat header so a
@@ -142,6 +144,7 @@ export function CompactSessionMenu({
   onSendToWorkspace,
   onDelete,
   onShowInfo,
+  onShowHistory,
   open: controlledOpen,
   onOpenChange,
   initialView = 'root',
@@ -259,6 +262,7 @@ export function CompactSessionMenu({
               hasUnread={_hasUnread}
               hasTransferTargets={hasTransferTargets}
               onShowInfo={closeAfter(onShowInfo)}
+              onShowHistory={closeAfter(onShowHistory)}
               onShare={closeAfter(actions.share)}
               onOpenShareSub={() => setView('share')}
               onSendToWorkspace={closeAfter(onSendToWorkspace)}
@@ -333,6 +337,7 @@ interface RootPaneProps {
   hasUnread: boolean
   hasTransferTargets?: boolean
   onShowInfo?: () => void
+  onShowHistory?: () => void
   onShare?: () => void
   onOpenShareSub: () => void
   onSendToWorkspace?: () => void
@@ -365,6 +370,7 @@ function RootPane({
   hasUnread,
   hasTransferTargets,
   onShowInfo,
+  onShowHistory,
   onShare,
   onOpenShareSub,
   onSendToWorkspace,
@@ -396,6 +402,7 @@ function RootPane({
 
   return (
     <div className="flex flex-col">
+      {onShowHistory && <Row icon={<History className="h-4 w-4" />} label={t('checkpoints.history', { defaultValue: 'History' })} onTap={onShowHistory} />}
       <Row icon={<Info className="h-4 w-4" />} label={t('chat.sessionInfo')} onTap={onShowInfo} />
 
       {/* Share / Shared */}

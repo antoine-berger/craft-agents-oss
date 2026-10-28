@@ -369,6 +369,7 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
 
   const turns: Turn[] = []
   let currentTurn: AssistantTurn | null = null
+  let requestTimestamp: number | undefined
 
   const flushCurrentTurn = (interrupted = false) => {
     if (currentTurn) {
@@ -417,6 +418,8 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
             text: lastTextActivity.content,
             isStreaming: false,
             messageId: lastTextActivity.id,
+            timestamp: lastTextActivity.timestamp,
+            durationMs: Math.max(0, lastTextActivity.timestamp - (requestTimestamp ?? currentTurn.timestamp)),
           }
         }
       }
@@ -445,6 +448,7 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
       // If there's a current turn, it's complete (something follows it)
       if (currentTurn) currentTurn.isComplete = true
       flushCurrentTurn()
+      requestTimestamp = message.timestamp
       turns.push({
         type: 'user',
         message,
@@ -636,6 +640,8 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
       // Set as response on current turn (ignoring turnId differences)
       currentTurn.response = {
         text: message.content,
+        timestamp: message.timestamp,
+        durationMs: message.isStreaming ? undefined : Math.max(0, message.timestamp - (requestTimestamp ?? currentTurn.timestamp)),
         isStreaming: !!message.isStreaming,
         streamStartTime: message.isStreaming ? message.timestamp : undefined,
         messageId: message.id,
@@ -647,6 +653,7 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
       // Flush when turn is complete (non-streaming = final response received)
       if (!message.isStreaming) {
         flushCurrentTurn()
+        requestTimestamp = undefined
       }
       continue
     }

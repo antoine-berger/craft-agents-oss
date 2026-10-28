@@ -7,6 +7,8 @@ export interface ConductorImportOrigin {
   sessionId: string
   workspaceId?: string
   repositoryId?: string
+  /** Display identity only; does not grant ownership of the imported checkout. */
+  repository?: string
   importedAt: number
   fingerprint: string
   partial?: boolean

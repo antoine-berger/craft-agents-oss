@@ -300,6 +300,11 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
     command: import('@craft-agent/shared/protocol').SessionCommand
   ) => {
     switch (command.type) {
+      case 'resumeFailed':
+        if (_ctx.workspaceId && sessionManager.getSessionSnapshot(sessionId)?.workspaceId !== _ctx.workspaceId) {
+          throw new Error('This chat belongs to another workspace')
+        }
+        return sessionManager.resumeFailedSession(sessionId)
       case 'flag':
         return sessionManager.flagSession(sessionId)
       case 'unflag':

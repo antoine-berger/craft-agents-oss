@@ -1,8 +1,7 @@
 /**
  * ChatHeader — the chat panel's header (design spec §7.3).
  *
- * Desktop: status glyph · title (click to rename) · "workspace · folder" · PR chip ·
- * label chips · Info · Share · ⋯ · close. Session metadata lives here rather than in a badge row
+ * Desktop: title (click to rename) · compact PR chip · Changes · ⋯ · close. Session metadata lives here rather than in a badge row
  * above the composer.
  *
  * Compact shell: back · status glyph · title · ⋯. The drawer behind ⋯ also holds Session info and
@@ -13,25 +12,20 @@
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 import { useSetAtom } from 'jotai'
-import { Info, MoreHorizontal, Pencil, GitCompareArrows } from 'lucide-react'
+import { History, Info, MoreHorizontal, Pencil, GitCompareArrows } from 'lucide-react'
 import { PanelHeaderCenterButton } from '@/components/ui/PanelHeaderCenterButton'
 import { RenameDialog } from '@/components/ui/rename-dialog'
-import { DropdownMenu, DropdownMenuTrigger, StyledDropdownMenuContent } from '@/components/ui/styled-dropdown'
+import { DropdownMenu, DropdownMenuTrigger, StyledDropdownMenuContent, StyledDropdownMenuItem, StyledDropdownMenuSeparator } from '@/components/ui/styled-dropdown'
 import { useAppShellContext } from '@/context/AppShellContext'
 import { kanbanEditorTargetAtom } from '@/atoms/kanban'
 import type { SessionMeta } from '@/atoms/sessions'
 import { navigate, routes } from '@/lib/navigate'
 import { cn } from '@/lib/utils'
-import { getSessionStatus } from '@/utils/session'
 import { PanelHeader } from '../PanelHeader'
 import { SessionMenu } from '../SessionMenu'
 import { CompactSessionMenu } from '../CompactSessionMenu'
 import { SessionInfoPopover } from '../SessionInfoPopover'
-import { deriveSelectionFlags } from '../input/use-working-directory-state'
-import { ChatHeaderStatusButton } from './ChatHeaderStatusButton'
-import { ChatHeaderLabels } from './ChatHeaderLabels'
-import { ChatShareMenu } from './ChatShareMenu'
-import { CHAT_HEADER_MAX_LABELS } from './label-strip-layout'
+import { PrQuickActions } from './pr-watch/PrQuickActions'
 import { ChatHeaderPrChip } from './pr-watch/ChatHeaderPrChip'
 import { isPrWatchVisible, type PrEntry, type PrMergeMethod, type PrWatchState } from './pr-watch/pr-watch-state'
 import type { PrAutoFixView, PrAutoMergeChange, PrWatchNav } from '@/hooks/usePrWatch'
@@ -45,13 +39,13 @@ export interface ChatHeaderProps {
   isRegeneratingTitle?: boolean
   /** Published viewer link; the loaded session can know it before the metadata does */
   sharedUrl?: string | null
-  checkpointControl?: React.ReactNode
+  onOpenHistory?: () => void
   onReviewChanges?: () => void
   workingDirectory?: string
   sessionFolderPath?: string
   /** The active pull request; shown on the desktop layout */
   prWatch?: PrWatchState
-  /** The session's PRs (branch PR + pinned PRs); with more than one the chip shows "+N" and the card its tabs */
+  /** The session's PRs (branch PR + pinned PRs); with more than one the chip shows "+N" */
   prWatchNav?: PrWatchNav
   /** Where the active PR came from — only `bound` PRs get an Unpin action */
   prWatchActiveOrigin?: PrEntry['origin']
@@ -85,7 +79,7 @@ function sameHeaderProps(prev: ChatHeaderProps, next: ChatHeaderProps): boolean 
     && prev.title === next.title
     && prev.isRegeneratingTitle === next.isRegeneratingTitle
     && prev.sharedUrl === next.sharedUrl
-    && prev.checkpointControl === next.checkpointControl
+    && prev.onOpenHistory === next.onOpenHistory
     && prev.onReviewChanges === next.onReviewChanges
     && prev.workingDirectory === next.workingDirectory
     && prev.sessionFolderPath === next.sessionFolderPath
@@ -107,9 +101,9 @@ export const ChatHeader = React.memo(function ChatHeader({
   title,
   isRegeneratingTitle,
   sharedUrl,
-  workingDirectory,
   onReviewChanges,
-  checkpointControl,
+  onOpenHistory,
+  workingDirectory,
   sessionFolderPath,
   prWatch,
   prWatchNav,
@@ -202,7 +196,7 @@ export const ChatHeader = React.memo(function ChatHeader({
   const [infoOpen, setInfoOpen] = React.useState(false)
   const infoOpenRef = React.useRef(false)
   infoOpenRef.current = infoOpen
-  const showInfo = React.useCallback(() => setInfoOpen(true), [])
+  const showInfo = React.useCallback(() => { infoOpenRef.current = true; requestAnimationFrame(() => setInfoOpen(true)) }, [])
   // The drawer has no trigger of its own (⋯ and the status glyph both open it), so focus goes back to
   // whichever opened it, unless "Session info" handed off to the info sheet.
   const drawerOpenerRef = React.useRef<HTMLElement | null>(null)
@@ -220,33 +214,11 @@ export const ChatHeader = React.memo(function ChatHeader({
     setInfoOpen(false)
   }, [compact])
 
-  // State, not a ref: the label strip measures this row in a layout effect, which runs before React attaches
-  // the row's ref (children's layout effects run first), so the strip needs a re-render once the row exists.
-  const [titleRowEl, setTitleRowEl] = React.useState<HTMLDivElement | null>(null)
-  // The session folder arrives with the loaded session; until then a reset folder would read as its id.
-  // Only the folder: the workspace is always named in the top bar, so repeating it here
-  // ("Design Audit · design-audit") was noise that competed with the title.
-  const folderName = sessionFolderPath ? deriveSelectionFlags(workingDirectory, sessionFolderPath).folderName : undefined
-  const meta = folderName ?? ''
   const showPrChip = !compact && isPrWatchVisible(prWatch)
-  // The PR chip, measured by the label strip (state: it mounts after the strip's first layout)
-  const [prReserveEl, setPrReserveEl] = React.useState<HTMLElement | null>(null)
 
   const titleRow = (
-    <div ref={setTitleRowEl} className="flex min-w-0 flex-1 items-center gap-1.5">
-      {item && sessionStatuses.length > 0 && (
-        <ChatHeaderStatusButton
-          sessionId={sessionId}
-          statusId={getSessionStatus(item)}
-          statuses={sessionStatuses}
-          onSelect={handleStatusChange}
-          onOpenCompact={compact ? (opener) => openDrawer('status', opener) : undefined}
-          compactExpanded={drawer.open && drawer.view === 'status'}
-        />
-      )}
-      {/* After the status glyph the title starts 10px from it, as row text does after a row glyph
-          (-ml-2 absorbs the flex gap and the glyph button's inner padding) */}
-      <h1 className={cn('min-w-0 shrink font-sans text-label-lg font-semibold', item && sessionStatuses.length > 0 && '-ml-2')}>
+    <div className="flex min-w-0 flex-1 items-center gap-2">
+      <h1 className={cn('min-w-0 flex-1 font-sans text-label-lg font-normal')}>
         <button
           type="button"
           onClick={openRename}
@@ -260,46 +232,27 @@ export const ChatHeader = React.memo(function ChatHeader({
           <span className={cn(isRegeneratingTitle && 'animate-shimmer-text')}>{title}</span>
         </button>
       </h1>
-      {/* Truncates first: the title keeps its room until the meta has none left */}
-      {meta && !compact && (
-        <span className="min-w-0 shrink-[100] truncate text-label-sm text-tertiary" title={workingDirectory}>
-          {meta}
-        </span>
-      )}
       {showPrChip && prWatch && (
         <ChatHeaderPrChip
-          sessionId={sessionId}
           state={prWatch}
           nav={prWatchNav}
-          activeOrigin={prWatchActiveOrigin}
-          onRefresh={onRefreshPrWatch}
-          onUnbind={onUnbindPr}
-          onSetAutoMerge={onSetPrAutoMerge}
-          autoFix={prWatchAutoFix}
-          onSetAutoFix={onSetPrAutoFix}
-          onCardOpenChange={onPrCardOpenChange}
-          onReserveElChange={setPrReserveEl}
         />
       )}
-      {item && !compact && (
-        <ChatHeaderLabels
-          item={item}
-          labels={labels}
-          onLabelsChange={handleLabelsChange}
-          rowEl={titleRowEl}
-          maxLabels={CHAT_HEADER_MAX_LABELS}
-          reserveEl={showPrChip ? prReserveEl : null}
-        />
-      )}
+      {!compact && workingDirectory && prWatch && <PrQuickActions
+        key={sessionId} sessionId={sessionId} state={prWatch} origin={prWatchActiveOrigin}
+        onRefresh={onRefreshPrWatch} onSetAutoMerge={onSetPrAutoMerge}
+      />}
     </div>
   )
 
   const moreLabel = t('session.actionsFor', { title })
   const actions = (
     <div className="flex items-center gap-1">
-      {checkpointControl}
-      {onReviewChanges && <PanelHeaderCenterButton icon={<GitCompareArrows className="h-4 w-4" />} tooltip={t('gitReview.title', { defaultValue: 'Review changes' })} onClick={onReviewChanges} />}
-      {isTaskOrchestrator && (
+      {onReviewChanges && <PanelHeaderCenterButton
+        icon={<><GitCompareArrows className="h-4 w-4" />{!compact && <span>{t('gitReview.shortTitle', { defaultValue: 'Changes' })}</span>}</>}
+        className={compact ? undefined : 'w-auto gap-1.5 px-2 text-label-sm'}
+        tooltip={t('gitReview.title', { defaultValue: 'Review changes' })} onClick={onReviewChanges} />}
+      {isTaskOrchestrator && compact && (
         <PanelHeaderCenterButton
           icon={<Pencil className="h-4 w-4" />}
           tooltip={t('kanban.editTask')}
@@ -307,21 +260,21 @@ export const ChatHeader = React.memo(function ChatHeader({
         />
       )}
       {item && !compact && (
-        <SessionInfoPopover
-          sessionId={sessionId}
-          sessionFolderPath={sessionFolderPath}
-          side="bottom"
-          align="end"
-          trigger={<PanelHeaderCenterButton icon={<Info className="h-4 w-4" />} aria-label={t('chat.sessionInfo')} />}
-        />
-      )}
-      {item && !compact && <ChatShareMenu item={item} />}
-      {item && !compact && (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <PanelHeaderCenterButton icon={<MoreHorizontal className="h-4 w-4" />} aria-label={moreLabel} />
           </DropdownMenuTrigger>
-          <StyledDropdownMenuContent align="end" sideOffset={8}>
+          <StyledDropdownMenuContent align="end" sideOffset={8} onCloseAutoFocus={event => { if (infoOpenRef.current) event.preventDefault() }}>
+            {onOpenHistory && <StyledDropdownMenuItem onSelect={onOpenHistory}>
+              <History className="h-3.5 w-3.5" /><span>{t('checkpoints.history', { defaultValue: 'History' })}</span>
+            </StyledDropdownMenuItem>}
+            <StyledDropdownMenuItem onSelect={showInfo}>
+              <Info className="h-3.5 w-3.5" /><span>{t('chat.sessionInfo')}</span>
+            </StyledDropdownMenuItem>
+            {isTaskOrchestrator && <StyledDropdownMenuItem onSelect={handleEditTask}>
+              <Pencil className="h-3.5 w-3.5" /><span>{t('kanban.editTask')}</span>
+            </StyledDropdownMenuItem>}
+            <StyledDropdownMenuSeparator />
             <SessionMenu
               item={item}
               sessionStatuses={sessionStatuses}
@@ -378,20 +331,19 @@ export const ChatHeader = React.memo(function ChatHeader({
             onOpenInNewWindow={handleOpenInNewWindow}
             onDelete={handleDelete}
             onShowInfo={showInfo}
+            onShowHistory={onOpenHistory}
             open={drawer.open}
             onOpenChange={handleDrawerOpenChange}
             initialView={drawer.view}
             onCloseAutoFocus={handleDrawerCloseAutoFocus}
           />
-          <SessionInfoPopover
-            sessionId={sessionId}
-            sessionFolderPath={sessionFolderPath}
-            presentation="drawer"
-            open={infoOpen}
-            onOpenChange={setInfoOpen}
-          />
         </>
       )}
+      {item && <SessionInfoPopover
+        sessionId={sessionId} sessionFolderPath={sessionFolderPath}
+        presentation={compact ? 'drawer' : 'dialog'}
+        side="bottom" align="end" open={infoOpen} onOpenChange={setInfoOpen}
+      />}
       <RenameDialog
         open={renameOpen}
         onOpenChange={setRenameOpen}

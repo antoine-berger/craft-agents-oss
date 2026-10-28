@@ -30,11 +30,12 @@ describe('handleArchiveSession (archive_session)', () => {
     expect(calls).toEqual([{ sessionId: 'other-2', archived: true }]);
   });
 
-  it('unarchives when archived=false', async () => {
+  it('refuses agent unarchive without invoking the server callback', async () => {
     const { ctx, calls } = createCtx();
     const res = await handleArchiveSession(ctx, { sessionId: 'other-2', archived: false });
-    expect(res.isError).toBeFalsy();
-    expect(calls).toEqual([{ sessionId: 'other-2', archived: false }]);
+    expect(res.isError).toBe(true);
+    expect(JSON.stringify(res)).toContain('Only the owner');
+    expect(calls).toHaveLength(0);
   });
 
   it('rejects a missing sessionId', async () => {

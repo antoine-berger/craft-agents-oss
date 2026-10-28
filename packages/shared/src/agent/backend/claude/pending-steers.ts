@@ -78,7 +78,7 @@ export class PendingSteers {
     let complete: Extract<AgentEvent, { type: 'complete' }> | undefined;
     try {
       for await (const event of events) {
-        if (event.type === 'complete') complete = event;
+        if (event.type === 'complete' && !event.continuing) complete = event;
         else yield event;
       }
     } finally {

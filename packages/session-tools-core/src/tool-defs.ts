@@ -299,7 +299,7 @@ export const SearchSessionsSchema = z.object({
 
 export const ArchiveSessionSchema = z.object({
   sessionId: z.string().describe('Session ID to archive or unarchive. Required — you cannot archive your own session.'),
-  archived: z.boolean().optional().describe('true to archive (default), false to unarchive.'),
+  archived: z.boolean().optional().describe('Must be true (default). Only the owner may unarchive a chat; false is refused.'),
 });
 
 export const CreateTaskSchema = z.object({
@@ -689,9 +689,9 @@ Omit sessionId to target the current session.
 
 IMPORTANT: never move a task into a closed status (such as "done" or "cancelled") yourself — closing a task is the user's decision, made on the board. You may prepare and hand off work by setting an open status like "needs-review"; the user reviews and closes it. Closed-status calls are rejected.`,
 
-  archive_session: `Archive or unarchive another session in this workspace by ID.
+  archive_session: `Archive another session in this workspace by ID, stopping its running and queued work.
 
-Archiving removes a session from the active list and unread counts — it does NOT delete it (pass archived=false to restore). Use it to tidy up finished or superseded sessions.
+Archived chats cannot receive prompts or run. Only the owner may unarchive them; archived=false is refused. History and worktrees are retained according to existing settings. Use it to tidy up finished or superseded sessions.
 Requires an explicit sessionId and cannot target your own session. Use list_sessions / get_session_info to find the target session's ID.`,
 
   project_memory_append: `Add a note to this session's project memory (MEMORY.md, shown to every session in the project as <project_memory>). Append-only: the note is added at the end under a dated heading naming this session, and nothing else in the file changes.
@@ -749,7 +749,7 @@ This changes state on GitHub and can lead to the PR merging without further acti
 Returns labels, status, name, permission mode, projectId (if the session is bound to a project), workingDirectory, and other details.
 Call with no arguments to introspect your own session state.`,
 
-  list_sessions: `List sessions in the workspace. Returns total count + paginated results.
+  list_sessions: `List active, non-archived sessions in the workspace. Returns total count + paginated results. Archived chats cannot receive prompts or run and only the owner may restore them.
 
 Use filters (status, label, search) to narrow results instead of fetching everything. Default limit is 20 sessions.
 Use get_session_info for full details on a specific session (list-then-detail pattern).`,

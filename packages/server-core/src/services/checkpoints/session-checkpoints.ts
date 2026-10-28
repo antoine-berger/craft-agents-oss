@@ -117,14 +117,13 @@ async function assertOwned(context: CheckpointContext): Promise<void> {
   }
   if (plan.status !== 'ready' || !plan.ownerId || !plan.token) throw new SessionCheckpointError('A ready session-owned worktree is required', 'not-owned')
   if (await realpath(plan.path).catch(() => '') !== plan.path || await realpath(plan.gitDir).catch(() => '') !== plan.gitDir) throw new SessionCheckpointError('The original worktree is no longer available', 'not-owned')
-  const [top, common, branch] = await Promise.all([
+  const [top, common] = await Promise.all([
     git(plan.path, ['rev-parse', '--show-toplevel']), git(plan.path, ['rev-parse', '--git-common-dir']),
-    git(plan.path, ['symbolic-ref', '--quiet', '--short', 'HEAD']),
   ])
   const markerFile = join(plan.gitDir, 'craft-session-worktrees', `${hash(plan.ownerId)}.json`)
   let marker: OwnedWorktree
   try { marker = JSON.parse(await readFile(markerFile, 'utf8')) } catch { throw new SessionCheckpointError('The worktree ownership reservation is missing', 'not-owned') }
-  if (resolve(top.trim()) !== plan.path || resolve(plan.path, common.trim()) !== plan.gitDir || branch.trim() !== plan.branch
+  if (resolve(top.trim()) !== plan.path || resolve(plan.path, common.trim()) !== plan.gitDir
     || marker.ownerId !== plan.ownerId || marker.token !== plan.token || marker.path !== plan.path || marker.branch !== plan.branch) {
     throw new SessionCheckpointError('This checkout does not match the session-owned worktree', 'not-owned')
   }
@@ -178,7 +177,7 @@ async function loadRecord(context: CheckpointContext, id: string): Promise<Check
   try { record = JSON.parse(await readFile(join(recordDir(context.sessionDir, id), 'record.json'), 'utf8')) } catch { throw new SessionCheckpointError('Checkpoint record is unavailable', 'invalid-checkpoint') }
   if (record.version !== 1 || record.id !== id || !['turn', 'recovery'].includes(record.kind)
     || record.ownerId !== context.plan.ownerId || record.worktreePath !== context.plan.path || record.gitDir !== context.plan.gitDir
-    || record.branch !== context.plan.branch || !/^[a-f0-9]{40,64}$/.test(record.headCommit) || !/^[a-f0-9]{40,64}$/.test(record.snapshotCommit)) {
+    || typeof record.branch !== 'string' || !record.branch || !/^[a-f0-9]{40,64}$/.test(record.headCommit) || !/^[a-f0-9]{40,64}$/.test(record.snapshotCommit)) {
     throw new SessionCheckpointError('Checkpoint ownership or contents do not match this session', 'invalid-checkpoint')
   }
   const expectedRef = `refs/craft/checkpoints/${hash(record.ownerId)}/${record.id}`
@@ -201,6 +200,7 @@ async function createSnapshot(context: CheckpointContext, kind: 'turn' | 'recove
   const temporaryIndex = join(temporary, 'snapshot-index')
   try {
     const headCommit = (await git(plan.path, ['rev-parse', '--verify', 'HEAD'])).trim()
+    const branch = (await git(plan.path, ['rev-parse', '--abbrev-ref', 'HEAD'])).trim()
     const sourceIndex = await indexPath(plan)
     const indexPresent = existsSync(sourceIndex)
     const index = indexPresent ? await readFile(sourceIndex) : undefined
@@ -214,7 +214,7 @@ async function createSnapshot(context: CheckpointContext, kind: 'turn' | 'recove
     const record: CheckpointRecord = {
       version: 1, id, kind, ...(userMessageId ? { userMessageId } : {}), createdAt: Date.now(),
       ownerId: plan.ownerId, repoPath: plan.repoPath, gitDir: plan.gitDir, worktreePath: plan.path,
-      branch: plan.branch, headCommit, snapshotCommit, snapshotRef,
+      branch, headCommit, snapshotCommit, snapshotRef,
       indexPresent, ...(index ? { indexHash: hash(index) } : {}),
     }
     const conversation = await readFile(join(sessionDir, 'session.jsonl'))
@@ -295,7 +295,7 @@ async function restoreGit(context: CheckpointContext, target: CheckpointRecord, 
     // Starting from the full current snapshot also removes new non-ignored untracked files.
     await git(context.plan.path, ['read-tree', current.snapshotCommit], temporaryIndex)
     await git(context.plan.path, ['read-tree', '--reset', '-u', target.snapshotCommit], temporaryIndex)
-    await git(context.plan.path, ['update-ref', `refs/heads/${target.branch}`, target.headCommit, current.headCommit])
+    await git(context.plan.path, ['update-ref', 'HEAD', target.headCommit, current.headCommit])
     const destination = await indexPath(context.plan)
     if (target.indexPresent) await atomicWrite(destination, await readFile(join(recordDir(context.sessionDir, target.id), 'index')))
     else await rm(destination, { force: true })

@@ -59,6 +59,7 @@ import type { BackgroundTaskOutput } from "@craft-agent/shared/protocol"
 import { agentDocument } from "./BackgroundTaskChip"
 import { runCommandMessage } from "@/lib/run-command-message"
 import { useTurnCardExpansion } from "@/hooks/useTurnCardExpansion"
+import { getNextUserMessageId } from "@/lib/checkpoint-target"
 import { useNavigation } from "@/contexts/NavigationContext"
 import { useAppShellContext } from "@/context/AppShellContext"
 import { navigate, routes } from "@/lib/navigate"
@@ -143,6 +144,7 @@ function getTurnKey(turn: Turn): string {
 
 interface ChatDisplayProps {
   session: Session | null
+  onRestoreBeforeMessage?: (userMessageId: string) => void
   onSendMessage: (message: string, attachments?: FileAttachment[], skillSlugs?: string[]) => void
   onOpenFile: (path: string) => void
   onOpenUrl: (url: string) => void
@@ -282,6 +284,7 @@ export interface ChatDisplayHandle {
  */
 export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>(function ChatDisplay({
   session,
+  onRestoreBeforeMessage,
   onSendMessage,
   onOpenFile,
   onOpenUrl,
@@ -346,9 +349,8 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   const appShellContext = useAppShellContext()
   const isFocusedPanel = appShellContext?.isFocusedPanel ?? true
 
-  // Input is only disabled when explicitly disabled (e.g., agent needs activation)
-  // User can type during streaming - submitting will stop the stream and send
-  const isInputDisabled = disabled
+  // Streaming accepts follow-ups; archived chats stay read-only until restored.
+  const isInputDisabled = disabled || !!session?.isArchived
   const messagesEndRef = React.useRef<HTMLDivElement>(null)
   const scrollViewportRef = React.useRef<HTMLDivElement>(null)
   const prevSessionIdRef = React.useRef<string | null>(null)
@@ -389,7 +391,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
 
   // Register as focus zone - when zone gains focus, focus the textarea
   // Guard with isFocusedPanelRef so only the focused panel responds in multi-panel layouts
-  const { zoneRef, isFocused } = useFocusZone({
+  const { zoneRef } = useFocusZone({
     zoneId: 'chat',
     enabled: isFocusedPanel,
     focusFirst: () => {
@@ -446,17 +448,15 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   // Require 2+ characters to activate in-chat search (aligned with session list isSearchMode)
   const isSearchActive = searchQuery.trim().length >= 2
 
-  // Focus textarea when zone gains focus via keyboard (Tab, Cmd+3, ArrowRight)
-  // Requires isFocused to be true - respects zone architecture
-  // Does NOT auto-focus just because session changed (that would steal focus from SessionList)
-  // Uses isSearchModeActive (prop) instead of isSearchActive (query-based) to prevent
-  // focus stealing when search is open but query is empty
-  // In multi-panel layouts, only the focused panel should auto-focus its textarea
+  // Opening a chat makes its composer ready to type after navigation has settled.
+  // Leave search, archived chats and background panels alone.
   useEffect(() => {
-    if (session && !isSearchModeActive && isFocused && isFocusedPanel) {
+    if (!session?.id || isSearchModeActive || !isFocusedPanel || isInputDisabled) return
+    const frame = requestAnimationFrame(() => {
       textareaRef.current?.focus()
-    }
-  }, [session?.id, isFocused, isSearchModeActive, isFocusedPanel])
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [session?.id, isSearchModeActive, isFocusedPanel, isInputDisabled, textareaRef])
 
   useEffect(() => {
     let isMounted = true
@@ -884,8 +884,9 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   // "Run in background" on a shell/console code block or a pasted snippet: ask the agent to start it
   // as a background command (permissions apply; the task chip shows it)
   const handleRunCommand = useCallback((command: string) => {
+    if (isInputDisabled) return
     onSendMessage(runCommandMessage(command))
-  }, [onSendMessage])
+  }, [onSendMessage, isInputDisabled])
 
   // New-chat starter prompts (design spec §7.8): use custom starters from workspace config when
   // defined (capped at 3), otherwise fall back to source-based auto-generation.
@@ -1090,6 +1091,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   // Handle message submission from InputContainer
   // Backend handles interruption and queueing if currently processing
   const handleSubmit = (message: string, attachments?: FileAttachment[], skillSlugs?: string[]) => {
+    if (isInputDisabled) return
     const hasBaseMessage = message.trim().length > 0
     const followUpSection = formatFollowUpSection(pendingFollowUpAnnotations, {
       includeTopSeparator: hasBaseMessage,
@@ -1217,6 +1219,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
 
   // Handle structured input responses (permissions and credentials)
   const handleStructuredResponse = (response: StructuredResponse) => {
+    if (isInputDisabled) return
     if ((response.type === 'permission' || response.type === 'admin_approval') && pendingPermission && onRespondToPermission) {
       if (response.type === 'permission') {
         const permResponse = response as PermissionResponse
@@ -1397,7 +1400,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
               }}
             >
               <ScrollArea className="h-full min-w-0" viewportRef={scrollViewportRef}>
-              {/* Transcript column: 720px of text + gutters, turns 20px apart (spec §7.4) */}
+              {/* Transcript and composer share the same column; turns are 16px apart. */}
               <div className={cn(
                 CHAT_LAYOUT.maxWidth,
                 "mx-auto min-w-0",
@@ -1537,6 +1540,8 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                       >
                       <TurnCard
                         sessionId={session.id}
+                        onRestore={onRestoreBeforeMessage}
+                        restoreUserMessageId={turn.isComplete && turn.response?.messageId ? getNextUserMessageId(session.messages, turn.response.messageId) : undefined}
                         sessionFolderPath={session.sessionFolderPath}
                         hasActiveFollowUpAnnotations={pendingFollowUpAnnotations.length > 0}
                         turnId={turn.turnId}
@@ -1739,6 +1744,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
           </div>
 
           {/* === INPUT CONTAINER: FreeForm or Structured Input === */}
+          <fieldset disabled={!!session.isArchived} className="min-w-0 border-0 p-0 disabled:opacity-50">
           <ChatInputZone
             compactMode={compactMode}
             permissionMode={permissionMode}
@@ -1774,6 +1780,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
               worktreeChoicePending: !session.worktree?.owned && !!(session.worktree?.pendingRepository || session.worktree?.needsRepository),
               worktreeRepository: session.worktree?.owned?.repoPath ?? session.worktree?.repositoryPath,
               worktreeBranch: session.worktree?.owned?.branch,
+              importedRepository: session.importedFrom?.repository,
               enabledModes,
               enableCompactModelPicker,
               structuredInput,
@@ -1805,6 +1812,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
               onFollowUpIndexClick: handleFollowUpIndexClick,
             }}
           />
+          </fieldset>
           </div>
         </div>
       ) : null}

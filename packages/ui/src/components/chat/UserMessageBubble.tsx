@@ -397,8 +397,7 @@ export function UserMessageBubble({
     }, remaining)
   }, [isQueued])
 
-  // 82% of the column, 90% in compact layouts (popover, compact shell)
-  const maxWidth = compactMode ? 'max-w-[90%]' : 'max-w-[82%]'
+  const maxWidth = compactMode ? 'max-w-[90%]' : 'max-w-xl lg:max-w-3xl'
 
   // Separate edit_request badges (rendered above bubble) from other badges (rendered inline)
   const editRequestBadges = badges?.filter(isEditRequestBadge) ?? []
@@ -513,7 +512,7 @@ export function UserMessageBubble({
             />
           </div>
         )}
-        <div className="min-w-0 select-text break-words rounded-xl bg-user-message-bubble px-3.5 py-2.25 text-copy text-foreground [&_p]:m-0">
+        <div className="min-w-0 select-text break-words rounded-md bg-user-message-bubble px-4 py-3 text-[14px] leading-6 in-data-compact:text-copy-lg text-foreground [&_p]:m-0">
           {showQueued && (
             <div
               className="mb-1 flex items-center gap-1.5 text-tertiary"

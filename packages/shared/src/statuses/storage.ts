@@ -34,13 +34,8 @@ const STATUS_ICONS_DIR = 'statuses/icons';
  * Note: icon field is omitted - uses auto-discovered files in statuses/icons/{id}.svg
  */
 export function getDefaultStatusConfig(): WorkspaceStatusConfig {
-  // Note: color is omitted - defaults from colors/defaults.ts are applied:
-  // - backlog: foreground/50 (muted, not yet planned)
-  // - todo: foreground/50 (muted, ready to work on)
-  // - needs-review: info (amber, attention needed)
-  // - done: accent (purple, completed)
-  // - cancelled: foreground/50 (muted, inactive)
-  //
+  // Conductor 0.92 labels and classic light/dark status colors.
+  // Keep storage IDs stable so existing sessions and automatic PR status retain their bindings.
   // Note: icon is omitted - auto-discovered from statuses/icons/{id}.svg
   return {
     version: 1,
@@ -48,38 +43,43 @@ export function getDefaultStatusConfig(): WorkspaceStatusConfig {
       {
         id: 'backlog',
         label: 'Backlog',
+        color: { light: '#8e8885', dark: '#8e8885' },
         category: 'open',
         isFixed: false,
         isDefault: true,
-        order: 0,
+        order: 3,
       },
       {
         id: 'todo',
-        label: 'Todo',
+        label: 'In progress',
+        color: { light: '#e0bb00', dark: '#ffdc2e' },
         category: 'open',
         isFixed: true,
         isDefault: false,
-        order: 1,
+        order: 2,
       },
       {
         id: 'needs-review',
-        label: 'Needs Review',
+        label: 'In review',
+        color: { light: '#16a249', dark: '#4ade80' },
         category: 'open',
         isFixed: false,
         isDefault: true,
-        order: 2,
+        order: 1,
       },
       {
         id: 'done',
         label: 'Done',
+        color: { light: '#cca694', dark: '#cca694' },
         category: 'closed',
         isFixed: true,
         isDefault: false,
-        order: 3,
+        order: 0,
       },
       {
         id: 'cancelled',
-        label: 'Cancelled',
+        label: 'Canceled',
+        color: { light: '#a5a09c', dark: '#a5a09c' },
         category: 'closed',
         isFixed: true,
         isDefault: false,

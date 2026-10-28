@@ -682,6 +682,7 @@ export interface ElectronAPI extends ShipWorkflowAPI {
   /** Enable/disable GitHub auto-merge for one of the session's PRs */
   prWatchSetAutoMerge(sessionId: string, ref: string, enabled: boolean, method?: import('@craft-agent/shared/protocol').PrMergeMethod): Promise<import('@craft-agent/session-tools-core').PrAutoMergeToolResult>
   /** Turn auto-fix (the card's Fix toggle) on/off for one of the session's PRs, by its entry id */
+  prWatchRunAction(sessionId: string, ref: string, request: import('@craft-agent/shared/protocol').PrQuickOperationRequest): Promise<import('@craft-agent/shared/protocol').PrQuickOperationResult>
   prWatchSetAutoFix(sessionId: string, prId: string, enabled: boolean): Promise<import('@craft-agent/shared/protocol').PrAutoFixResult>
   onPrWatchChanged(callback: (sessionId: string, state: import('@craft-agent/shared/protocol').PrWatchSessionState) => void): () => void
 

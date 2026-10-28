@@ -34,6 +34,20 @@ function makeSession(overrides: Partial<Session> = {}): Session {
 }
 
 describe('session message loading atoms', () => {
+  it('restores the server subagent count in the list and refreshes it without replacing loaded messages', () => {
+    const firstApp = createStore()
+    firstApp.set(initializeSessionsAtom, [makeSession({ backgroundAgentCount: 2, isProcessing: false })])
+    const reopenedApp = createStore()
+    reopenedApp.set(initializeSessionsAtom, [makeSession({ backgroundAgentCount: 2, isProcessing: false })])
+    expect(reopenedApp.get(sessionMetaMapAtom).get('session-1')?.backgroundAgentCount).toBe(2)
+    const messages = [msg('kept')]
+    reopenedApp.set(sessionAtomFamily('session-1'), makeSession({ messages, backgroundAgentCount: 2 }))
+    reopenedApp.set(refreshSessionsMetadataAtom, {
+      sessions: [makeSession({ backgroundAgentCount: 0 })], loadedSessionIds: new Set(['session-1']),
+    })
+    expect(reopenedApp.get(sessionMetaMapAtom).get('session-1')?.backgroundAgentCount).toBe(0)
+    expect(reopenedApp.get(sessionAtomFamily('session-1'))?.messages).toBe(messages)
+  })
   const originalWindow = globalThis.window
 
   afterEach(() => {

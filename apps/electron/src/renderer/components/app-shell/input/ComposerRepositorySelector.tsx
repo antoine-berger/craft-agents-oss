@@ -15,6 +15,7 @@ interface ComposerRepositorySelectorProps {
   workspaceId?: string
   sessionId?: string
   repository?: RepositorySelection
+  nameWithOwner?: string
   repositoryPath?: string
   worktreePath?: string
   branch?: string
@@ -23,9 +24,9 @@ interface ComposerRepositorySelectorProps {
   onChoose: (repository: RepositorySelection) => void
 }
 
-export function ComposerRepositorySelector({ workspaceId, sessionId, repository, repositoryPath, worktreePath, branch, disabled, locked, onChoose }: ComposerRepositorySelectorProps) {
+export function ComposerRepositorySelector({ workspaceId, sessionId, repository, nameWithOwner: displayNameWithOwner, repositoryPath, worktreePath, branch, disabled, locked, onChoose }: ComposerRepositorySelectorProps) {
   const { t } = useTranslation()
-  const knownNameWithOwner = repository?.nameWithOwner
+  const knownNameWithOwner = displayNameWithOwner ?? repository?.nameWithOwner
   const identityPath = repository?.kind === 'local' ? repository.gitDir : repositoryPath
   const nameWithOwner = useRepositoryIdentity(knownNameWithOwner, identityPath)
   const label = nameWithOwner?.split('/').pop()

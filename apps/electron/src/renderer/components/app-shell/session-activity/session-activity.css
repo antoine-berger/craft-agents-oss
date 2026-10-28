@@ -1,0 +1,31 @@
+.session-activity {
+  display: block;
+  width: 1em;
+  height: 1em;
+  font-size: 16px;
+  background: currentColor;
+  mask-repeat: no-repeat;
+  mask-size: calc(var(--activity-frames) * 100%) 100%;
+  animation: session-activity-frames var(--activity-duration) steps(var(--activity-frames)) infinite;
+}
+
+.session-activity-working {
+  --activity-frames: 64;
+  --activity-duration: 1.0666666667s;
+  mask-image: url('./working.svg');
+}
+
+.session-activity-waiting {
+  --activity-frames: 96;
+  --activity-duration: 1.6s;
+  mask-image: url('./waiting.svg');
+}
+
+@keyframes session-activity-frames {
+  from { mask-position: 0 0; }
+  to { mask-position: calc(-1em * var(--activity-frames)) 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .session-activity { animation: none; mask-position: -16em 0; }
+}

@@ -1,0 +1,8 @@
+{
+  "repository": "antoine-berger/craft-agents-oss",
+  "version": "0.15.13",
+  "sourceCommit": "5d4333922936c989f928059c710fe9e8fc8d6098",
+  "kind": "deployed-snapshot",
+  "baseRelease": "fork-v0.15.12",
+  "note": "Restore live background-task chips and partial streaming text when a client reopens. Keeps native continuation, worktree ownership and updater fixes. No private user data included."
+}

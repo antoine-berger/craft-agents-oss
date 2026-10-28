@@ -22,6 +22,7 @@ import { WsRpcClient, type TransportConnectionState } from '../transport/client'
 import { RoutedClient } from '../transport/routed-client'
 import { buildClientApi } from '../transport/build-api'
 import { CHANNEL_MAP } from '../transport/channel-map'
+import { createThinClientUpdateApi } from '../transport/thin-client-updates'
 import { readLocalProxyAccounts } from './local-proxy-accounts'
 import type { CliProxyProvider, CliProxyResult } from '@craft-agent/shared/protocol'
 import {
@@ -203,6 +204,8 @@ client.handleCapability(CLIENT_BROWSER_INVOKE, async (req: BrowserCapabilityRequ
 // ---------------------------------------------------------------------------
 
 const api = buildClientApi(client, CHANNEL_MAP, (ch) => client.isChannelAvailable(ch))
+// A thin client has no embedded RPC server. Keep updates on native local IPC.
+if (isClientOnly) Object.assign(api, createThinClientUpdateApi(ipcRenderer))
 
 let cancelProxySignIn: (() => void) | undefined
 api.cancelCliProxySignIn = () => cancelProxySignIn?.()

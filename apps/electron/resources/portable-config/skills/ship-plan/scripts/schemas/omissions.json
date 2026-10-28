@@ -1,0 +1,61 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "gate",
+    "round",
+    "actor",
+    "omissions"
+  ],
+  "properties": {
+    "gate": {
+      "type": "string",
+      "enum": [
+        "g1"
+      ]
+    },
+    "round": {
+      "type": "integer"
+    },
+    "actor": {
+      "type": "string",
+      "enum": [
+        "codex-omissions"
+      ]
+    },
+    "omissions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "what",
+          "why",
+          "evidence",
+          "severity"
+        ],
+        "properties": {
+          "what": {
+            "type": "string",
+            "minLength": 1
+          },
+          "why": {
+            "type": "string",
+            "minLength": 1
+          },
+          "evidence": {
+            "type": "string",
+            "minLength": 1
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "blocking",
+              "suggestion"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

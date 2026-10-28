@@ -84,6 +84,7 @@ interface SessionListProps {
   onLabelsChange?: (sessionId: string, labels: string[]) => void
   /** Workspace projects (for the Projects submenu in SessionMenu) */
   projects?: Array<{ id: string; slug: string; name: string; color?: string; pilotSessionId?: string }>
+  scopedProjectId?: string
   /** Callback to bind/unbind a session to a project (null = unbind) */
   onSetProjectId?: (sessionId: string, projectId: string | null) => void
   /** How to group sessions: 'date' (default) or 'status' */
@@ -146,6 +147,7 @@ export function SessionList({
   labels = [],
   onLabelsChange,
   projects,
+  scopedProjectId,
   onSetProjectId,
   groupingMode = 'date',
   workspaceId,
@@ -380,7 +382,7 @@ export function SessionList({
       for (const [key, { rows: groupRows, statusId }] of groupsByKey) {
         const state = sessionStatuses.find(s => s.id === statusId)
         if (!state) continue
-        groupRows.sort((a, b) => (b.item.lastMessageAt || 0) - (a.item.lastMessageAt || 0))
+        // Preserve the creation order already applied before per-group pagination.
         const collapsedMeta = collapsedGroupsMeta.find(m => m.key === key)
         orderedGroups.push({
           key,
@@ -724,6 +726,7 @@ export function SessionList({
     onDelete: handleDeleteWithToast,
     onLabelsChange,
     projects,
+    scopedProjectId,
     onSetProjectId,
     onSelectSessionById: handleSelectSessionById,
     onOpenInNewWindow: handleOpenInNewWindow,
@@ -746,7 +749,7 @@ export function SessionList({
     onFlag, handleFlagWithToast, onUnflag, handleUnflagWithToast,
     onArchive, onUnarchive,
     onMarkUnread, handleDeleteWithToast, onLabelsChange,
-    projects, onSetProjectId,
+    projects, scopedProjectId, onSetProjectId,
     handleSelectSessionById, handleOpenInNewWindow, setSendToWorkspace, handleFocusZone, handleKeyDown,
     sessionStatuses, flatLabels, labels, resolvedSearchQuery,
     focusedSessionId, selectionStore.state.selected, isMultiSelectActive,

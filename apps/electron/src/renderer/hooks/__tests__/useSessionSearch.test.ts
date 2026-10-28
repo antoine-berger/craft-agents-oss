@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test'
-import { computeCollapsedPagination } from '../useSessionSearch'
+import { computeCollapsedPagination, sortSessionsForGrouping } from '../useSessionSearch'
 import type { SessionMeta } from '@/atoms/sessions'
 
 function makeSession(id: string, opts: Partial<SessionMeta> = {}): SessionMeta {
@@ -11,6 +11,38 @@ function makeSession(id: string, opts: Partial<SessionMeta> = {}): SessionMeta {
     ...opts,
   }
 }
+
+describe('status-group creation order', () => {
+  it('shows newer creations on the first page even when an older chat receives new messages', () => {
+    const sessions = [
+      makeSession('old', { createdAt: 1, lastMessageAt: 1000 }),
+      makeSession('middle', { createdAt: 2, lastMessageAt: 20 }),
+      makeSession('new', { createdAt: 3, lastMessageAt: 10 }),
+    ]
+    const firstPage = () => computeCollapsedPagination(sortSessionsForGrouping(sessions, 'status'), 2, undefined, 'status').paginatedItems.map(s => s.id)
+    expect(firstPage()).toEqual(['new', 'middle'])
+    sessions[0].lastMessageAt = 10000
+    expect(firstPage()).toEqual(['new', 'middle'])
+  })
+
+  it('keeps equal or missing creation dates stable instead of falling back to activity', () => {
+    const sessions = [
+      makeSession('b', { createdAt: 2, lastMessageAt: 1000 }),
+      makeSession('a', { createdAt: 2, lastMessageAt: 1 }),
+      makeSession('legacy', { lastMessageAt: 10000 }),
+    ]
+    expect(sortSessionsForGrouping(sessions, 'status').map(s => s.id)).toEqual(['a', 'b', 'legacy'])
+    sessions[1].lastMessageAt = 20000
+    expect(sortSessionsForGrouping(sessions, 'status').map(s => s.id)).toEqual(['a', 'b', 'legacy'])
+  })
+
+  it('preserves activity order for other grouping modes', () => {
+    const sessions = [makeSession('new', { createdAt: 3, lastMessageAt: 1 }), makeSession('active', { createdAt: 1, lastMessageAt: 10 })]
+    for (const mode of ['date', 'unread', 'project'] as const) {
+      expect(sortSessionsForGrouping(sessions, mode).map(s => s.id)).toEqual(['active', 'new'])
+    }
+  })
+})
 
 describe('computeCollapsedPagination', () => {
   it('does not hide items when current view has only one group and that group is collapsed', () => {

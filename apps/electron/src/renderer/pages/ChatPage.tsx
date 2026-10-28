@@ -94,10 +94,18 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   const checkpointTurnLabel = React.useCallback((id: string) => checkpointMessagesRef.current?.find(message => message.id === id)?.content.slice(0, 100), [])
   const checkpointsDisabled = !!session?.isProcessing || !!session?.isAsyncOperationOngoing
   const hasOwnedCheckpointCheckout = !!session?.worktree?.owned
+  const [checkpointRequest, setCheckpointRequest] = React.useState<{ sessionId: string; userMessageId?: string }>()
+  const checkpointRequested = checkpointRequest?.sessionId === sessionId
+  const requestedUserMessageId = checkpointRequest?.sessionId === sessionId ? checkpointRequest.userMessageId : undefined
+  const requestCheckpointRestore = React.useCallback((userMessageId: string) => setCheckpointRequest({ sessionId, userMessageId }), [sessionId])
+  const requestCheckpointHistory = React.useCallback(() => setCheckpointRequest({ sessionId }), [sessionId])
+  const clearCheckpointRequest = React.useCallback(() => setCheckpointRequest(undefined), [])
   const checkpointControl = React.useMemo(() => hasOwnedCheckpointCheckout ? <SessionCheckpointControl
     key={sessionId} sessionId={sessionId} disabled={checkpointsDisabled}
     listCheckpoints={listCheckpoints} restoreCheckpoint={restoreCheckpoint} getTurnLabel={checkpointTurnLabel}
-  /> : undefined, [sessionId, hasOwnedCheckpointCheckout, checkpointsDisabled, listCheckpoints, restoreCheckpoint, checkpointTurnLabel])
+    requestedUserMessageId={requestedUserMessageId} onRequestHandled={clearCheckpointRequest}
+    requestedOpen={checkpointRequested} showTrigger={false}
+  /> : undefined, [sessionId, hasOwnedCheckpointCheckout, checkpointsDisabled, listCheckpoints, restoreCheckpoint, checkpointTurnLabel, requestedUserMessageId, clearCheckpointRequest, checkpointRequested])
 
   // Fallback: ensure messages are loaded when session is viewed
   const ensureMessagesLoaded = useSetAtom(ensureSessionMessagesLoadedAtom)
@@ -522,7 +530,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
         sharedUrl={sharedUrl}
         workingDirectory={workingDirectory}
         sessionFolderPath={session?.sessionFolderPath}
-        checkpointControl={checkpointControl}
+        onOpenHistory={hasOwnedCheckpointCheckout ? requestCheckpointHistory : undefined}
         onReviewChanges={workingDirectory ? openGitReview : undefined}
         prWatch={prWatch.state}
         prWatchNav={prWatch.nav}
@@ -534,11 +542,13 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
         onSetPrAutoFix={prWatch.setAutoFix}
         onPrCardOpenChange={prWatch.onCardOpenChange}
       />
+      {checkpointControl}
       <GitReviewDialog key={sessionId} sessionId={sessionId} open={gitReviewOpen} onOpenChange={setGitReviewOpen} onAddToChat={addGitReviewComments} />
       <div className="flex-1 flex flex-col min-h-0">
         <ChatDisplay
           ref={chatDisplayRef}
           session={session}
+          onRestoreBeforeMessage={hasOwnedCheckpointCheckout && !checkpointsDisabled ? requestCheckpointRestore : undefined}
           onSendMessage={(message, attachments, skillSlugs) => {
             if (session) {
               onSendMessage(session.id, message, attachments, skillSlugs)

@@ -29,6 +29,7 @@ import { useEffect, useRef, useState } from "react"
 import { BrowserTabStrip } from "../browser/BrowserTabStrip"
 import type { Workspace } from "../../../shared/types"
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher"
+import { FailedSessionsButton } from './FailedSessionsButton'
 import { CompactWorkspaceSwitcher } from "./CompactWorkspaceSwitcher"
 import { getDocUrl } from "@craft-agent/shared/docs/doc-links"
 import { AppMenu } from "../AppMenu"
@@ -200,7 +201,7 @@ export function TopBar({
             </>
           )}
 
-          <div className="min-w-0 flex-1">
+          <div className="min-w-0 flex items-center">
             {isCompact ? (
               <CompactWorkspaceSwitcher
                 workspaces={workspaces}
@@ -221,6 +222,7 @@ export function TopBar({
                 workspaceUnreadMap={workspaceUnreadMap}
               />
             )}
+            <FailedSessionsButton workspaceId={activeWorkspaceId} />
           </div>
         </div>
       </div>

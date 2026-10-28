@@ -44,6 +44,13 @@ export interface CollapsedGroupMeta {
 
 export type SessionGroupingMode = 'date' | 'status' | 'unread' | 'project'
 
+/** Sort before pagination so status groups show the newest-created chats first. */
+export function sortSessionsForGrouping(items: SessionMeta[], groupingMode?: SessionGroupingMode): SessionMeta[] {
+  return [...items].sort((a, b) => groupingMode === 'status'
+    ? (b.createdAt ?? 0) - (a.createdAt ?? 0) || a.id.localeCompare(b.id)
+    : (b.lastMessageAt || 0) - (a.lastMessageAt || 0))
+}
+
 export interface UseSessionSearchOptions {
   items: SessionMeta[]
   searchActive: boolean
@@ -409,10 +416,10 @@ export function useSessionSearch({
   // Filter out hidden sessions before any processing
   const visibleItems = useMemo(() => items.filter(item => !item.hidden), [items])
 
-  // Sort by most recent activity first
+  // Status groups keep creation order even when an older conversation is updated.
   const sortedItems = useMemo(() =>
-    [...visibleItems].sort((a, b) => (b.lastMessageAt || 0) - (a.lastMessageAt || 0)),
-    [visibleItems]
+    sortSessionsForGrouping(visibleItems, groupingMode),
+    [visibleItems, groupingMode]
   )
 
   // Filter items by search query or current filter

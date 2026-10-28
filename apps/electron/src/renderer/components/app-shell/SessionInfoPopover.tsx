@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerTrigger } from '@/components/ui/drawer'
 import { Input } from '@/components/ui/input'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { useAppShellContext, useSession } from '@/context/AppShellContext'
 import { cn } from '@/lib/utils'
 import { SessionFilesSection } from '../right-sidebar/SessionFilesSection'
@@ -19,7 +20,7 @@ interface SessionInfoPopoverProps {
   align?: 'start' | 'center' | 'end'
   sideOffset?: number
   contentClassName?: string
-  presentation?: 'popover' | 'drawer'
+  presentation?: 'popover' | 'drawer' | 'dialog'
 }
 
 // The popover and sheet materials come from PopoverContent / DrawerContent; these only size them.
@@ -56,6 +57,17 @@ export function SessionInfoPopover({
       })
     }
   }, [controlledOpen, onOpenChange, sessionId])
+
+  if (presentation === 'dialog') {
+    return <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogContent className="flex w-[420px] max-w-[calc(100vw-32px)] max-h-[80vh] flex-col gap-0 overflow-hidden p-0" aria-describedby={undefined}>
+        <DialogHeader className="border-b border-subtle px-4 py-3">
+          <DialogTitle>{t('chat.sessionInfo')}</DialogTitle>
+        </DialogHeader>
+        <SessionInfoPopoverContent sessionId={sessionId} sessionFolderPath={sessionFolderPath} />
+      </DialogContent>
+    </Dialog>
+  }
 
   if (presentation === 'drawer') {
     return (

@@ -21,6 +21,8 @@ import type {
   PrEntry,
   PrMergeMethod,
   PrMonitorState,
+  PrQuickOperationRequest,
+  PrQuickOperationResult,
   PrSummary,
   PrWatchSessionState,
   PrWatchState,
@@ -55,6 +57,8 @@ import {
 } from './map-github'
 import type { RepoCoordinates } from './remote-url'
 import { nextPollDelay, POLL } from './schedule'
+import { runGitResult } from '../git'
+import { runPrQuickOperation, rerunFailedJobs } from './quick-actions'
 import { TokenChain, type TokenCandidate } from './token-chain'
 
 /** Details are cached this long, so a card re-asking every 15 s costs at most one query. */
@@ -405,6 +409,34 @@ export class PrWatchRegistry {
       this.deps.graphql<GqlAutoMergeMutationResponse>(coords.host, token, DISABLE_AUTO_MERGE_MUTATION, { prId }))
     if (!response) throw new Error(`No GitHub credential could disable auto-merge on ${label}.`)
     return { enabled: false }
+  }
+
+  private readonly actionsInFlight = new Set<string>()
+
+  async runAction(input: { coords: RepoCoordinates; number: number; workspaceRootPath: string; dir: string; request: PrQuickOperationRequest }): Promise<PrQuickOperationResult> {
+    const { coords, number, workspaceRootPath, dir, request } = input
+    const key = entryId(coords, number)
+    if (this.actionsInFlight.has(key)) throw new Error('An action is already running for this PR.')
+    this.actionsInFlight.add(key)
+    try {
+      const node = await this.fetchByNumber({ coords, number, workspaceRootPath })
+      return await runPrQuickOperation(node, request, {
+        localStatus: async () => {
+          const status = await runGitResult(dir, ['status', '--porcelain=v1', '--untracked-files=normal'])
+          if (!status.ok) throw new Error('Could not verify this worktree before merging.')
+          return { ...await this.localStatus(dir, node.headRefOid), localDirty: status.stdout.length > 0 }
+        },
+        graphql: async <T>(query: string, variables: Record<string, unknown>): Promise<T> => {
+          const response = await this.runWithCredential(coords, workspaceRootPath, token => this.deps.graphql<T>(coords.host, token, query, variables))
+          if (!response) throw new Error('No GitHub credential could perform this action.')
+          return response.result
+        },
+        rerunFailedJobs: async runId => {
+          const response = await this.runWithCredential(coords, workspaceRootPath, token => rerunFailedJobs(coords, token, runId))
+          if (!response) throw new Error('No GitHub credential could restart this workflow.')
+        },
+      })
+    } finally { this.actionsInFlight.delete(key) }
   }
 
   /**

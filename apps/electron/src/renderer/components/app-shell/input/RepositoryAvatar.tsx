@@ -1,18 +1,55 @@
 import * as React from 'react'
 import { FolderGit2 } from 'lucide-react'
+import { useOptionalAppShellContext } from '@/context/AppShellContext'
+import type { Session } from '@craft-agent/shared/protocol'
+
+/** Display metadata remains valid even when an imported checkout is unavailable. */
+export function sessionRepositoryIdentity(session: Pick<Session, 'worktree' | 'importedFrom' | 'boundPrs'>): string | undefined {
+  const valid = (value?: string) => value && /^[\w.-]+\/[\w.-]+$/.test(value) ? value : undefined
+  const known = valid(session.worktree?.pendingRepository?.nameWithOwner) ?? valid(session.importedFrom?.repository)
+  if (known) return known
+  const repositories = new Set((session.boundPrs ?? [])
+    .filter(pr => pr.host.toLowerCase() === 'github.com')
+    .map(pr => valid(`${pr.owner}/${pr.repo}`)).filter((name): name is string => !!name))
+  return repositories.size === 1 ? repositories.values().next().value : undefined
+}
+
+const pendingIdentities = new Map<string, Promise<string | null>>()
+
+/** Share simultaneous lookups, but never keep a failed/unknown result cached. */
+export function resolveRepositoryIdentity(key: string, load: () => Promise<string | null>): Promise<string | null> {
+  const pending = pendingIdentities.get(key)
+  if (pending) return pending
+  const request = Promise.resolve().then(load).finally(() => pendingIdentities.delete(key))
+  pendingIdentities.set(key, request)
+  return request
+}
 
 /** Resolve only the chosen/remembered repository; never scan or block selection. */
 export function useRepositoryIdentity(knownNameWithOwner?: string, repositoryPath?: string) {
-  const [resolved, setResolved] = React.useState<{ path: string; nameWithOwner: string | null }>()
+  const workspaceId = useOptionalAppShellContext()?.activeWorkspaceId
+  const lookupKey = `${workspaceId ?? ''}\0${repositoryPath ?? ''}`
+  const [resolved, setResolved] = React.useState<{ key: string; nameWithOwner: string | null }>()
   React.useEffect(() => {
     if (knownNameWithOwner || !repositoryPath || !window.electronAPI?.getRepositoryIdentity) return
     let cancelled = false
-    window.electronAPI.getRepositoryIdentity(repositoryPath).then(nameWithOwner => {
-      if (!cancelled) setResolved({ path: repositoryPath, nameWithOwner })
-    }).catch(() => { /* Keep the local folder presentation when unavailable. */ })
-    return () => { cancelled = true }
-  }, [knownNameWithOwner, repositoryPath])
-  return knownNameWithOwner ?? (resolved?.path === repositoryPath ? resolved?.nameWithOwner : undefined) ?? undefined
+    let retry: ReturnType<typeof setTimeout> | undefined
+    const resolve = async (attempt = 0) => {
+      try {
+        const nameWithOwner = await resolveRepositoryIdentity(lookupKey,
+          () => window.electronAPI.getRepositoryIdentity(repositoryPath))
+        if (cancelled) return
+        if (nameWithOwner) { setResolved({ key: lookupKey, nameWithOwner }); return }
+      } catch { /* A reconnect can temporarily interrupt the lookup. */ }
+      if (!cancelled && attempt < 2) retry = setTimeout(() => { void resolve(attempt + 1) }, 1000 * (attempt + 1))
+    }
+    void resolve()
+    const unsubscribe = window.electronAPI.onTransportConnectionStateChanged?.(state => {
+      if (state.status === 'connected') { clearTimeout(retry); void resolve() }
+    })
+    return () => { cancelled = true; clearTimeout(retry); unsubscribe?.() }
+  }, [knownNameWithOwner, repositoryPath, lookupKey])
+  return knownNameWithOwner ?? (resolved?.key === lookupKey ? resolved?.nameWithOwner : undefined) ?? undefined
 }
 
 /** The organization/user avatar, shared by the selected repository and its menu rows. */

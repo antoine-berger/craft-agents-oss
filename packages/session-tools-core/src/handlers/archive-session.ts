@@ -8,10 +8,9 @@ export interface ArchiveSessionArgs {
 }
 
 /**
- * Archive (or unarchive) another session by ID. Archiving is reversible and does
- * not delete anything — it moves a session out of the active list / unread counts.
+ * Archive another session by ID. Only the owner may restore an archived chat.
  *
- * Guards (defence-in-depth; the authoritative workspace + mid-turn checks live in
+ * Guards (defence-in-depth; the authoritative workspace + owner-only checks live in
  * the SessionManager-side callback):
  *  - the tool must be wired in this context,
  *  - sessionId is required,
@@ -33,6 +32,9 @@ export async function handleArchiveSession(
   }
 
   const archived = args.archived ?? true;
+  if (!archived) {
+    return errorResponse('Only the owner can unarchive a chat. Agents cannot restore archived sessions.');
+  }
 
   // Best-effort existence pre-check. getSessionInfo returns null for unknown
   // sessions; the SessionManager callback enforces the same-workspace boundary.

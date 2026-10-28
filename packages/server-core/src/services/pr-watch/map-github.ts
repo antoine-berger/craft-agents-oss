@@ -178,6 +178,13 @@ export type { LocalStatus } from './local-git'
 export function mapSummary(node: GqlPullRequestSummary, local: LocalStatus, meta: { fetchedAt: number; via: string }): PrSummary {
   const autoMergeBlocked = mapAutoMergeBlock(node)
   return {
+    quickActions: {
+      canMerge: ['ADMIN', 'MAINTAIN', 'WRITE'].includes(node.baseRepository?.viewerPermission ?? ''),
+      methods: node.baseRepository ? allowedMergeMethods(node.baseRepository) : [],
+      defaultMethod: pickMergeMethod(node.baseRepository),
+      mergeQueue: node.isMergeQueueEnabled === true,
+      ...(node.mergeQueueEntry ? { queued: node.mergeQueueEntry } : {}),
+    },
     number: node.number,
     headOid: node.headRefOid,
     ...(node.reviewThreads.pageInfo?.hasNextPage ? { attentionStale: true } : {}),

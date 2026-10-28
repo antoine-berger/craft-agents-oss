@@ -1,7 +1,7 @@
 /**
  * Guard logic for the archive_session tool: may the invoking session archive or
  * unarchive the target session? Extracted from the SessionManager callback so
- * the authoritative checks (workspace scoping, mid-turn refusal) are
+ * the authoritative checks (workspace scoping, owner-only restoration) are
  * unit-testable — the session-tools-core handler only re-states these as
  * best-effort pre-checks.
  */
@@ -26,8 +26,8 @@ export function validateArchiveTarget(
   if (!target || target.workspaceId !== invokingWorkspaceId) {
     return `Session ${sessionId} not found in this workspace`
   }
-  if (archived && target.isProcessing) {
-    return `Session ${sessionId} is currently processing a turn — try again once it is idle`
+  if (!archived) {
+    return 'Only the owner can unarchive a chat. Agents cannot restore archived sessions.'
   }
   return null
 }

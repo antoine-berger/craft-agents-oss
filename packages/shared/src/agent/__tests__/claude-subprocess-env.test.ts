@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { buildClaudeSubprocessEnv } from '../options.ts';
 
 const ENV_KEYS = [
-  'CLAUDE_CODE_ENABLE_TODO_TOOLS', 'CLAUDE_CODE_OAUTH_TOKEN', 'CLAUDE_CODE_OAUTH_SCOPES',
+  'CLAUDE_CODE_ENABLE_TODO_TOOLS', 'CLAUDE_CODE_OAUTH_TOKEN', 'CLAUDE_CODE_OAUTH_SCOPES', 'CRAFT_SESSION_DIR',
 ] as const;
 const originalEnv = new Map(ENV_KEYS.map(key => [key, process.env[key]]));
 
@@ -53,5 +53,11 @@ describe('buildClaudeSubprocessEnv', () => {
 
     expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBe('selected-account-token');
     expect(env.CLAUDE_CODE_OAUTH_SCOPES).toBe('user:inference user:profile');
+  });
+
+  it('gives each session its own CRAFT_SESSION_DIR over the one another session left in process env', () => {
+    process.env.CRAFT_SESSION_DIR = '/ws/sessions/other-session';
+    const env = buildClaudeSubprocessEnv({ CRAFT_SESSION_DIR: '/ws/sessions/this-session' });
+    expect(env.CRAFT_SESSION_DIR).toBe('/ws/sessions/this-session');
   });
 });

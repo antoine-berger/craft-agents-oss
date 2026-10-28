@@ -10,8 +10,8 @@ describe('validateArchiveTarget (archive_session guards)', () => {
     expect(validateArchiveTarget(idle, WS, 's-2', true)).toBeNull()
   })
 
-  it('allows unarchiving an idle session in the same workspace', () => {
-    expect(validateArchiveTarget(idle, WS, 's-2', false)).toBeNull()
+  it('reserves unarchiving an idle session to the owner', () => {
+    expect(validateArchiveTarget(idle, WS, 's-2', false)).toContain('Only the owner')
   })
 
   it('rejects an unknown target', () => {
@@ -26,12 +26,11 @@ describe('validateArchiveTarget (archive_session guards)', () => {
     expect(crossWs).toBe(unknown)
   })
 
-  it('rejects archiving a session that is mid-turn', () => {
-    expect(validateArchiveTarget(busy, WS, 's-4', true)).toContain('processing a turn')
+  it('allows archiving a running session so the server can stop it', () => {
+    expect(validateArchiveTarget(busy, WS, 's-4', true)).toBeNull()
   })
 
-  it('allows UNarchiving a session that is mid-turn', () => {
-    // Unarchive only restores visibility — no reason to gate it on idleness.
-    expect(validateArchiveTarget(busy, WS, 's-4', false)).toBeNull()
+  it('never lets an agent unarchive, including a running target', () => {
+    expect(validateArchiveTarget(busy, WS, 's-4', false)).toContain('Only the owner')
   })
 })

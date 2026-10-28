@@ -11,6 +11,8 @@
 
 import {
   backgroundIsDark,
+  DERIVED_ROLE_VARS,
+  alphaRoleVars,
   deriveThemeRoles,
   isParseableColor,
   type ThemeRoleInput,
@@ -59,9 +61,16 @@ export type ThemeMode = 'solid' | 'scenic';
  * Theme overrides - light mode default, optional dark overrides
  * App-level only (no workspace cascading)
  */
+export const THEME_COLOR_ROLE_KEYS = [...DERIVED_ROLE_VARS, ...Object.keys(alphaRoleVars('light')), '--surface-input', '--navigator-text', '--navigator-text-muted', '--navigator-border', '--bubble-text', '--popover-ink'];
+export type ThemeColorRoles = Partial<Record<string, CSSColor>>;
+
 export interface ThemeOverrides extends ThemeColors, SurfaceColors {
+  /** Exact palette roles for themes ported from another app; only known color roles are applied. */
+  colorRoles?: ThemeColorRoles;
+  /** Keep the palette independent of macOS vibrancy / Windows Mica. */
+  opaque?: boolean;
   // Optional dark mode overrides (includes both semantic and surface colors)
-  dark?: ThemeColors & SurfaceColors;
+  dark?: ThemeColors & SurfaceColors & { colorRoles?: ThemeColorRoles };
 
   /**
    * Theme mode: 'solid' (default) or 'scenic'
@@ -117,6 +126,9 @@ function mergeThemes(
     }
   }
 
+  if (override.colorRoles) result.colorRoles = { ...base.colorRoles, ...override.colorRoles };
+  if (override.opaque !== undefined) result.opaque = override.opaque;
+
   // Merge scenic mode properties
   if (override.mode !== undefined) result.mode = override.mode;
   if (override.backgroundImage !== undefined)
@@ -125,6 +137,7 @@ function mergeThemes(
   // Deep merge dark overrides
   if (override.dark) {
     result.dark = { ...base.dark };
+    if (override.dark.colorRoles) result.dark.colorRoles = { ...base.dark?.colorRoles, ...override.dark.colorRoles };
     for (const key of ALL_COLOR_KEYS) {
       if (override.dark[key] !== undefined) {
         result.dark![key] = override.dark[key];
@@ -187,14 +200,24 @@ export function themeToCSS(theme: ThemeOverrides, isDark: boolean = false): stri
   const colors: SurfaceColors = isDark && theme.dark ? { ...theme, ...theme.dark } : theme;
   if (colors.input && isParseableColor(colors.input)) vars.push(`--surface-input: ${colors.input};`);
 
-  // Solve for the mode the background actually is: a light-only theme shown in dark mode keeps
-  // light-mode roles instead of being "solved" toward white text on a light background.
-  const roleMode = backgroundIsDark(input.background) ? 'dark' : 'light';
-  for (const [name, value] of Object.entries(deriveThemeRoles(input, roleMode).vars)) {
+  for (const [name, value] of Object.entries(resolveThemeRoles(theme, isDark))) {
     vars.push(`${name}: ${value};`);
   }
 
   return vars.join('\n  ');
+}
+
+/** Final roles used by both the app and theme previews. Existing themes keep the solver unchanged. */
+export function resolveThemeRoles(theme: ThemeOverrides, isDark = false): Record<string, string> {
+  const input = resolveThemeRoleInput(theme, isDark);
+  const mode = backgroundIsDark(input.background) ? 'dark' : 'light';
+  const vars = deriveThemeRoles(input, mode).vars;
+  const overrides = isDark ? { ...theme.colorRoles, ...theme.dark?.colorRoles } : theme.colorRoles;
+  for (const key of THEME_COLOR_ROLE_KEYS) {
+    const value = overrides?.[key];
+    if (value && isParseableColor(value)) vars[key] = value;
+  }
+  return vars;
 }
 
 /**

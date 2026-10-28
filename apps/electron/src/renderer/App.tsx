@@ -142,6 +142,7 @@ function handleBackgroundTaskEvent(
         {
           id: evt.taskId as string,
           type: isWorkflow ? ('workflow' as const) : ('agent' as const),
+          isSubagent: evt.kind !== 'task',
           toolUseId: evt.toolUseId as string,
           startTime,
           elapsedSeconds: 0,

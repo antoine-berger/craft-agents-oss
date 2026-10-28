@@ -1,0 +1,65 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "gate",
+    "round",
+    "actor",
+    "verdicts"
+  ],
+  "properties": {
+    "gate": {
+      "type": "string",
+      "enum": [
+        "g1"
+      ]
+    },
+    "round": {
+      "type": "integer"
+    },
+    "actor": {
+      "type": "string",
+      "enum": [
+        "codex-factchecker"
+      ]
+    },
+    "verdicts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "verdict",
+          "evidence",
+          "source"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "verdict": {
+            "type": "string",
+            "enum": [
+              "CONFIRMED",
+              "REFUTED",
+              "UNVERIFIABLE"
+            ]
+          },
+          "evidence": {
+            "type": "string",
+            "minLength": 1
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "code",
+              "doc"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

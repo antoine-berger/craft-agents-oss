@@ -1,5 +1,20 @@
 import type { BackgroundTask } from '@/atoms/sessions'
 
+/** A reply is not finished while its agents are running or their status is still unconfirmed. */
+export function hasPendingSubagentWork(tasks: readonly BackgroundTask[], serverCount?: number): boolean {
+  // A fresh server snapshot wins over missing or stale renderer-only task chips.
+  if (serverCount !== undefined) return serverCount > 0
+  return tasks.some(task => task.type !== 'shell' && task.isSubagent !== false
+    && (task.status === 'running' || task.status === 'stale'))
+}
+
+/** Sidebar activity includes external reviewers and their background wait tasks, not only native agents. */
+export function hasPendingBackgroundWork(tasks: readonly BackgroundTask[], serverAgentCount?: number): boolean {
+  return hasPendingSubagentWork(tasks, serverAgentCount)
+    || tasks.some(task => (task.type === 'shell' || task.isSubagent === false)
+      && (task.status === 'running' || task.status === 'stale'))
+}
+
 /** How long real terminal/orphaned chips remain visible. */
 export const TERMINAL_LINGER_MS = 8_000
 export const ORPHANED_LINGER_MS = 20_000

@@ -1,0 +1,55 @@
+{
+  "factcheck": {
+    "actor": "codex-factchecker",
+    "gate": "g1",
+    "models": [
+      "gpt-6.1-sol",
+      "gpt-6-sol"
+    ],
+    "effort": "high",
+    "prompt": "factcheck",
+    "schema": "factcheck"
+  },
+  "omissions": {
+    "actor": "codex-omissions",
+    "gate": "g1",
+    "models": [
+      "gpt-6-astra"
+    ],
+    "effort": "high",
+    "prompt": "omissions",
+    "schema": "omissions"
+  },
+  "bugs": {
+    "actor": "astra",
+    "gate": "review",
+    "models": [
+      "gpt-6-astra"
+    ],
+    "effort": "high",
+    "prompt": "astra-review",
+    "schema": "review"
+  },
+  "comments": {
+    "actor": "codex-comments",
+    "gate": "review",
+    "models": [
+      "gpt-6.1-sol",
+      "gpt-6-sol"
+    ],
+    "effort": "high",
+    "prompt": "comments",
+    "schema": "comments"
+  },
+  "light": {
+    "actor": "codex-light",
+    "gate": "review",
+    "models": [
+      "gpt-6.1-sol",
+      "gpt-6-sol"
+    ],
+    "effort": "xhigh",
+    "prompt": "light",
+    "schema": "review"
+  }
+}

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test'
 import type { BackgroundTask } from '@/atoms/sessions'
 import {
   advanceBackgroundTaskChips,
+  hasPendingSubagentWork,
   markBackgroundTaskSignal,
   markLiveBackgroundTasksOrphaned,
   ORPHANED_LINGER_MS,
@@ -22,6 +23,35 @@ function task(overrides: Partial<BackgroundTask> = {}): BackgroundTask {
     ...overrides,
   }
 }
+
+describe('pending subagent activity', () => {
+  it('restores activity from the server when a reopened app has no task chips', () => {
+    expect(hasPendingSubagentWork([], 2)).toBe(true)
+    expect(hasPendingSubagentWork([], 0)).toBe(false)
+  })
+
+  it('does not let a stale client chip override confirmed server completion', () => {
+    expect(hasPendingSubagentWork([task()], 0)).toBe(false)
+    expect(hasPendingSubagentWork([task({ status: 'stale' })], 0)).toBe(false)
+  })
+  it('keeps running and stale agents active, including workflows', () => {
+    expect(hasPendingSubagentWork([task()])).toBe(true)
+    expect(hasPendingSubagentWork([task({ status: 'stale' })])).toBe(true)
+    expect(hasPendingSubagentWork([task({ type: 'workflow' })])).toBe(true)
+  })
+
+  it('does not mistake a background server or monitor for an agent', () => {
+    expect(hasPendingSubagentWork([task({ type: 'shell' }), task({ isSubagent: false })])).toBe(false)
+  })
+
+  it('stays active until the last agent finishes', () => {
+    const finished = (['completed', 'failed', 'stopped', 'orphaned'] as const)
+      .map(status => task({ status }))
+    expect(hasPendingSubagentWork(finished)).toBe(false)
+    expect(hasPendingSubagentWork([...finished, task()])).toBe(true)
+    expect(hasPendingSubagentWork([])).toBe(false)
+  })
+})
 
 describe('background task chip lifecycle', () => {
   it('keeps a recently signaled running task unchanged', () => {

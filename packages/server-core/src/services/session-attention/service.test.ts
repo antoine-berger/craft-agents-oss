@@ -57,6 +57,36 @@ it('preserves simultaneous auth and permission prompts and resolves only the ans
   } finally { service.dispose(); rmSync(root, { recursive: true, force: true }) }
 })
 
+it('keeps idle foreground sessions working while server subagents run and derives PR status without a client', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'craft-attention-background-'))
+  const session = { id: 's', workspaceId: 'w', workingDirectory: '/repo', isProcessing: false, backgroundAgentCount: 2 }
+  const derived: string[] = []
+  let listener: ((id: string, state: PrWatchSessionState) => void) | undefined
+  const manager = {
+    waitForInit: async () => {}, getSessions: () => [session], getSessionSnapshot: () => session,
+    getSessionWorkingDirectory: () => '/repo', getSessionBoundPrs: () => [], getSessionPrMonitors: () => ({}),
+    setDerivedSessionStatus: async (_id: string, status: string) => { derived.push(status) },
+  } as unknown as ISessionManager
+  const registry = {
+    onSessionState: (fn: typeof listener) => { listener = fn; return () => {} }, dropClient: () => {},
+    subscribe: async () => ({ subscriptionId: 'sub', state: { kind: 'loading' } }), unsubscribe: () => {},
+    cachedSessionState: () => null,
+  } as unknown as PrWatchRegistry
+  const service = new SessionAttentionService({ manager, workspaceRoot: () => root, push: () => {} })
+  try {
+    service.start(registry)
+    await service.sync()
+    expect(service.snapshot('w').sessions.s?.status).toBe('working')
+    listener?.('s', { kind: 'none' })
+    expect(derived).toEqual(['todo'])
+    listener?.('s', { kind: 'unavailable', reason: 'no-token' })
+    expect(derived).toEqual(['todo'])
+    session.backgroundAgentCount = 0
+    await service.sync()
+    expect(service.snapshot('w').sessions.s?.status).toBe('idle')
+  } finally { service.dispose(); rmSync(root, { recursive: true, force: true }) }
+})
+
 it('background recovery respects the registry retry deadline instead of forcing requests each minute', async () => {
   const { PrWatchRegistry } = await import('../pr-watch/registry')
   const { GitHubRequestError } = await import('../pr-watch/github-client')

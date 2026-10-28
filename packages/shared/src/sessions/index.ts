@@ -9,11 +9,13 @@
  */
 
 // Types
+export { canResumeFailedSession, recoverAfterServerRestart } from './recovery.ts';
 export type {
   SessionStatus,
   SessionTokenUsage,
   StoredMessage,
   SessionConfig,
+  SessionRecovery,
   StoredSession,
   SessionMetadata,
   SessionHeader,

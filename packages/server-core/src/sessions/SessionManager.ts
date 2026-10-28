@@ -1,4 +1,5 @@
 import { getSessionAttentionService, disposeSessionAttention } from '../handlers/rpc/session-attention'
+import { canResumeFailedSession, recoverAfterServerRestart, type SessionRecovery } from '@craft-agent/shared/sessions'
 import { readSessionHistory, searchSessionHistory } from '../services/session-history'
 import { captureSessionCheckpoint, listSessionCheckpoints as listWorktreeCheckpoints, restoreSessionCheckpoint as restoreWorktreeCheckpoint, assertCheckpointRestoreComplete, SessionCheckpointError, type CheckpointRecord } from '../services/checkpoints/session-checkpoints'
 import type { SessionCheckpointList, SessionCheckpointRestoreResult } from '@craft-agent/shared/protocol'
@@ -119,7 +120,8 @@ import type { SummarizeCallback } from '@craft-agent/shared/sources'
 import { type ThinkingLevel, DEFAULT_THINKING_LEVEL, normalizeThinkingLevel } from '@craft-agent/shared/agent/thinking-levels'
 import { evaluateAutoLabels, autoLabelMatchToEntry, newAutoLabelEntries, type AutoLabelMatch } from '@craft-agent/shared/labels/auto'
 import { evaluateSemanticLabelsForMessage } from '../decisions/semantic-labels'
-import { classifyTurnOutcome, TURN_OUTCOME_ATTENTION_STATUS } from '../decisions/turn-outcome'
+import { classifyTurnOutcome } from '../decisions/turn-outcome'
+import { countBackgroundAgents } from './background-task-state'
 import { isSmallTalk, titleNoLongerFits, TITLE_DRIFT_RECENT_MESSAGES } from '../decisions/smart-titles'
 import { pickTurnThinkingLevel, recordThinkingFollowUp } from '../decisions/adaptive-thinking'
 import { decideMidTurnDelivery, isContinuation } from '../decisions/mid-turn-messages'
@@ -701,6 +703,7 @@ type BackgroundTaskStatus = 'running' | 'completed' | 'failed' | 'stopped' | 'or
 
 /** A background task tracked from launch, for cross-subprocess status queries. */
 interface RunningBackgroundTask {
+  activity?: { summary?: string; lastToolName?: string; toolUses?: number }
   taskId: string
   toolUseId?: string
   intent?: string
@@ -733,10 +736,13 @@ interface RunningBackgroundTask {
 }
 
 interface ManagedSession {
+  recovery?: import('@craft-agent/shared/sessions').SessionRecovery | null
   importedFrom?: import('@craft-agent/shared/protocol').ConductorImportOrigin;
   id: string
   workspace: Workspace
   agent: AgentInstance | null  // Lazy-loaded - null until first message
+  idleRuntimeTimer?: ReturnType<typeof setTimeout>
+  idleRuntimeGeneration?: number
   messages: Message[]
   isProcessing: boolean
   /** Set when user requests stop - allows event loop to drain before clearing isProcessing */
@@ -796,6 +802,7 @@ interface ManagedSession {
   // Session status (user-controlled) - determines open vs closed
   // Dynamic status ID referencing workspace status config
   sessionStatus?: string
+  derivedSessionStatus?: string
   // Read/unread tracking - ID of last message user has read
   lastReadMessageId?: string
   /**
@@ -1021,6 +1028,7 @@ interface ManagedSession {
 }
 
 const PI_SDK_MESSAGE_ID_CACHE_LIMIT = 256
+export const CLAUDE_RUNTIME_IDLE_TIMEOUT_MS = 5 * 60_000
 
 export interface AutoRetryPendingHost {
   autoRetryPending?: {
@@ -1220,6 +1228,23 @@ function managedToSession(m: ManagedSession, overrides?: Partial<Session>): Sess
     workspaceName: m.workspace.name,
     messages: [],
     isProcessing: m.isProcessing,
+    backgroundAgentCount: countBackgroundAgents(m.backgroundTaskRegistry.values()),
+    backgroundTasks: [...m.backgroundTaskRegistry.values()]
+      .filter(t => t.status === 'running' && !t.untracked)
+      .map(t => ({
+        id: t.taskId,
+        type: t.kind === 'shell' ? 'shell' : t.kind === 'workflow' ? 'workflow' : 'agent',
+        isSubagent: t.kind !== 'shell' && t.kind !== 'task',
+        toolUseId: t.toolUseId ?? t.taskId,
+        startTime: t.startTime,
+        elapsedSeconds: t.elapsedSeconds ?? 0,
+        lastSignalAt: t.lastProgressAt ?? t.startTime,
+        intent: t.intent,
+        status: 'running' as const,
+        workflowId: t.workflowId,
+        agentsCompleted: t.agentsCompleted,
+        ...(t.activity ? { activity: { ...t.activity } } : {}),
+      })),
     sessionFolderPath: getSessionStoragePath(m.workspace.rootPath, m.id),
     supportsBranching: resolveSupportsBranching(m),
     ...overrides,
@@ -1394,6 +1419,9 @@ export class SessionManager implements ISessionManager {
    * subprocess can race the resulting `chat` against the still-pending update.
    */
   private agentRefreshLocks: Map<string, Promise<void>> = new Map()
+  private agentPreparations = new Map<string, Promise<AgentInstance>>()
+  private archiveStops = new Map<string, Promise<void>>()
+  private archiveStopFailures = new Set<string>()
   private worktreeLocks: Map<string, Promise<void>> = new Map()
   private checkpointRestores = new Map<string, ManagedSession>()
   /** Monotonic clock to ensure strictly increasing message timestamps */
@@ -1460,8 +1488,8 @@ export class SessionManager implements ISessionManager {
 
   /**
    * Turn outcome (decision model, toggle `turnOutcome`): when a completed turn ends with
-   * the agent asking the user something or giving up, move an open session to Needs
-   * Review. Off the completion path; never throws, never touches a closed session, and
+   * the agent asking the user something or giving up, mark it as needing attention.
+   * PR review status is independent. Off the completion path; never throws, and
    * the answer is dropped if a new turn started meanwhile.
    */
   private async applyTurnOutcome(managed: ManagedSession, finalMessageId: string): Promise<void> {
@@ -1484,12 +1512,13 @@ export class SessionManager implements ISessionManager {
       if (this.sessions.get(managed.id) !== managed || managed.isProcessing) return
       if (this.getLastFinalAssistantMessageId(managed.messages) !== finalMessageId) return
 
-      const statuses = loadStatusConfig(managed.workspace.rootPath).statuses
-      const target = statuses.find(status => status.id === TURN_OUTCOME_ATTENTION_STATUS && status.category === 'open')
-      const current = statuses.find(status => status.id === managed.sessionStatus)
-      if (!target || managed.sessionStatus === target.id || current?.category === 'closed') return
-      sessionLog.info(`Turn outcome ${result.outcome} (confidence ${result.confidence.toFixed(2)}): session ${managed.id} → ${target.id}`)
-      await this.setSessionStatus(managed.id, target.id)
+      if (countBackgroundAgents(managed.backgroundTaskRegistry.values()) > 0) return
+      // A question needs the yellow hand, not a PR-review column change.
+      getSessionAttentionService()?.setReasons(managed.id, 'agent', [{
+        id: `outcome:${finalMessageId}`, source: 'agent', kind: result.outcome === 'blocked' ? 'error' : 'question',
+        title: result.outcome === 'blocked' ? 'The agent needs help to continue' : 'The agent is waiting for your answer',
+        createdAt: Date.now(), action: { type: 'session' },
+      }])
     } catch (e) {
       sessionLog.warn(`Turn outcome check failed for session ${managed.id}:`, e)
     }
@@ -1864,12 +1893,58 @@ export class SessionManager implements ISessionManager {
   private setProcessing(managed: ManagedSession, processing: boolean): void {
     const was = managed.isProcessing
     managed.isProcessing = processing
-    getSessionAttentionService()?.setWorking(managed.id, processing)
+    this.scheduleIdleRuntimeRelease(managed)
+    if (!was && processing) {
+      managed.stopRequested = false
+      this.setSessionRecovery(managed, { status: 'running', at: Date.now() })
+    }
+    else if (!processing && managed.recovery?.status === 'running') this.setSessionRecovery(managed, null)
+    getSessionAttentionService()?.setWorking(managed.id, processing || countBackgroundAgents(managed.backgroundTaskRegistry.values()) > 0)
     if (!was && processing) {
       sessionRuntimeHooks.onSessionStarted()
     } else if (was && !processing) {
       sessionRuntimeHooks.onSessionStopped()
     }
+  }
+
+  private setSessionRecovery(managed: ManagedSession, recovery: SessionRecovery | null): void {
+    managed.recovery = recovery
+    this.persistSession(managed)
+    this.sendEvent({ type: 'session_metadata_changed', sessionId: managed.id, changes: { recovery } }, managed.workspace.id)
+  }
+
+  private recordSessionFailure(managed: ManagedSession, message: string): void {
+    if (managed.stopRequested || managed.isArchived || managed.isDeleting) return
+    this.setSessionRecovery(managed, { status: 'failed', at: Date.now(), message: message.slice(0, 500),
+      lastFinalMessageId: this.getLastFinalAssistantMessageId(managed.messages) })
+  }
+
+  /** Owner-triggered continuation in the same session; claim synchronously to dedupe clicks. */
+  resumeFailedSession(sessionId: string): void {
+    const managed = this.sessions.get(sessionId)
+    if (!managed || managed.isDeleting || !canResumeFailedSession(managed)) return
+    const stopEpoch = managed.stopEpoch ?? 0
+    if (!managed.messagesLoaded) this.hydrateMessagesForColdPersist(managed)
+    const queuedIds = new Set(managed.messageQueue.map(entry => entry.messageId))
+    for (const message of managed.messages) {
+      if (message.role === 'user' && message.isQueued && !queuedIds.has(message.id)) {
+        managed.messageQueue.push({ message: message.content, messageId: message.id, storedAttachments: message.attachments })
+      }
+    }
+    this.setSessionRecovery(managed, { status: 'running', at: Date.now() })
+    void (async () => {
+      try {
+        if (!await this.disposeManagedAgentRuntime(managed, 'resume failed request')) {
+          throw new Error('The previous agent could not be stopped. Try again.')
+        }
+        this.assertSessionRunnable(managed, stopEpoch)
+        if (managed.messageQueue.length) this.processNextQueuedMessage(sessionId)
+        else await this.sendMessage(sessionId, 'Continue.')
+      } catch (error) {
+        if (managed.isArchived || managed.isDeleting || (managed.stopEpoch ?? 0) !== stopEpoch) return
+        this.recordSessionFailure(managed, error instanceof Error ? error.message : String(error))
+      }
+    })()
   }
 
   /** Wait until initialize() has completed (sessions loaded from disk).
@@ -2621,6 +2696,10 @@ export class SessionManager implements ISessionManager {
           }
 
           this.sessions.set(meta.id, managed)
+          if (!managed.isArchived && !managed.hidden) {
+            const recovery = recoverAfterServerRestart(managed.recovery, managed.lastMessageRole)
+            if (recovery !== managed.recovery && recovery) this.setSessionRecovery(managed, recovery)
+          }
 
           // Initialize session metadata in AutomationSystem for diffing
           const automationSystem = this.automationSystems.get(workspaceRootPath)
@@ -2721,7 +2800,7 @@ export class SessionManager implements ISessionManager {
       const orphanedQueued = managed.messages.filter(m =>
         m.role === 'user' && m.isQueued === true
       )
-      if (orphanedQueued.length > 0) {
+      if (orphanedQueued.length > 0 && !managed.isArchived && managed.recovery?.status !== 'failed') {
         sessionLog.info(`Recovering ${orphanedQueued.length} queued message(s) for session ${managed.id}`)
         for (const msg of orphanedQueued) {
           managed.messageQueue.push({
@@ -3170,7 +3249,20 @@ export class SessionManager implements ISessionManager {
     // Lazy-load messages from disk if not yet loaded
     await this.ensureMessagesLoaded(m)
 
-    return managedToSession(m, { messages: m.messages })
+    // Deliver queued deltas before the snapshot so they cannot be appended twice.
+    this.flushDelta(m.id, m.workspace.id)
+    const messages = m.streamingText
+      ? [...m.messages, {
+          id: `streaming-${m.id}`,
+          role: 'assistant' as const,
+          content: m.streamingText,
+          timestamp: (m.messages.at(-1)?.timestamp ?? m.lastMessageAt ?? Date.now()) + 1,
+          turnId: m.streamingTurnId,
+          isStreaming: true,
+          isPending: true,
+        }]
+      : [...m.messages]
+    return managedToSession(m, { messages })
   }
 
   /**
@@ -3230,7 +3322,7 @@ export class SessionManager implements ISessionManager {
       const orphanedQueued = managed.messages.filter(m =>
         m.role === 'user' && m.isQueued === true
       )
-      if (orphanedQueued.length > 0) {
+      if (orphanedQueued.length > 0 && !managed.isArchived && managed.recovery?.status !== 'failed') {
         sessionLog.info(`Recovering ${orphanedQueued.length} queued message(s) for session ${managed.id}`)
         for (const msg of orphanedQueued) {
           managed.messageQueue.push({
@@ -3811,6 +3903,8 @@ export class SessionManager implements ISessionManager {
   async spawnIndependentSession(sourceSessionId: string, request: SpawnSessionRequest): Promise<SpawnSessionResult> {
     const managed = this.sessions.get(sourceSessionId)
     if (!managed || managed.isDeleting) throw new Error('The invoking session is no longer available')
+    this.assertSessionRunnable(managed)
+    const stopEpoch = managed.stopEpoch ?? 0
     if (!request.prompt?.trim()) throw new Error('A prompt is required for the new chat')
     sessionLog.info(`Independent session request from session ${managed.id}:`, request.name || '(unnamed)')
 
@@ -3839,6 +3933,7 @@ export class SessionManager implements ISessionManager {
       }
     }
     const workingDirectory = request.workingDirectory ?? (sameProject && !projectId ? inheritedDirectory : undefined)
+    this.assertSessionRunnable(managed, stopEpoch)
     const session = await this.createSession(managed.workspace.id, {
       name: request.name,
       llmConnection: request.llmConnection ?? managed.llmConnection,
@@ -3880,6 +3975,7 @@ export class SessionManager implements ISessionManager {
     // (session_created is emitted by createSession above.)
 
     // Fire and forget — send the message but don't await completion
+    this.assertSessionRunnable(managed, stopEpoch)
     this.sendMessage(session.id, request.prompt, fileAttachments, undefined, { repository }).catch(err => {
       sessionLog.error(`Failed to send message to spawned session ${session.id}:`, err)
     })
@@ -3942,14 +4038,19 @@ export class SessionManager implements ISessionManager {
 
   /** An assigned backend can still be waiting for OAuth refresh. Never use it until it is ready. */
   private async getReadyManagedAgent(managed: ManagedSession): Promise<AgentInstance | null> {
+    this.assertSessionRunnable(managed)
+    await this.agentRefreshLocks.get(managed.id)?.catch(() => undefined)
+    this.assertSessionRunnable(managed)
     const readiness = managed.agentReady
     if (readiness && !await readiness) throw new Error('Session agent initialization did not complete')
+    this.assertSessionRunnable(managed)
     // Disposal/recreation while awaiting invalidates the captured runtime.
     if (readiness !== managed.agentReady) return null
     return managed.agent
   }
 
   private async disposeManagedAgentRuntime(managed: ManagedSession, reason: string): Promise<boolean> {
+    this.clearIdleRuntimeTimer(managed)
     const sessionId = managed.id
     let disposed = true
     // Settle before asynchronous cleanup, but do not tell waiting title calls that auth succeeded.
@@ -3999,6 +4100,69 @@ export class SessionManager implements ISessionManager {
     managed.backendRestartSignature = undefined
     unregisterSessionScopedToolCallbacks(sessionId)
     return disposed
+  }
+
+  private clearIdleRuntimeTimer(managed: ManagedSession): void {
+    if (managed.idleRuntimeTimer) clearTimeout(managed.idleRuntimeTimer)
+    managed.idleRuntimeTimer = undefined
+    managed.idleRuntimeGeneration = (managed.idleRuntimeGeneration ?? 0) + 1
+  }
+
+  private scheduleIdleRuntimeRelease(managed: ManagedSession): void {
+    this.clearIdleRuntimeTimer(managed)
+    const agent = managed.agent
+    // Only Claude opts in. Active turns and archived/deleting sessions have their own lifecycle.
+    if (!agent?.canReleaseIdleRuntime || managed.isProcessing || managed.isArchived || managed.isDeleting) return
+    const generation = managed.idleRuntimeGeneration!
+    managed.idleRuntimeTimer = setTimeout(() => {
+      if (managed.idleRuntimeGeneration !== generation) return
+      managed.idleRuntimeTimer = undefined
+      void this.releaseIdleRuntime(managed, agent, generation)
+    }, CLAUDE_RUNTIME_IDLE_TIMEOUT_MS)
+    managed.idleRuntimeTimer.unref?.()
+  }
+
+  private canReleaseIdleRuntime(managed: ManagedSession, agent: AgentInstance, generation: number, ownLock?: Promise<void>): boolean {
+    const lock = this.agentRefreshLocks.get(managed.id)
+    return this.sessions.get(managed.id) === managed && managed.agent === agent
+      && managed.idleRuntimeGeneration === generation && !!managed.sdkSessionId
+      && !managed.isArchived && !managed.isDeleting && !managed.isRestoringCheckpoint
+      && !managed.isProcessing && !managed.stopRequested && !managed.agentReadyResolve
+      && !this.agentPreparations.has(managed.id) && (!lock || lock === ownLock)
+      && !(managed.checkpointPendingSends || managed.checkpointAsyncWriters)
+      && !managed.messageQueue.length && !(managed.acceptedSteers?.size)
+      && !managed.authRetryInProgress && !managed.autoRetryTimer
+      && (!managed.autoRetryPending || managed.autoRetryPending.committed || managed.autoRetryPending.deadlineMs <= Date.now())
+      && managed.pendingActivationResend === undefined && !managed.pendingHandoffSummary
+      && !managed.isAsyncOperationOngoing && !managed.pendingAuthRequestId && !managed.pendingAuthRequest
+      && ![...this.pendingPermissionRequests.values()].some(request => request.sessionId === managed.id)
+      // Includes shells, workflows and untracked tasks, not just the sidebar's agent count.
+      && ![...managed.backgroundTaskRegistry.values()].some(task => task.status === 'running')
+      && agent.canReleaseIdleRuntime?.() === true
+  }
+
+  private async releaseIdleRuntime(managed: ManagedSession, agent: AgentInstance, generation: number): Promise<void> {
+    if (!this.canReleaseIdleRuntime(managed, agent, generation)) {
+      if (managed.idleRuntimeGeneration === generation) this.scheduleIdleRuntimeRelease(managed)
+      return
+    }
+    // Share the existing runtime-refresh lock: new sends/title requests must await teardown.
+    const work: Promise<void> = Promise.resolve().then(async () => {
+      this.persistSession(managed)
+      await this.flushSession(managed.id)
+      // A send, background event or permission can arrive while persistence is flushing.
+      if (!this.canReleaseIdleRuntime(managed, agent, generation, work)) return
+      if (await this.disposeManagedAgentRuntime(managed, 'five minutes idle')) {
+        sessionLog.info(`Released idle Claude runtime for session ${managed.id}; conversation retained`)
+      }
+    })
+    this.agentRefreshLocks.set(managed.id, work)
+    try { await work }
+    catch (error) { sessionLog.warn(`Idle runtime release failed for ${managed.id}:`, error) }
+    finally {
+      if (this.agentRefreshLocks.get(managed.id) === work) this.agentRefreshLocks.delete(managed.id)
+      if (managed.agent === agent && managed.idleRuntimeGeneration === generation) this.scheduleIdleRuntimeRelease(managed)
+    }
   }
 
   /**
@@ -4226,6 +4390,7 @@ export class SessionManager implements ISessionManager {
   async restoreSessionCheckpoint(sessionId: string, checkpointId: string): Promise<SessionCheckpointRestoreResult> {
     const managed = this.sessions.get(sessionId)
     if (!managed) throw new Error('Session not found')
+    this.assertSessionRunnable(managed)
     const plan = managed.worktree?.owned
     if (!plan || plan.ownerId !== `${managed.workspace.id}/${managed.id}` || plan.status !== 'ready') throw new Error('This conversation does not own a ready worktree')
     if (managed.isRestoringCheckpoint || this.checkpointRestores.has(plan.path)) throw new Error('Checkpoint restoration is already in progress')
@@ -4368,7 +4533,7 @@ export class SessionManager implements ISessionManager {
       await this.prepareSessionWorktree(managed)
       const owned = managed.worktree!.owned!
       this.notifySessionCreated(workspaceId, sessionId)
-      return { path: ownedWorktreeWorkingDirectory(owned), branch: owned.branch, base: owned.baseCommit, cloned: false }
+      return { path: ownedWorktreeWorkingDirectory(owned), branch: owned.checkout ? owned.checkout.branch ?? 'HEAD' : owned.branch, base: owned.baseCommit, cloned: false }
     })
   }
 
@@ -4542,12 +4707,30 @@ export class SessionManager implements ISessionManager {
   }
 
   private async getOrCreateAgent(managed: ManagedSession, checkpointUserMessageId?: string): Promise<AgentInstance> {
+    this.assertSessionRunnable(managed)
+    const existing = this.agentPreparations.get(managed.id)
+    if (existing) return existing
+    const preparing = this.prepareManagedAgent(managed, checkpointUserMessageId)
+    this.agentPreparations.set(managed.id, preparing)
+    try {
+      return await preparing
+    } finally {
+      if (this.agentPreparations.get(managed.id) === preparing) this.agentPreparations.delete(managed.id)
+    }
+  }
+
+  private async prepareManagedAgent(managed: ManagedSession, checkpointUserMessageId?: string): Promise<AgentInstance> {
     if (managed.isDeleting) throw new DOMException('Session was deleted', 'AbortError')
+    const stopEpoch = managed.stopEpoch ?? 0
     await this.assertNoCheckpointRestore(managed)
+    this.assertSessionRunnable(managed, stopEpoch)
     const prepareAgent = async () => {
       try {
         await this.syncAutomaticSessionSources(managed)
-        return await this.getOrCreatePreparedAgent(managed)
+        this.assertSessionRunnable(managed, stopEpoch)
+        const agent = await this.getOrCreatePreparedAgent(managed)
+        this.assertSessionRunnable(managed, stopEpoch)
+        return agent
       } catch (error) {
         // Source setup or backend construction can fail before postInit. Release title waiters
         // and clean up before a queued worktree operation can access this incomplete runtime.
@@ -4563,7 +4746,8 @@ export class SessionManager implements ISessionManager {
           await this.prepareSessionWorktree(managed)
         } catch (error) {
           if (error instanceof Error && error.name === 'AbortError') throw error
-          throw new Error(i18n.t('worktree.session.prepareFailed', { reason: error instanceof Error ? error.message : String(error) }))
+          const reason = error instanceof Error ? error.message : String(error)
+          throw new Error(i18n.t('worktree.session.prepareFailed', { reason }) || `Could not prepare worktree: ${reason}`)
         }
         if (managed.worktree?.owned) {
           const context = { plan: managed.worktree.owned, sessionDir: getSessionStoragePath(managed.workspace.rootPath, managed.id) }
@@ -4591,6 +4775,7 @@ export class SessionManager implements ISessionManager {
     // the agent was created. May null out `managed.agent` if the in-place
     // refresh fails, in which case the create branch below rebuilds it.
     await this.tryRefreshAgentRuntime(managed, 'send-path refresh')
+    this.assertSessionRunnable(managed)
 
     const workspaceConfig = loadWorkspaceConfig(managed.workspace.rootPath)
     const backendContext = resolveBackendContext({
@@ -4806,6 +4991,7 @@ export class SessionManager implements ISessionManager {
       // Construct backend via factory
       // ============================================================
 
+      this.assertSessionRunnable(managed)
       managed.agent = createBackendFromResolvedContext({
         context: backendContext,
         hostRuntime: buildBackendHostRuntimeContext(),
@@ -5535,11 +5721,12 @@ export class SessionManager implements ISessionManager {
         setSessionStatusFn: async (sessionId: string | undefined, status: string) => {
           await this.setSessionStatus(sessionId ?? managed.id, status as SessionStatus)
         },
-        // archive_session — archive/unarchive ANOTHER session by ID. Scoped to the
-        // invoking session's workspace and blocked mid-turn (guard logic lives in
+        // archive_session — stop and archive ANOTHER session by ID. Scoped to the
+        // invoking session's workspace; only the owner may restore it (guard logic lives in
         // archive-guards.ts so it is unit-testable); delegates to the existing
         // archive/unarchive methods (which persist + emit events).
         archiveSessionFn: async (sessionId: string, archived: boolean) => {
+          this.assertSessionRunnable(managed)
           const target = this.sessions.get(sessionId)
           const guardError = validateArchiveTarget(
             target ? { workspaceId: target.workspace.id, isProcessing: target.isProcessing } : undefined,
@@ -5691,6 +5878,7 @@ export class SessionManager implements ISessionManager {
             llmConnection: session.llmConnection,
             model: session.model,
             isActive: session.agent != null,
+            isArchived: session.isArchived ?? false,
           }
         },
         listSessionsFn: (options) => {
@@ -5699,7 +5887,7 @@ export class SessionManager implements ISessionManager {
           const limit = Math.min(options?.limit ?? DEFAULT_LIMIT, MAX_LIMIT)
           const offset = options?.offset ?? 0
 
-          let sessions = this.getSessions(managed.workspace.id)
+          let sessions = this.getSessions(managed.workspace.id).filter(session => !session.isArchived && !session.hidden)
 
           // Filter
           if (options?.status) {
@@ -5791,6 +5979,8 @@ export class SessionManager implements ISessionManager {
           return { resolved: null, available }
         },
         sendAgentMessageFn: async (sessionId: string, message: string, attachments?: Array<{ path: string; name?: string }>) => {
+          this.assertSessionRunnable(managed)
+          const stopEpoch = managed.stopEpoch ?? 0
           // Build FileAttachment[] from paths (same pattern as spawn_session)
           let fileAttachments: FileAttachment[] | undefined
           if (attachments?.length) {
@@ -5818,6 +6008,7 @@ export class SessionManager implements ISessionManager {
           // target starts processing immediately. sendMessage throws for an
           // unknown session — that rejection propagates to the handler's catch.
           const targetBusy = this.sessions.get(sessionId)?.isProcessing === true
+          this.assertSessionRunnable(managed, stopEpoch)
           await this.sendMessage(sessionId, message, fileAttachments)
           return {
             delivery: targetBusy ? ('queued' as const) : ('delivered' as const),
@@ -5861,6 +6052,7 @@ export class SessionManager implements ISessionManager {
       managed.agent.setBackgroundEventSink?.((event: AgentEvent) => {
         void this.processEvent(managed, event)
       })
+      managed.agent.setBackgroundTurnReadyHandler?.(() => this.resumeBackgroundTurn(managed))
 
       // Wire up onSourceActivationRequest to auto-enable sources when agent tries to use them
       managed.agent.onSourceActivationRequest = async (sourceSlug: string): Promise<boolean> => {
@@ -5972,6 +6164,7 @@ export class SessionManager implements ISessionManager {
       managed.agentReadyResolve?.(true)
       managed.agentReadyResolve = undefined
     }
+    this.scheduleIdleRuntimeRelease(managed)
     return managed.agent
   }
 
@@ -6009,21 +6202,96 @@ export class SessionManager implements ISessionManager {
     }
   }
 
+  private assertSessionRunnable(managed: ManagedSession, stopEpoch?: number): void {
+    if (managed.isArchived || this.archiveStops.has(managed.id)) {
+      throw Object.assign(new Error('This chat is archived and cannot receive prompts or run. Only the owner can unarchive it.'), { code: 'SESSION_ARCHIVED' })
+    }
+    if (managed.isDeleting || (stopEpoch !== undefined && stopEpoch !== (managed.stopEpoch ?? 0))) {
+      throw new DOMException('This session was stopped before the request could run', 'AbortError')
+    }
+  }
+
+  private clearArchivedSessionWork(managed: ManagedSession): void {
+    this.recoverPendingSteers(managed)
+    managed.messageQueue = []
+    managed.acceptedSteers?.clear()
+    // Keep accepted user messages in history, but never replay their cancelled queue entries.
+    for (const message of managed.messages) if (message.isQueued) message.isQueued = false
+    if (managed.autoRetryTimer) clearTimeout(managed.autoRetryTimer)
+    managed.autoRetryTimer = undefined
+    managed.autoRetryPending = undefined
+    managed.pendingActivationResend = undefined
+    managed.authRetryInProgress = false
+    managed.pendingPlanExecution = undefined
+    managed.pendingAuthRequestId = undefined
+    managed.pendingAuthRequest = undefined
+    this.clearPendingPermissionRequestsForSession(managed.id)
+    this.clearAdminRememberApprovalsForSession(managed.id)
+  }
+
   async archiveSession(sessionId: string): Promise<void> {
     const managed = this.sessions.get(sessionId)
-    if (!managed) {
-      sessionLog.warn(`archiveSession: unknown session ${sessionId} — no-op`)
-    }
-    if (managed) {
-      managed.isArchived = true
-      managed.archivedAt = Date.now()
-      // Persist in-memory state directly to avoid race with pending queue writes
+    if (!managed) return
+    const stopping = this.archiveStops.get(sessionId)
+    if (stopping) return stopping
+    if (managed.isRestoringCheckpoint) throw new Error('Wait for checkpoint restoration before archiving this chat')
+
+    // Lock synchronously, before any await: no concurrent send/steer can enter.
+    managed.isArchived = true
+    managed.recovery = null
+    managed.archivedAt = Date.now()
+    if (managed.isProcessing) managed.wasInterrupted = true
+    managed.stopRequested = true
+    managed.stopEpoch = (managed.stopEpoch ?? 0) + 1
+    managed.processingGeneration++
+    if (!managed.messagesLoaded) this.hydrateMessagesForColdPersist(managed)
+    this.clearArchivedSessionWork(managed)
+    this.flushDelta(sessionId, managed.workspace.id)
+    // A hard abort also stops keep-alive subagents; the ordinary Stop keeps them alive.
+    try { managed.agent?.forceAbort(AbortReason.UserStop) }
+    catch (error) { sessionLog.warn(`Hard abort failed for archived chat ${sessionId}; disposing its runtime`, error) }
+    this.setProcessing(managed, false)
+
+    const stopped = (async () => {
       this.persistSession(managed)
       await this.flushSession(managed.id)
-      // Notify all windows for this workspace
+      // An initialization already awaiting I/O must settle before the owner can restore this chat.
+      await this.agentPreparations.get(sessionId)?.catch(() => {})
+      const runtime = { agent: managed.agent, poolServer: managed.poolServer, mcpPool: managed.mcpPool }
+      const disposed = await this.disposeManagedAgentRuntime(managed, 'session archived')
+      if (!disposed) {
+        // Keep failed resources reachable so a retry can stop them; never unlock on failure.
+        Object.assign(managed, runtime)
+        throw new Error('Chat locked as archived, but its runtime could not be fully stopped. Retry archiving before restoring it.')
+      }
+      for (const task of managed.backgroundTaskRegistry.values()) {
+        if (task.status === 'running') {
+          task.status = 'stopped'
+          task.completedAt = Date.now()
+        }
+      }
+      this.publishBackgroundActivity(managed)
+      await releaseBrowserOwnershipOnForcedStop(sid => this.getBrowserPaneManagerForSession(sid), sessionId)
+      this.finishSuggestionTrace(managed)
+      finishLargeResultExcerpts(sessionId)
+      await clearStoredPendingPlanExecution(managed.workspace.rootPath, sessionId)
+      this.clearArchivedSessionWork(managed)
+      this.persistSession(managed)
+      await this.flushSession(sessionId)
+      this.sendEvent({ type: 'complete', sessionId, tokenUsage: managed.tokenUsage, backgroundTasksAlive: false }, managed.workspace.id)
       this.sendEvent({ type: 'session_archived', sessionId }, managed.workspace.id)
       this.emitUnreadSummaryChanged()
       await this.cleanupSessionWorktree(managed)
+    })()
+    this.archiveStops.set(sessionId, stopped)
+    try {
+      await stopped
+      this.archiveStopFailures.delete(sessionId)
+    } catch (error) {
+      this.archiveStopFailures.add(sessionId)
+      throw error
+    } finally {
+      if (this.archiveStops.get(sessionId) === stopped) this.archiveStops.delete(sessionId)
     }
   }
 
@@ -6033,6 +6301,14 @@ export class SessionManager implements ISessionManager {
       sessionLog.warn(`unarchiveSession: unknown session ${sessionId} — no-op`)
     }
     if (managed) {
+      await this.archiveStops.get(sessionId)
+      if (this.archiveStopFailures.has(sessionId)) throw new Error('This archived chat has not fully stopped; retry archiving before restoring it')
+      if (!managed.isArchived) return
+      // Load while still archived, so crash-recovered queue entries cannot start.
+      await this.ensureMessagesLoaded(managed)
+      this.clearArchivedSessionWork(managed)
+      managed.stopEpoch = (managed.stopEpoch ?? 0) + 1
+      managed.stopRequested = false
       managed.isArchived = false
       managed.archivedAt = undefined
       // Persist in-memory state directly to avoid race with pending queue writes
@@ -6042,6 +6318,15 @@ export class SessionManager implements ISessionManager {
       this.sendEvent({ type: 'session_unarchived', sessionId }, managed.workspace.id)
       this.emitUnreadSummaryChanged()
     }
+  }
+
+  /** Match Conductor: keep a manual choice until the PR-derived state changes. */
+  async setDerivedSessionStatus(sessionId: string, status: SessionStatus): Promise<void> {
+    const managed = this.sessions.get(sessionId)
+    if (!managed || managed.isArchived || managed.hidden || managed.derivedSessionStatus === status) return
+    if (!loadStatusConfig(managed.workspace.rootPath).statuses.some(candidate => candidate.id === status)) return
+    managed.derivedSessionStatus = status
+    await this.setSessionStatus(sessionId, status)
   }
 
   async setSessionStatus(sessionId: string, sessionStatus: SessionStatus): Promise<void> {
@@ -7044,6 +7329,7 @@ export class SessionManager implements ISessionManager {
     }
 
     if (managed.isRestoringCheckpoint) throw new Error('Wait for checkpoint restoration before deleting this session')
+    this.clearIdleRuntimeTimer(managed)
     managed.isDeleting = true
     managed.stopEpoch = (managed.stopEpoch ?? 0) + 1
     // Let any already-started Git operation finish before deleting its recovery metadata.
@@ -7168,13 +7454,19 @@ export class SessionManager implements ISessionManager {
   ): Promise<void> {
     const managed = this.sessions.get(sessionId)
     if (!managed) throw new Error(`Session ${sessionId} not found`)
+    this.assertSessionRunnable(managed)
+    const stopEpoch = managed.stopEpoch ?? 0
     if (managed.isRestoringCheckpoint) throw new Error('Wait for checkpoint restoration before sending a message')
     managed.checkpointPendingSends = (managed.checkpointPendingSends ?? 0) + 1
+    this.clearIdleRuntimeTimer(managed)
     try {
       await this.assertNoCheckpointRestore(managed)
+      this.assertSessionRunnable(managed, stopEpoch)
       return await this.sendMessageInternal(sessionId, message, attachments, storedAttachments, options, existingMessageId, _isAuthRetry, onAck, rpcContext)
     } finally {
       managed.checkpointPendingSends = Math.max(0, (managed.checkpointPendingSends ?? 1) - 1)
+      this.resumeBackgroundTurn(managed)
+      this.scheduleIdleRuntimeRelease(managed)
     }
   }
 
@@ -7206,6 +7498,8 @@ export class SessionManager implements ISessionManager {
     if (!managed || managed.isDeleting) {
       throw new Error(`Session ${sessionId} not found`)
     }
+    this.assertSessionRunnable(managed)
+    const turnStopEpoch = managed.stopEpoch ?? 0
     this.setLastMessageClientId(sessionId, rpcContext?.callerClientId)
 
     // Source-activation auto-retry dedup (craft-agents-oss#804). When the server
@@ -7238,6 +7532,7 @@ export class SessionManager implements ISessionManager {
 
     // Ensure messages are loaded before we try to add new ones
     await this.ensureMessagesLoaded(managed)
+    this.assertSessionRunnable(managed, turnStopEpoch)
 
     if (options?.repository && !existingMessageId && !_isAuthRetry) {
       const choice = options.repository
@@ -7257,6 +7552,7 @@ export class SessionManager implements ISessionManager {
       })
     }
 
+    this.assertSessionRunnable(managed, turnStopEpoch)
     // If currently processing, behavior depends on the connection's
     // `midStreamBehavior` (resolved via {@link resolveMidStreamBehavior},
     // defaults to provider-appropriate value):
@@ -7346,6 +7642,7 @@ export class SessionManager implements ISessionManager {
       // before we tell the renderer "accepted" — `persistSession` only
       // enqueues with a 500ms debounce. (#616 reliability fix.)
       await this.flushSession(managed.id)
+      this.assertSessionRunnable(managed, turnStopEpoch)
       onAck?.(userMessage.id)
       return
     }
@@ -7385,6 +7682,7 @@ export class SessionManager implements ISessionManager {
       // `persistSession` is debounced (500ms). #616.
       this.persistSession(managed)
       await this.flushSession(managed.id)
+      this.assertSessionRunnable(managed, turnStopEpoch)
       onAck?.(userMessage.id)
 
       // Emit user_message event so UI can confirm the optimistic message
@@ -7480,8 +7778,6 @@ export class SessionManager implements ISessionManager {
     // Capture the generation to detect if a new request supersedes this one.
     // This prevents the finally block from clobbering state when a follow-up message arrives.
     const myGeneration = managed.processingGeneration
-    // A Stop from now on (not a stale stopRequested flag) keeps this turn from starting.
-    const turnStopEpoch = managed.stopEpoch ?? 0
 
     // Pre-enable sources required by invoked skills (Issue #249)
     // This eliminates the two-turn penalty where the agent discovers missing sources at runtime.
@@ -7549,7 +7845,10 @@ export class SessionManager implements ISessionManager {
 
     const workspaceRootPath = managed.workspace.rootPath
     try {
+      // Persist the running marker before network/provider setup can stall or the server can exit.
+      await this.flushSession(sessionId)
       await this.syncAutomaticSessionSources(managed)
+      this.assertSessionRunnable(managed, turnStopEpoch)
       const enabledSlugs = managed.enabledSourceSlugs ?? []
       const hasSources = enabledSlugs.length > 0
       // Load enabled sources up-front so we can refresh tokens BEFORE getOrCreateAgent
@@ -7559,6 +7858,7 @@ export class SessionManager implements ISessionManager {
       const sources: LoadedSource[] = hasSources
         ? await this.loadSessionSources(managed, enabledSlugs)
         : []
+      this.assertSessionRunnable(managed, turnStopEpoch)
 
       if (hasSources && managed.tokenRefreshManager) {
         const refreshResult = await refreshExpiredCredentials(sources, managed.tokenRefreshManager)
@@ -7573,12 +7873,15 @@ export class SessionManager implements ISessionManager {
       // Get or create the agent (lazy loading). Its internal cold-session build at
       // ~L2956 now sees fresh tokens (or correctly-needs_auth failed sources, since
       // ensureFreshToken mirrors the disk write to source.config in-memory).
+      this.assertSessionRunnable(managed, turnStopEpoch)
       const agent = await this.getOrCreateAgent(managed, !userMessage.hidden && !options?.hidden && !_isAuthRetry ? userMessage.id : undefined)
+      this.assertSessionRunnable(managed, turnStopEpoch)
       sendSpan.mark('agent.ready')
 
 
       // Always set all sources for context (even if none are enabled), including built-ins
       const allSources = await this.loadSessionSources(managed)
+      this.assertSessionRunnable(managed, turnStopEpoch)
       agent.setAllSources(allSources)
       sendSpan.mark('sources.loaded')
 
@@ -7587,6 +7890,7 @@ export class SessionManager implements ISessionManager {
         const sessionPath = getSessionStoragePath(workspaceRootPath, sessionId)
         // Single fresh build — tokens already refreshed above.
         const { mcpServers, apiServers, errors } = await buildServersFromSources(sources, sessionPath, managed.tokenRefreshManager, agent.getSummarizeCallback())
+        this.assertSessionRunnable(managed, turnStopEpoch)
         if (errors.length > 0) {
           sessionLog.warn(`Source build errors:`, errors)
         }
@@ -7597,6 +7901,7 @@ export class SessionManager implements ISessionManager {
           const usableSources = sources.filter(isSourceUsable)
           const intendedSlugs = usableSources.map(s => s.config.slug)
           await agent.setSourceServers(mcpServers, apiServers, intendedSlugs)
+          this.assertSessionRunnable(managed, turnStopEpoch)
           sessionLog.info(`Applied ${mcpCount} MCP + ${apiCount} API sources to session ${sessionId} (${allSources.length} total)`)
         }
         sendSpan.mark('servers.applied')
@@ -7667,7 +7972,7 @@ export class SessionManager implements ISessionManager {
       const stoppedMeanwhile = (managed.stopEpoch ?? 0) !== turnStopEpoch
       const superseded = managed.processingGeneration !== myGeneration
       const deleted = this.sessions.get(sessionId) !== managed
-      if (stoppedMeanwhile || superseded || deleted) {
+      if (stoppedMeanwhile || superseded || deleted || managed.isArchived) {
         sessionLog.info(`Turn for session ${sessionId} not started: ${deleted ? 'deleted' : superseded ? 'superseded' : 'stopped'} before it began`)
         sendSpan.mark('chat.not_started')
         if (deleted) return  // the finally block below cleans up
@@ -7726,7 +8031,7 @@ export class SessionManager implements ISessionManager {
 
         // Handle complete event - SDK always sends this (even after interrupt)
         // This is the central place where processing ends
-        if (event.type === 'complete') {
+        if (event.type === 'complete' && !event.continuing) {
           // Skip normal completion handling if auth retry is in progress
           // The retry will handle its own completion
           if (managed.authRetryInProgress) {
@@ -7831,6 +8136,8 @@ export class SessionManager implements ISessionManager {
         this.onProcessingStopped(sessionId, 'interrupted')
       } else {
         sessionLog.info('Chat loop exited unexpectedly')
+        this.recordSessionFailure(managed, 'The agent stopped before completing its response.')
+        this.onProcessingStopped(sessionId, 'error')
       }
     } catch (error) {
       if (managed.processingGeneration !== myGeneration) {
@@ -7839,7 +8146,7 @@ export class SessionManager implements ISessionManager {
         return
       }
       // Check if this is an abort error (expected when interrupted)
-      const isAbortError = error instanceof Error && (
+      const isAbortError = (managed.stopEpoch ?? 0) !== turnStopEpoch || error instanceof Error && (
         error.name === 'AbortError' ||
         error.message === 'Request was aborted.' ||
         error.message.includes('aborted')
@@ -7862,6 +8169,7 @@ export class SessionManager implements ISessionManager {
         }
       } else {
         sessionLog.error('Error in chat:', error)
+        this.recordSessionFailure(managed, error instanceof Error ? error.message : String(error))
         sessionLog.error('Error message:', error instanceof Error ? error.message : String(error))
         sessionLog.error('Error stack:', error instanceof Error ? error.stack : 'No stack')
 
@@ -7900,6 +8208,7 @@ export class SessionManager implements ISessionManager {
 
     sessionLog.info('Cancelling processing for session:', sessionId, silent ? '(silent)' : '')
 
+    this.setSessionRecovery(managed, null)
     // A hard Stop visibly cancels undelivered accepted steers just like queued
     // sends. Transfer first so the existing input-restoration path includes them.
     this.recoverPendingSteers(managed)
@@ -7965,12 +8274,25 @@ export class SessionManager implements ISessionManager {
       }, managed.workspace.id)
     }
 
-    // Safety timeout: if event loop doesn't complete within 5 seconds, force cleanup
-    // This handles cases where the generator gets stuck
+    // Preparation may still be waiting on I/O, with no backend iterator to drain.
+    if (!managed.agent) {
+      managed.processingGeneration++
+      await this.onProcessingStopped(sessionId, 'interrupted')
+      return
+    }
+
+    // A stalled interrupt must stop the actual backend, not merely clear the UI.
+    // Scope the fallback to this turn so it cannot stop a later request.
+    const stoppedGeneration = managed.processingGeneration
+    const stoppedEpoch = managed.stopEpoch
     setTimeout(() => {
-      if (managed.stopRequested && managed.isProcessing) {
-        sessionLog.warn('Generator did not complete after stop request, forcing cleanup')
-        this.onProcessingStopped(sessionId, 'timeout')
+      if (managed.stopRequested && managed.isProcessing
+          && managed.processingGeneration === stoppedGeneration && managed.stopEpoch === stoppedEpoch) {
+        sessionLog.warn('Generator did not complete after stop request, aborting the stopped turn')
+        managed.agent?.forceAbort(AbortReason.UserStop)
+        // Ignore late events from the aborted iterator.
+        managed.processingGeneration++
+        void this.onProcessingStopped(sessionId, 'interrupted')
       }
     }, 5000)
 
@@ -7989,7 +8311,8 @@ export class SessionManager implements ISessionManager {
     workspaceId: string,
     failureErrorCode?: string,
   ): boolean {
-    if (managed.authRetryAttempted || !managed.lastSentMessage) return false
+    if (managed.isArchived || managed.isDeleting || managed.authRetryAttempted || !managed.lastSentMessage) return false
+    const stopEpoch = managed.stopEpoch ?? 0
 
     sessionLog.info(`Auth error detected, attempting token refresh and retry for session ${sessionId}`)
     managed.authRetryAttempted = true
@@ -8005,6 +8328,7 @@ export class SessionManager implements ISessionManager {
 
     setImmediate(async () => {
       try {
+        this.assertSessionRunnable(managed, stopEpoch)
         // 1. Reset summarization client so it picks up fresh credentials
         sessionLog.info(`[auth-retry] Resetting summarization client for session ${sessionId}`)
         resetSummarizationClient()
@@ -8012,6 +8336,7 @@ export class SessionManager implements ISessionManager {
         // 2. Destroy the agent — the new agent's postInit() will refresh auth
         sessionLog.info(`[auth-retry] Destroying agent for session ${sessionId}`)
         await this.disposeManagedAgentRuntime(managed, 'auth retry')
+        this.assertSessionRunnable(managed, stopEpoch)
 
         // 3. Retry the message
         const retryMessage = managed.lastSentMessage
@@ -8052,6 +8377,7 @@ export class SessionManager implements ISessionManager {
         }
       } catch (retryError) {
         managed.authRetryInProgress = false
+        if (managed.isArchived || (managed.stopEpoch ?? 0) !== stopEpoch) return
         sessionLog.error(`[auth-retry] Failed to retry after auth refresh for session ${sessionId}:`, retryError)
         sessionRuntimeHooks.captureException(retryError, { errorSource: 'auth-retry', sessionId })
         const failedMessage: Message = {
@@ -8179,14 +8505,70 @@ export class SessionManager implements ISessionManager {
    * @param sessionId - The session that stopped processing
    * @param reason - Why processing stopped ('complete' | 'interrupted' | 'error')
    */
+  private readonly backgroundTurnCleanups = new WeakMap<ManagedSession, number>()
+
+  /** Reserve the normal session lifecycle synchronously; never synthesize a user message. */
+  private resumeBackgroundTurn(managed: ManagedSession): void {
+    const agent = managed.agent
+    if (this.sessions.get(managed.id) !== managed || managed.isArchived || managed.isDeleting
+      || managed.isProcessing || managed.stopRequested || managed.isRestoringCheckpoint
+      || managed.checkpointPendingSends || this.backgroundTurnCleanups.get(managed)
+      || !agent?.resumeBackgroundTurn || !agent.hasPendingBackgroundTurn?.()) return
+    const generation = ++managed.processingGeneration
+    managed.turnFromUser = false
+    const stopEpoch = managed.stopEpoch ?? 0
+    this.setProcessing(managed, true)
+    managed.streamingText = ''
+    managed.streamingTurnId = undefined
+    managed.turnStartFinalMessageId = this.getLastFinalAssistantMessageId(managed.messages)
+    void (async () => {
+      let reason: 'complete' | 'interrupted' | 'error' = 'complete'
+      try {
+        for await (const event of agent.resumeBackgroundTurn!()) {
+          if (managed.agent !== agent || managed.processingGeneration !== generation
+            || managed.isArchived || managed.isDeleting || (managed.stopEpoch ?? 0) !== stopEpoch) return
+          if (event.type === 'error' || event.type === 'typed_error') reason = 'error'
+          await this.processEvent(managed, event)
+        }
+      } catch (error) {
+        if ((managed.stopEpoch ?? 0) !== stopEpoch) reason = 'interrupted'
+        else {
+          reason = 'error'
+          sessionLog.error(`Claude continuation failed for ${managed.id}:`, error)
+          await this.processEvent(managed, { type: 'error', message: error instanceof Error ? error.message : String(error) })
+        }
+      } finally {
+        if (managed.agent === agent && managed.processingGeneration === generation
+          && !managed.isArchived && !managed.isDeleting) {
+          if ((managed.stopEpoch ?? 0) !== stopEpoch) reason = 'interrupted'
+          managed.turnFromUser = false
+          await this.onProcessingStopped(managed.id, reason)
+          this.persistSession(managed)
+        }
+      }
+    })().catch(error => sessionLog.error(`Claude continuation cleanup failed for ${managed.id}:`, error))
+  }
+
   private async onProcessingStopped(
     sessionId: string,
     reason: 'complete' | 'interrupted' | 'error' | 'timeout'
   ): Promise<void> {
     const managed = this.sessions.get(sessionId)
     if (!managed || managed.isDeleting) return
+    if (managed.isArchived) return
+    const stopEpoch = managed.stopEpoch ?? 0
+    const generation = managed.processingGeneration
+    this.backgroundTurnCleanups.set(managed, (this.backgroundTurnCleanups.get(managed) ?? 0) + 1)
+    try {
 
     sessionLog.info(`Processing stopped for session ${sessionId}: ${reason}`)
+    if (reason === 'interrupted') this.setSessionRecovery(managed, null)
+    else if (reason === 'error' || reason === 'timeout') {
+      if (managed.recovery?.status !== 'failed') this.recordSessionFailure(managed, reason === 'timeout' ? 'The agent timed out.' : 'The request failed.')
+    } else if (managed.recovery?.status !== 'failed'
+        || this.getLastFinalAssistantMessageId(managed.messages) !== managed.recovery.lastFinalMessageId) {
+      this.setSessionRecovery(managed, null)
+    }
     getSessionAttentionService()?.setAutoFixActive(sessionId, null)
     if (reason === 'error' || reason === 'timeout') getSessionAttentionService()?.setReasons(sessionId, 'agent', [{ id: 'runtime-error', source: 'agent', kind: 'error', title: reason === 'timeout' ? 'The agent timed out' : 'The agent encountered an error', createdAt: Date.now(), action: { type: 'session' } }])
 
@@ -8225,6 +8607,8 @@ export class SessionManager implements ISessionManager {
         sessionLog.warn(`Browser-pane visual clear failed for ${sessionId} (continuing):`, err)
       }
     }
+
+    if (managed.isArchived || managed.isDeleting || managed.processingGeneration !== generation || (managed.stopEpoch ?? 0) !== stopEpoch) return
 
     // 2. Handle unread state based on whether user is viewing this session
     //    This is the explicit state machine for NEW badge:
@@ -8269,8 +8653,13 @@ export class SessionManager implements ISessionManager {
       this.applyExternalSessionMetadata(managed, pendingHeader)
     }
 
+    if (managed.isArchived || managed.isDeleting || managed.processingGeneration !== generation || (managed.stopEpoch ?? 0) !== stopEpoch) return
+
+    // SDK output already produced belongs before a queued owner prompt.
+    if (managed.agent?.hasPendingBackgroundTurn?.()) return
+
     // 5. Check queue and process or complete
-    if (managed.messageQueue.length > 0) {
+    if (managed.messageQueue.length > 0 && managed.recovery?.status !== 'failed') {
       // Has queued messages - process next
       this.processNextQueuedMessage(sessionId)
     } else {
@@ -8290,6 +8679,8 @@ export class SessionManager implements ISessionManager {
           sessionLog.warn(`Browser-pane teardown failed for ${sessionId} (continuing to completion):`, err)
         }
       }
+
+      if (managed.isArchived || managed.isDeleting || managed.processingGeneration !== generation || (managed.stopEpoch ?? 0) !== stopEpoch) return
 
       // No queue - emit complete to UI (include tokenUsage and hasUnread for state updates)
       this.sendEvent({
@@ -8332,6 +8723,12 @@ export class SessionManager implements ISessionManager {
     // 6. Always persist
     this.persistSession(managed)
     if (managed.isArchived) void this.cleanupSessionWorktree(managed)
+    } finally {
+      const remaining = (this.backgroundTurnCleanups.get(managed) ?? 1) - 1
+      if (remaining) this.backgroundTurnCleanups.set(managed, remaining)
+      else this.backgroundTurnCleanups.delete(managed)
+      this.resumeBackgroundTurn(managed)
+    }
   }
 
   /**
@@ -8340,7 +8737,7 @@ export class SessionManager implements ISessionManager {
    */
   private processNextQueuedMessage(sessionId: string): void {
     const managed = this.sessions.get(sessionId)
-    if (!managed || managed.messageQueue.length === 0) return
+    if (!managed || managed.isArchived || managed.isDeleting || managed.recovery?.status === 'failed' || managed.messageQueue.length === 0) return
 
     const first = managed.messageQueue.shift()!
     // Mid-turn messages: entries judged to continue this one are replayed with it as one turn.
@@ -8441,6 +8838,7 @@ export class SessionManager implements ISessionManager {
       if (entry?.status === 'running') {
         entry.status = 'stopped'
         entry.completedAt = Date.now()
+        this.publishBackgroundActivity(managed)
       }
       return { success: false, error: 'not-running' }
     }
@@ -8539,6 +8937,7 @@ export class SessionManager implements ISessionManager {
       }
     }
     if (orphaned > 0) {
+      this.publishBackgroundActivity(managed)
       sessionLog.info(`[bg-lifecycle] turn ended — orphaned ${orphaned} still-running background task(s)`, {
         sessionId,
       })
@@ -8551,13 +8950,16 @@ export class SessionManager implements ISessionManager {
    * their completion wakes the idle session. Shells and other tasks are left out: a dev server or
    * a watcher may never end, and a task step must not wait for it.
    */
+  /** Publish activity from the same registry used by reconnect snapshots. */
+  private publishBackgroundActivity(managed: ManagedSession): void {
+    const backgroundAgentCount = countBackgroundAgents(managed.backgroundTaskRegistry.values())
+    this.sendEvent({ type: 'session_metadata_changed', sessionId: managed.id, changes: { backgroundAgentCount } }, managed.workspace.id)
+    getSessionAttentionService()?.setWorking(managed.id, managed.isProcessing || backgroundAgentCount > 0)
+  }
+
   private countRunningBackgroundWork(managed: ManagedSession): number {
     if (!this.keepBackgroundTasksAlive) return 0
-    let running = 0
-    for (const task of managed.backgroundTaskRegistry.values()) {
-      if (task.status === 'running' && !task.untracked && (task.kind === 'agent' || task.kind === 'workflow')) running++
-    }
-    return running
+    return countBackgroundAgents(managed.backgroundTaskRegistry.values())
   }
 
   /**
@@ -9252,7 +9654,7 @@ export class SessionManager implements ISessionManager {
    */
   wakeIdleSessionWithNotice(sessionId: string, text: string): boolean {
     const managed = this.sessions.get(sessionId)
-    if (!managed || managed.isProcessing) return false
+    if (!managed || managed.isArchived || managed.isDeleting || managed.isProcessing) return false
     void this.sendMessage(sessionId, labelSystemNotice(text), [], [], { hidden: true }).catch((err) => {
       sessionLog.error(`Session ${sessionId}: failed to start a system-notice turn:`, err)
     })
@@ -9265,6 +9667,7 @@ export class SessionManager implements ISessionManager {
    * If no agent exists, creates a temporary one using the session's connection.
    */
   private async generateTitle(managed: ManagedSession, userMessage: string): Promise<void> {
+    if (managed.isArchived || managed.isDeleting) return
     sessionLog.info(`[generateTitle] Starting for session ${managed.id}`)
 
     // Use existing agent or create temporary one
@@ -9369,6 +9772,8 @@ export class SessionManager implements ISessionManager {
   }
 
   private async processEvent(managed: ManagedSession, event: AgentEvent): Promise<void> {
+    if (managed.isArchived) return
+    this.scheduleIdleRuntimeRelease(managed)
     const sessionId = managed.id
     const workspaceId = managed.workspace.id
     this.notifySessionActivity(sessionId)
@@ -9833,6 +10238,7 @@ export class SessionManager implements ISessionManager {
           timestamp: this.monotonic()
         }
         managed.messages.push(errorMessage)
+        this.recordSessionFailure(managed, event.message)
         this.sendEvent({ type: 'error', sessionId, error: event.message, timestamp: errorMessage.timestamp }, workspaceId)
         break
       }
@@ -9882,6 +10288,7 @@ export class SessionManager implements ISessionManager {
           errorCanRetry: event.error.canRetry,
         }
         managed.messages.push(typedErrorMessage)
+        this.recordSessionFailure(managed, typedErrorMessage.content)
         // Send typed_error event with full structure for renderer to handle
         this.sendEvent({
           type: 'typed_error',
@@ -9923,6 +10330,7 @@ export class SessionManager implements ISessionManager {
             turnId: event.turnId,
           })
         }
+        if (managed) this.publishBackgroundActivity(managed)
         // Forward background task event directly to renderer
         this.sendEvent({
           ...event,
@@ -9955,6 +10363,12 @@ export class SessionManager implements ISessionManager {
         const info = managed?.backgroundTaskRegistry.get(event.taskId)
         if (!info || info.untracked) break
         info.lastProgressAt = Date.now()
+        info.activity = {
+          ...info.activity,
+          ...(event.summary !== undefined ? { summary: event.summary } : {}),
+          ...(event.lastToolName !== undefined ? { lastToolName: event.lastToolName } : {}),
+          ...(event.toolUses !== undefined ? { toolUses: event.toolUses } : {}),
+        }
         this.sendEvent({
           ...event,
           sessionId,
@@ -10042,6 +10456,7 @@ export class SessionManager implements ISessionManager {
           this.evictStaleBackgroundTasks(managed)
         }
         // Forward to renderer for UI update
+        if (managed) this.publishBackgroundActivity(managed)
         this.sendEvent({
           ...event,
           sessionId,
@@ -10059,7 +10474,7 @@ export class SessionManager implements ISessionManager {
         // A stop the user asked for from the chip is not news to report back: it wakes nothing. A task
         // step still wakes, since its run waits for the turn that follows its background work.
         const stoppedByUser = event.status === 'stopped' && !!priorEntry?.stopRequestedAt && !managed?.taskRunId
-        if (managed && this.keepBackgroundTasksAlive && !managed.isProcessing && launchedHereAndRunning && !stoppedByUser) {
+        if (managed && this.keepBackgroundTasksAlive && !managed.agent?.resumeBackgroundTurn && !managed.isProcessing && launchedHereAndRunning && !stoppedByUser) {
           const taskIntent = priorEntry?.intent
           const outputFile = event.outputFile || managed.backgroundTaskOutputs.get(event.taskId)?.outputFile
           const label = taskIntent ? `"${taskIntent}"` : `task ${event.taskId}`
@@ -10188,10 +10603,11 @@ export class SessionManager implements ISessionManager {
           committed: false,
         }
 
+        const retryStopEpoch = managed.stopEpoch ?? 0
         if (managed.autoRetryTimer) clearTimeout(managed.autoRetryTimer)
         managed.autoRetryTimer = setTimeout(() => {
           const current = this.sessions.get(sessionId)
-          if (!current) return
+          if (!current || current.isArchived || current.isDeleting || (current.stopEpoch ?? 0) !== retryStopEpoch) return
           current.autoRetryTimer = undefined
 
           // If a user follow-up arrived in the 100ms window, skip — they preempted us.
@@ -10971,6 +11387,7 @@ export class SessionManager implements ISessionManager {
    * Should be called on app shutdown to prevent resource leaks.
    */
   cleanup(): void {
+    for (const managed of this.sessions.values()) this.clearIdleRuntimeTimer(managed)
     disposeSessionAttention()
     sessionLog.info('Cleaning up resources...')
 
