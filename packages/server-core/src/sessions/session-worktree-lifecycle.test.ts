@@ -72,7 +72,7 @@ afterEach(async () => {
 
 /** Keep persistence, Git operations, runtime disposal and locks real; replace only backend construction. */
 function harness() {
-  const manager = Object.create(SessionManager.prototype) as LifecycleHarness
+  const manager = new SessionManager() as unknown as LifecycleHarness
   manager.sessions = new Map()
   manager.worktreeLocks = new Map()
   manager.keepBackgroundTasksAlive = true
