@@ -83,6 +83,7 @@ export function useUpdateChecker(): UseUpdateCheckerResult {
     const checkAndNotify = async (info: UpdateInfo) => {
       if (!info.available || !info.latestVersion) return
       if (info.downloadState !== 'ready') return
+      if (info.error) return
 
       // Check if this version was dismissed
       const dismissedVersion = await window.electronAPI.getDismissedUpdateVersion()

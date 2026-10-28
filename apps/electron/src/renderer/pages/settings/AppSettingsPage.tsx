@@ -330,7 +330,7 @@ export default function AppSettingsPage() {
             </SettingsRow>
           )}
           {isElectron && updateChecker.isReadyToInstall && updateChecker.updateInfo?.latestVersion && (
-            <SettingsRow label={t("settings.about.updateReady")}>
+            <SettingsRow label={t("settings.about.updateReady")} description={updateChecker.updateInfo.error}>
               <Button
                 variant="primary"
                 size="md"

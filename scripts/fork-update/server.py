@@ -204,7 +204,7 @@ def assert_idle():
     return pid
 
 
-def apply(target, asset, authorized):
+def apply(target, asset, authorized, force=False):
     if not authorized:
         raise ValueError('Explicit --authorize-restart is required; nothing restarted')
     result = status(target, asset)
@@ -213,7 +213,7 @@ def apply(target, asset, authorized):
     if not result['staged']:
         raise ValueError('Prepare this exact release before applying it')
     verify_file(CACHE / f'{target}.tar.gz', asset)
-    assert_idle()
+    pid = rpc_probe(require_idle=False) if force else assert_idle()
     destination = RELEASES / f'fork-{target}'
     backup = Path('/var/backups') / f'craft-fork-{target}-{time.time_ns()}'
     backup.mkdir(mode=0o700)
@@ -222,7 +222,11 @@ def apply(target, asset, authorized):
     shutil.copy2('/etc/craft-agents.env', backup / 'craft-agents.env')
     run('rsync', '-aHAX', '--numeric-ids', str(DATA) + '/', str(backup / 'craft-agent') + '/')
     previous = DROPIN.read_text() if DROPIN.exists() else None
-    assert_idle()  # Recheck after the potentially slow live backup.
+    # Force only bypasses activity checks. Consent, RPC health, verified files,
+    # backups and rollback remain required in both paths.
+    latest_pid = rpc_probe(require_idle=False) if force else assert_idle()
+    if latest_pid != pid:
+        raise ValueError('Server changed during preparation; retry the update')
     stopped = False
     try:
         run('systemctl', 'stop', SERVICE)
@@ -262,12 +266,15 @@ def main():
     parser.add_argument('version')
     parser.add_argument('sha256')
     parser.add_argument('--authorize-restart', action='store_true')
+    parser.add_argument('--force', action='store_true', help='Interrupt active agents and commands; still requires --authorize-restart')
     args = parser.parse_args()
     if os.geteuid() != 0:
         raise ValueError('Run this administrator helper over SSH as root')
     # Refuse before any network or system operation when apply lacks consent.
     if args.action == 'apply' and not args.authorize_restart:
         raise ValueError('Explicit --authorize-restart is required; nothing restarted')
+    if args.force and args.action != 'apply':
+        raise ValueError('--force is only valid for an explicitly authorized apply')
     version(args.version)
     asset = validate_manifest(fetch_json(MANIFEST_URL), args.version, args.sha256)
     CACHE.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -278,7 +285,7 @@ def main():
         elif args.action == 'stage':
             result = stage(args.version, asset)
         else:
-            result = apply(args.version, asset, args.authorize_restart)
+            result = apply(args.version, asset, args.authorize_restart, args.force)
     print(json.dumps(result))
 
 

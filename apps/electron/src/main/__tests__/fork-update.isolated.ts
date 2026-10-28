@@ -62,14 +62,24 @@ test('only explicit native restart confirmation sends apply authorization', asyn
   answers.push(1, 1, 0); await updater.installUpdate()
   expect(calls).toHaveLength(1)
   expect(calls[0]).toContain('apply'); expect(calls[0]).toContain('--authorize-restart')
+  expect(calls[0]).not.toContain('--force')
   expect(calls[0]).toContain('StrictHostKeyChecking=yes')
 })
 
-test('an occupied server stays ready and shows a useful message instead of a generic install failure', async () => {
+test('only choosing force authorizes interruption of active agents', async () => {
+  await updater.checkForUpdates(); calls.length = 0
+  answers.push(1, 2, 0); await updater.installUpdate()
+  expect(calls).toHaveLength(1)
+  expect(calls[0]).toContain('--authorize-restart')
+  expect(calls[0]).toContain('--force')
+})
+
+test('an occupied server stays ready without an additional modal', async () => {
   await updater.checkForUpdates(); calls.length = 0; busy = true
   answers.push(1, 1, 0)
   await updater.installUpdate()
-  expect(shownDialogs.at(-1).message).toBe('Le serveur est encore occupé')
-  expect(shownDialogs.at(-1).detail).not.toContain('ssh')
+  expect(shownDialogs).toHaveLength(2)
+  expect(updater.getUpdateInfo().error).toContain('Serveur occupé')
+  expect(updater.getUpdateInfo().error).not.toContain('ssh')
   expect(updater.getUpdateInfo().downloadState).toBe('ready')
 })

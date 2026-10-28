@@ -49,12 +49,13 @@ async function serverConfig(): Promise<ServerConfig | null> {
   if (!/^[\w][\w.@-]*$/.test(config.host) || !/^[\w][\w.@-]*$/.test(config.jump)) throw new Error('Invalid update SSH destination')
   return config
 }
-async function serverCommand(action: 'check' | 'stage' | 'apply', target: ForkRelease): Promise<any> {
+async function serverCommand(action: 'check' | 'stage' | 'apply', target: ForkRelease, force = false): Promise<any> {
   const config = await serverConfig()
   if (!config) return null
   const args = ['-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes', '-o', 'ConnectTimeout=10', '-J', config.jump, config.host,
     '/usr/local/sbin/craft-fork-update', action, target.version, target.assets['server-linux-x64'].sha256]
   if (action === 'apply') args.push('--authorize-restart')
+  if (action === 'apply' && force) args.push('--force')
   try {
     const result = await exec('/usr/bin/ssh', args, { timeout: action === 'check' ? 30_000 : 30 * 60_000, maxBuffer: 1024 * 1024 })
     return JSON.parse(result.stdout)
@@ -193,6 +194,7 @@ export async function installUpdate(): Promise<void> {
   if (installing) throw new Error('Update installation is already in progress')
   if (checking || !release || info.downloadState !== 'ready') throw new Error('Check and prepare the fork update first')
   installing = true
+  publish({ error: undefined })
   try {
     const choices: Array<'cancel' | 'app' | 'server'> = ['cancel']
     const buttons = ['Annuler']
@@ -205,13 +207,13 @@ export async function installUpdate(): Promise<void> {
     if (choices[answer.response] === 'server') {
       const consent = await dialog.showMessageBox({ type: 'warning', title: 'Autoriser le redémarrage du serveur',
         message: `Installer ${release.version} et redémarrer le serveur ?`,
-        detail: 'Le serveur refusera si des agents ou des commandes tournent encore. Les données seront sauvegardées et la version précédente conservée. Cette action redémarre le serveur.',
-        buttons: ['Annuler', 'Installer et redémarrer le serveur'], defaultId: 0, cancelId: 0, noLink: true })
-      if (consent.response === 1) {
-        try { server = await serverCommand('apply', release) }
+        detail: 'Installer refuse si des agents ou des commandes tournent. Forcer les interrompt et redémarre immédiatement le serveur. Les conversations sont sauvegardées et la version précédente conservée.',
+        buttons: ['Annuler', 'Installer', 'Forcer et redémarrer'], defaultId: 0, cancelId: 0, noLink: true })
+      if (consent.response === 1 || consent.response === 2) {
+        try { server = await serverCommand('apply', release, consent.response === 2) }
         catch (error) {
           if (error instanceof Error && error.name === 'ServerUpdateBusy') {
-            await dialog.showMessageBox({ type: 'info', title: 'Mise à jour en attente', message: 'Le serveur est encore occupé', detail: error.message, buttons: ['OK'] })
+            publish({ error: 'Serveur occupé · Réessaie après la fin des sessions en cours.' })
             return
           }
           throw error

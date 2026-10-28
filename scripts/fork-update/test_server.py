@@ -17,6 +17,8 @@ class ForkServerTests(unittest.TestCase):
         with patch.object(server, 'run', side_effect=AssertionError('must not run commands')), patch.object(server, 'status', side_effect=AssertionError('must not inspect or mutate')):
             with self.assertRaisesRegex(ValueError, 'authorize-restart'):
                 server.apply('0.15.7', {}, False)
+            with self.assertRaisesRegex(ValueError, 'authorize-restart'):
+                server.apply('0.15.7', {}, False, force=True)
 
     def test_only_exact_fork_asset_and_checksum_can_be_staged(self):
         asset = {'url': f'https://github.com/{server.REPOSITORY}/releases/download/fork-v0.15.7/craft-server-linux-x64.tar.gz', 'sha256': 'a' * 64, 'size': 1024}
@@ -34,6 +36,26 @@ class ForkServerTests(unittest.TestCase):
     def test_apply_refuses_before_backup_when_runtime_is_busy(self):
         with patch.object(server, 'status', return_value={'available': True, 'staged': True}), patch.object(server, 'verify_file'), patch.object(server, 'assert_idle', side_effect=ValueError('command still active')), patch.object(server, 'run', side_effect=AssertionError('must not stop')):
             with self.assertRaisesRegex(ValueError, 'command still active'): server.apply('0.15.7', {}, True)
+
+    def test_force_keeps_backup_and_health_checks_but_bypasses_activity(self):
+        with tempfile.TemporaryDirectory() as root:
+            root = Path(root); dropin = root / 'update.conf'; commands = []
+            def command(*args, **kwargs):
+                commands.append(args)
+                return 'active' if args == ('systemctl', 'is-active', server.SERVICE) else ''
+            def path(value):
+                return root if value == '/var/backups' else Path(value)
+            with patch.object(server, 'status', return_value={'available': True, 'staged': True}), patch.object(server, 'verify_file'), patch.object(server, 'Path', side_effect=path), patch.object(server, 'DROPIN', dropin), patch.object(server, 'assert_idle', side_effect=AssertionError('force must bypass activity check')), patch.object(server, 'rpc_probe', return_value='123') as health, patch.object(server.shutil, 'copytree'), patch.object(server.shutil, 'copy2'), patch.object(server.time, 'sleep'), patch.object(server, 'run', side_effect=command):
+                result = server.apply('0.15.7', {}, True, force=True)
+            self.assertEqual(result['currentVersion'], '0.15.7')
+            self.assertTrue(Path(result['backup']).is_dir())
+            self.assertEqual(health.call_count, 3)
+            self.assertTrue(all(call.kwargs == {'require_idle': False} for call in health.call_args_list))
+            stop = commands.index(('systemctl', 'stop', server.SERVICE))
+            self.assertTrue(any(args[0] == 'rsync' for args in commands[:stop]))
+            self.assertEqual(commands[stop + 1][0], 'rsync')
+            self.assertIn('--delete', commands[stop + 1])
+            self.assertIn(('systemctl', 'start', server.SERVICE), commands)
 
     def test_preparation_uses_its_own_writable_disk_cache(self):
         with tempfile.TemporaryDirectory() as root:

@@ -17,7 +17,8 @@ A merge alone never publishes or deploys anything.
 
 Settings → About → Check for updates downloads and verifies the app and prepares
 the server on disk. Install opens a native choice between Mac and server.
-The server has a second explicit **Installer et redémarrer le serveur** confirmation.
+The server has a second explicit restart confirmation: **Installer** requires idle
+sessions; **Forcer et redémarrer** interrupts active agents and commands.
 Cancelling either dialog does nothing. No server update RPC is exposed to agents.
 
 The Mac uses a small local installer because this personal build has an ad-hoc
@@ -53,6 +54,12 @@ again, stops the service, finishes the consistent backup and switches an isolate
 systemd override. The previous release and `/etc/craft-agents.env` remain intact.
 A failed authenticated health check restores the previous override and starts the
 old release. The updater never merges, migrates or removes projects/worktrees.
+
+Adding `--force` bypasses only the activity checks after explicit restart consent.
+RPC health, archive verification, both backups and rollback remain required.
+The service flushes conversation history on shutdown; in-flight commands are
+interrupted, not guaranteed to resume. A busy normal install stays ready with
+an inline status in Settings instead of another modal.
 
 The root helper is intentionally outside the running backend: installing this
 updater does not require restarting that backend. Updating the helper itself is a
