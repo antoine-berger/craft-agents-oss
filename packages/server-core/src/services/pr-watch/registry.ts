@@ -305,7 +305,7 @@ export class PrWatchRegistry {
           const now = this.now()
           const coolingDown = (watcher.retryAfterUntil ?? 0) > now
             || (watcher.consecutiveErrors > 0 && (watcher.nextPollAt ?? 0) > now)
-            || (watcher.rateLimit && watcher.rateLimit.remaining < POLL.rateLimitFloor && watcher.rateLimit.resetAt > now)
+            || !this.canPoll(this.watcherHost(watcher), this.isForeground(watcher))
           if (!automatic || !coolingDown) await this.refresh(watcher, !automatic)
         }
       }
@@ -768,10 +768,13 @@ export class PrWatchRegistry {
     if (!Number.isFinite(resetAt)) return
     const previous = this.hostBudgets.get(host)
     const active = previous && previous.resetAt > this.now() ? previous : undefined
-    const remaining = Math.min(active?.remaining ?? Infinity, limit.remaining)
-    this.hostBudgets.set(host, { remaining, resetAt: Math.max(active?.resetAt ?? resetAt, resetAt) })
+    // Counters are comparable only within the same quota window. An old exhausted
+    // counter must neither poison a replenished window nor overwrite it out of order.
+    if (active && resetAt < active.resetAt) return
+    const remaining = Math.min(active?.resetAt === resetAt ? active.remaining : Infinity, limit.remaining)
+    this.hostBudgets.set(host, { remaining, resetAt })
     const band = (value: number) => value < POLL.rateLimitFloor ? 0 : value < POLL.rateLimitSlow ? 1 : 2
-    if (band(previous?.remaining ?? Infinity) !== band(remaining)) {
+    if (band(previous?.remaining ?? Infinity) !== band(remaining) || previous?.resetAt !== resetAt) {
       for (const watcher of this.watchers.values()) {
         if (this.watcherHost(watcher) === host && !watcher.inFlight) this.schedule(watcher)
       }
@@ -856,7 +859,10 @@ export class PrWatchRegistry {
       this.saveAssociation(watcher.workspaceRootPath, watcher.key, coords, summary)
       this.setState(watcher, { kind: 'pr', summary })
     } catch (error) {
-      if (error instanceof PollingPaused) return
+      if (error instanceof PollingPaused) {
+        this.markStale(watcher)
+        return
+      }
       watcher.consecutiveErrors++
       if (error instanceof GitHubRequestError && error.retryAfterMs) watcher.retryAfterUntil = this.now() + error.retryAfterMs
       this.log(`[pr-watch] ${watcher.key}: ${(error as Error).message}`)
@@ -950,6 +956,13 @@ export class PrWatchRegistry {
     for (const sessionId of sessions) this.pushSession(sessionId)
   }
 
+  private markStale(watcher: Watcher): void {
+    if (watcher.state.kind === 'pr' && !watcher.state.summary.attentionStale
+      && (watcher.state.summary.state === 'open' || watcher.state.summary.state === 'draft')) {
+      this.setState(watcher, { ...watcher.state, summary: { ...watcher.state.summary, attentionStale: true } })
+    }
+  }
+
   private schedule(watcher: Watcher): void {
     watcher.nextPollAt = undefined
     if (watcher.timer !== null) {
@@ -958,6 +971,7 @@ export class PrWatchRegistry {
     }
     if (watcher.subscriptions.size === 0) return
     const now = this.now()
+    if (!this.canPoll(this.watcherHost(watcher), this.isForeground(watcher))) this.markStale(watcher)
     // A saved terminal state still needs one successful refresh after a cold start.
     const state = watcher.state.kind === 'pr' && watcher.state.summary.attentionStale
       ? { kind: 'loading' } as const : watcher.state

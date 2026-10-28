@@ -18,7 +18,7 @@ interface SessionStatusIconProps {
 /** The branch's live PR state; attention and activity take priority in the same slot. */
 export function SessionStatusIcon({ item, needsAttention = false, isWorking = false, isWaitingForSubagents = false, attentionDescription }: SessionStatusIconProps) {
   const { t } = useTranslation()
-  const { state } = usePrWatch(item.id, true, item.workingDirectory)
+  const { state } = usePrWatch(item.id, true, item.workingDirectory, false)
   const pr = state.kind === 'pr' ? state.summary : undefined
   const iconState = pr ? prIconState(pr) : undefined
   const Icon = iconState ? PR_STATUS_ICON[iconState] : GitBranch

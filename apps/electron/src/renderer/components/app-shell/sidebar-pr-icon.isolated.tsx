@@ -10,7 +10,11 @@ let summary: PrSummary = {
   reviewDecision: 'approved', mergeState: 'clean', unresolvedThreads: 0,
   localAhead: 0, localDirty: false, fetchedAt: 1, via: 'gh',
 }
-mock.module('@/hooks/usePrWatch', () => ({ usePrWatch: () => ({ state: { kind: 'pr', summary } }) }))
+const priorities: Array<boolean | undefined> = []
+mock.module('@/hooks/usePrWatch', () => ({ usePrWatch: (_id: string, _enabled: boolean, _dir: string, isForeground?: boolean) => {
+  priorities.push(isForeground)
+  return { state: { kind: 'pr', summary } }
+} }))
 mock.module('@/context/AppShellContext', () => ({ useAppShellContext: () => ({ onOpenUrl: () => {} }) }))
 mock.module('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }))
 mock.module('@craft-agent/ui', () => ({ Spinner: () => null }))
@@ -34,4 +38,10 @@ test('sidebar and header render the rebase and merge queue icons with matching l
       expect(html).toContain(queued ? 'chat.queuedBadge' : 'chat.prWatch.merge.behind')
     }
   }
+})
+
+test('the actual sidebar row subscribes at background priority', () => {
+  priorities.length = 0
+  renderToStaticMarkup(<SessionStatusIcon item={item} />)
+  expect(priorities).toEqual([false])
 })

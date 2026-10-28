@@ -122,7 +122,7 @@ export function registerPrWatchHandlers(server: RpcServer, deps: HandlerDeps): v
     .then(() => armed.armAll())
     .catch(error => log.warn?.(`[pr-auto-fix] re-arming at start failed: ${error instanceof Error ? error.message : String(error)}`))
 
-  server.handle(RPC_CHANNELS.prWatch.SUBSCRIBE, async (ctx, sessionId: string): Promise<{ subscriptionId: string | null; state: PrWatchSessionState }> => {
+  server.handle(RPC_CHANNELS.prWatch.SUBSCRIBE, async (ctx, sessionId: string, foreground = true): Promise<{ subscriptionId: string | null; state: PrWatchSessionState }> => {
     const session = deps.sessionManager.getSessionSnapshot(sessionId)
     if (!session) return { subscriptionId: null, state: { kind: 'unavailable', reason: 'not-git' } }
     const dir = deps.sessionManager.getSessionWorkingDirectory(sessionId) ?? session.workingDirectory
@@ -130,7 +130,7 @@ export function registerPrWatchHandlers(server: RpcServer, deps: HandlerDeps): v
     if (!dir || !workspaceRootPath) return { subscriptionId: null, state: { kind: 'unavailable', reason: 'not-git' } }
     return current.subscribe({
       clientId: ctx.clientId,
-      foreground: true,
+      foreground: foreground === true,
       sessionId,
       dir,
       workspaceRootPath,
