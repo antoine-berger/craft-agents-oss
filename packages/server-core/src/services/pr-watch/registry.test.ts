@@ -764,7 +764,7 @@ describe('Conductor PR polling', () => {
       await t.registry.getDetails('s1', 'github.com/acme/app#7', 'c1')
       await t.registry.fetchReviewSignature({ coords: REPO.repo!, number: 7, workspaceRootPath: '/ws' })
       expect(t.calls.length).toBe(count)
-      expect(firstPr(t.registry.cachedSessionState('s1')!)?.summary.attentionStale).toBeUndefined()
+      expect(firstPr(t.registry.cachedSessionState('s1')!)?.summary.attentionStale).toBe(true)
       limit.remaining = 4000
       limit.resetAt = new Date(1_120_000).toISOString()
       await t.advance(60_000)
@@ -812,5 +812,51 @@ describe('Conductor PR polling', () => {
       await new Promise(resolve => setTimeout(resolve, 0))
       expect(calls).toBe(4)
     } finally { registry.dispose(); for (const finish of release) finish(900) }
+  })
+})
+
+describe('quota freshness', () => {
+  it('marks a quota-paused PR stale instead of continuing to advertise its old merge readiness', async () => {
+    const limit = { remaining: 4000, resetAt: new Date(1_360_000).toISOString() }
+    const t = setup({ rateLimit: limit })
+    try {
+      await t.registry.subscribe({ ...sub(), foreground: true }); await t.flush()
+      limit.remaining = 499
+      await t.registry.nudge('s1')
+      expect(firstPr(t.registry.cachedSessionState('s1')!)?.summary.attentionStale).toBe(true)
+      expect(t.nextDelay()).toBe(360_000)
+      const calls = t.calls.length
+      await t.registry.nudge('s1', 'c1', true)
+      expect(t.calls.length).toBe(calls)
+      expect(firstPr(t.registry.cachedSessionState('s1')!)?.summary.attentionStale).toBe(true)
+    } finally { t.registry.dispose() }
+  })
+
+  it('accepts a replenished quota window and detects an external merge on the next poll', async () => {
+    const limit = { remaining: 499, resetAt: new Date(1_360_000).toISOString() }
+    const t = setup({ rateLimit: limit })
+    try {
+      await t.registry.subscribe({ ...sub(), foreground: true }); await t.flush()
+      limit.remaining = 4000
+      limit.resetAt = new Date(1_720_000).toISOString()
+      await t.registry.nudge('s1')
+      expect(t.nextDelay()).toBe(POLL.foreground)
+      expect(firstPr(t.registry.cachedSessionState('s1')!)?.summary.attentionStale).toBeUndefined()
+      t.setPrs([{ ...PR, state: 'MERGED' }])
+      await t.advance(POLL.foreground)
+      expect(firstPr(t.registry.cachedSessionState('s1')!)?.summary.state).toBe('merged')
+    } finally { t.registry.dispose() }
+  })
+
+  it('ignores a delayed exhausted counter from a previous quota window', async () => {
+    const limit = { remaining: 4000, resetAt: new Date(1_720_000).toISOString() }
+    const t = setup({ rateLimit: limit })
+    try {
+      await t.registry.subscribe({ ...sub(), foreground: true }); await t.flush()
+      limit.remaining = 0
+      limit.resetAt = new Date(1_360_000).toISOString()
+      await t.registry.nudge('s1')
+      expect(t.nextDelay()).toBe(POLL.foreground)
+    } finally { t.registry.dispose() }
   })
 })

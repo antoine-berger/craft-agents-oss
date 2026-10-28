@@ -89,7 +89,7 @@ function entriesOf(state: PrWatchSessionState): PrEntry[] {
   return state.kind === 'ready' ? state.prs : NO_ENTRIES
 }
 
-export function usePrWatch(sessionId: string, enabled: boolean, workingDirectory: string | undefined): PrWatch {
+export function usePrWatch(sessionId: string, enabled: boolean, workingDirectory: string | undefined, foreground = true): PrWatch {
   const visible = useDocumentVisible()
   const snapshotKey = JSON.stringify([sessionId, workingDirectory])
   // Tag by checkout too: a folder change must never expose the previous branch's actions.
@@ -145,12 +145,12 @@ export function usePrWatch(sessionId: string, enabled: boolean, workingDirectory
       setRefreshing(false)
     })
     const refetchOnFocus = () => {
-      if (!cancelled && document.visibilityState !== 'hidden' && subscriptionId) {
-        void api.prWatchRefresh?.(sessionId, true).catch(() => {})
+      if (foreground && !cancelled && document.visibilityState !== 'hidden' && subscriptionId) {
+        void api.prWatchRefresh?.(sessionId, false).catch(() => {})
       }
     }
     window.addEventListener('focus', refetchOnFocus)
-    api.prWatchSubscribe(sessionId).then(
+    api.prWatchSubscribe(sessionId, foreground).then(
       (result) => {
         if (cancelled) {
           if (result.subscriptionId) void api.prWatchUnsubscribe(result.subscriptionId)
@@ -158,8 +158,9 @@ export function usePrWatch(sessionId: string, enabled: boolean, workingDirectory
         }
         subscriptionId = result.subscriptionId
         subscribed.current = !!subscriptionId
-        // A shared watcher may have answered from cache; ask GitHub again on entry.
-        if (subscriptionId) void api.prWatchRefresh?.(sessionId, true).catch(() => {})
+        // Reconcile the opened chat once, even when the automatic budget gate is paused.
+        // Sidebar rows share the background poll and never force a request on entry/focus.
+        if (foreground && subscriptionId) void api.prWatchRefresh?.(sessionId, false).catch(() => {})
         if (!pushed) {
           setBase(result.state)
         } else if (pushed.kind === 'ready' && pushed.incomplete && result.state.kind === 'ready') {
@@ -192,7 +193,7 @@ export function usePrWatch(sessionId: string, enabled: boolean, workingDirectory
       off()
       if (subscriptionId) void api.prWatchUnsubscribe(subscriptionId)
     }
-  }, [active, sessionId, workingDirectory, setBase, retry])
+  }, [active, sessionId, workingDirectory, setBase, retry, foreground])
 
   // Details belong to one PR (kept on screen across pushes so the card doesn't flash skeletons);
   // each push re-reads them while the card is open. Keyed by the active entry's id.

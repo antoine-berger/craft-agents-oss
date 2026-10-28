@@ -2,6 +2,7 @@ import { beforeEach, afterEach, expect, test } from 'bun:test'
 import * as React from 'react'
 import { create, act } from 'react-test-renderer'
 import { usePrWatch, type PrWatch } from '../usePrWatch'
+import { nextPrQuickAction } from '../../components/app-shell/chat-header/pr-watch/pr-quick-actions'
 import type { PrWatchSessionState, PrEntry } from '@craft-agent/shared/protocol'
 
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(r => { resolve = r }); return {promise, resolve} }
@@ -13,7 +14,7 @@ const entry = (number: number, origin: PrEntry['origin'] = 'branch'): PrEntry =>
 const ready = (...prs: PrEntry[]): PrWatchSessionState => ({ kind:'ready',prs })
 let result: PrWatch
 let root: ReturnType<typeof create> | undefined
-let requests: Array<{session:string; result:ReturnType<typeof deferred<any>>}>
+let requests: Array<{session:string; foreground?:boolean; result:ReturnType<typeof deferred<any>>}>
 let listeners: Set<(id:string,state:PrWatchSessionState)=>void>
 let reconnected: Set<(stale:boolean)=>void>
 let active: Set<string>
@@ -22,8 +23,8 @@ let refreshes: number
 let automaticRefreshes: Array<boolean | undefined>
 let originalWindow: PropertyDescriptor | undefined
 let originalDocument: PropertyDescriptor | undefined
-function Probe({session,dir='/repo'}:{session:string;dir?:string}) { result=usePrWatch(session,true,dir); return null }
-async function mount(session:string,dir='/repo') { await act(async()=>{root=create(React.createElement(Probe,{session,dir}))}) }
+function Probe({session,dir='/repo',foreground=true}:{session:string;dir?:string;foreground?:boolean}) { result=usePrWatch(session,true,dir,foreground); return null }
+async function mount(session:string,dir='/repo',foreground=true) { await act(async()=>{root=create(React.createElement(Probe,{session,dir,foreground}))}) }
 async function update(session:string,dir='/repo') { await act(async()=>{root!.update(React.createElement(Probe,{session,dir}))}) }
 async function resolve(index:number,state:PrWatchSessionState) {
  await act(async()=>{ const id=`sub-${index}`;active.add(id);requests[index]!.result.resolve({subscriptionId:id,state});await Promise.resolve() })
@@ -36,7 +37,7 @@ beforeEach(()=>{
  const documentMock=new EventTarget();Object.assign(documentMock,{visibilityState:'visible'});(globalThis as any).document=documentMock
  ;(globalThis as any).window=Object.assign(new EventTarget(), {electronAPI:{
   onPrWatchChanged:(cb:any)=>{listeners.add(cb);return ()=>listeners.delete(cb)},
-  prWatchSubscribe:(session:string)=>{const next=deferred<any>();requests.push({session,result:next});return next.promise},
+  prWatchSubscribe:(session:string,foreground?:boolean)=>{const next=deferred<any>();requests.push({session,foreground,result:next});return next.promise},
   prWatchUnsubscribe:async(id:string)=>{active.delete(id);unsubscribed.push(id)},
   prWatchRefresh:async(_session:string,automatic?:boolean)=>{refreshes++;automaticRefreshes.push(automatic)},
   onReconnected:(cb:any)=>{reconnected.add(cb);return()=>reconnected.delete(cb)},
@@ -139,7 +140,7 @@ test('reads GitHub again after subscribing, on return, and when the window regai
   await update('focus-refresh')
   await resolve(2, ready(entry(91)))
   expect(refreshes).toBe(4)
-  expect(automaticRefreshes).toEqual([true, true, true, true])
+  expect(automaticRefreshes).toEqual([false, false, false, false])
 })
 
 test('a stale push cannot reopen a merged PR but a different PR remains allowed', async () => {
@@ -161,4 +162,43 @@ test('keeps the known PR visible and stale when GitHub fails temporarily', async
   expect(result!.state.kind).toBe('pr')
   expect(result!.state.kind === 'pr' && result!.state.summary.number).toBe(6173)
   expect(result!.state.kind === 'pr' && result!.state.summary.attentionStale).toBe(true)
+})
+
+test('sidebar subscriptions stay in the background and never force a refresh on window focus', async () => {
+  await mount('sidebar', '/repo', false)
+  await resolve(0, ready(entry(111)))
+  expect(requests[0]!.foreground).toBe(false)
+  expect(refreshes).toBe(0)
+  await act(async () => { window.dispatchEvent(new Event('focus')) })
+  expect(refreshes).toBe(0)
+})
+
+test('opening the chat explicitly reconciles a paused snapshot instead of replaying its cached merge action', async () => {
+  await mount('foreground-paused')
+  await resolve(0, ready(entry(112)))
+  expect(requests[0]!.foreground).toBe(true)
+  expect(automaticRefreshes).toEqual([false])
+  const merged = entry(112)
+  merged.summary.state = 'merged'
+  await push('foreground-paused', ready(merged))
+  expect(result!.state.kind === 'pr' && result!.state.summary.state).toBe('merged')
+  expect(nextPrQuickAction(result!.state, result!.activeOrigin)).toBe('archive')
+})
+
+test('twenty sidebar rows and one open chat trigger only one foreground reconciliation', async () => {
+  await act(async () => {
+    root = create(React.createElement(React.Fragment, null,
+      ...Array.from({ length: 20 }, (_, i) => React.createElement(Probe, { key: i, session: `background-${i}`, foreground: false })),
+      React.createElement(Probe, { key: 'opened', session: 'opened' }),
+    ))
+  })
+  expect(requests.filter(r => r.foreground === false)).toHaveLength(20)
+  expect(requests.filter(r => r.foreground === true)).toHaveLength(1)
+  await act(async () => {
+    requests.forEach((request, i) => request.result.resolve({ subscriptionId: `sub-${i}`, state: ready(entry(i + 120)) }))
+    await Promise.resolve()
+  })
+  expect(refreshes).toBe(1)
+  await act(async () => { window.dispatchEvent(new Event('focus')) })
+  expect(refreshes).toBe(2)
 })
