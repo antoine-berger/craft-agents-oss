@@ -701,6 +701,7 @@ type BackgroundTaskStatus = 'running' | 'completed' | 'failed' | 'stopped' | 'or
 
 /** A background task tracked from launch, for cross-subprocess status queries. */
 interface RunningBackgroundTask {
+  activity?: { summary?: string; lastToolName?: string; toolUses?: number }
   taskId: string
   toolUseId?: string
   intent?: string
@@ -1220,6 +1221,22 @@ function managedToSession(m: ManagedSession, overrides?: Partial<Session>): Sess
     workspaceName: m.workspace.name,
     messages: [],
     isProcessing: m.isProcessing,
+    backgroundTasks: [...m.backgroundTaskRegistry.values()]
+      .filter(t => t.status === 'running' && !t.untracked)
+      .map(t => ({
+        id: t.taskId,
+        type: t.kind === 'shell' ? 'shell' : t.kind === 'workflow' ? 'workflow' : 'agent',
+        isSubagent: t.kind !== 'shell' && t.kind !== 'task',
+        toolUseId: t.toolUseId ?? t.taskId,
+        startTime: t.startTime,
+        elapsedSeconds: t.elapsedSeconds ?? 0,
+        lastSignalAt: t.lastProgressAt ?? t.startTime,
+        intent: t.intent,
+        status: 'running' as const,
+        workflowId: t.workflowId,
+        agentsCompleted: t.agentsCompleted,
+        ...(t.activity ? { activity: { ...t.activity } } : {}),
+      })),
     sessionFolderPath: getSessionStoragePath(m.workspace.rootPath, m.id),
     supportsBranching: resolveSupportsBranching(m),
     ...overrides,
@@ -3170,7 +3187,20 @@ export class SessionManager implements ISessionManager {
     // Lazy-load messages from disk if not yet loaded
     await this.ensureMessagesLoaded(m)
 
-    return managedToSession(m, { messages: m.messages })
+    // Deliver queued deltas before the snapshot so they cannot be appended twice.
+    this.flushDelta(m.id, m.workspace.id)
+    const messages = m.streamingText
+      ? [...m.messages, {
+          id: `streaming-${m.id}`,
+          role: 'assistant' as const,
+          content: m.streamingText,
+          timestamp: (m.messages.at(-1)?.timestamp ?? m.lastMessageAt ?? Date.now()) + 1,
+          turnId: m.streamingTurnId,
+          isStreaming: true,
+          isPending: true,
+        }]
+      : [...m.messages]
+    return managedToSession(m, { messages })
   }
 
   /**
@@ -10020,6 +10050,12 @@ export class SessionManager implements ISessionManager {
         const info = managed?.backgroundTaskRegistry.get(event.taskId)
         if (!info || info.untracked) break
         info.lastProgressAt = Date.now()
+        info.activity = {
+          ...info.activity,
+          ...(event.summary !== undefined ? { summary: event.summary } : {}),
+          ...(event.lastToolName !== undefined ? { lastToolName: event.lastToolName } : {}),
+          ...(event.toolUses !== undefined ? { toolUses: event.toolUses } : {}),
+        }
         this.sendEvent({
           ...event,
           sessionId,

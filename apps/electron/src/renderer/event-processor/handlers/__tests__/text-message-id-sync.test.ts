@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { handleTextComplete } from '../text'
+import { handleTextComplete, handleTextDelta } from '../text'
 import type { SessionState, TextCompleteEvent } from '../../types'
 
 function makeState(messages: any[]): SessionState {
@@ -14,6 +14,16 @@ function makeState(messages: any[]): SessionState {
 }
 
 describe('handleTextComplete messageId synchronization', () => {
+  it('continues a recovered partial reply and finalizes it once with the authoritative ID', () => {
+    const restored = makeState([{ id: 'streaming-session-1', role: 'assistant', content: 'Recovered ', isStreaming: true, isPending: true, turnId: 'turn-1', timestamp: 100 }])
+    const next = handleTextDelta(restored, { type: 'text_delta', sessionId: 'session-1', turnId: 'turn-1', delta: 'reply' })
+    expect(next.session.messages).toHaveLength(1)
+    expect(next.session.messages[0]?.content).toBe('Recovered reply')
+    expect(next.streaming?.content).toBe('Recovered reply')
+    const final = handleTextComplete(next, { type: 'text_complete', sessionId: 'session-1', turnId: 'turn-1', text: '', messageId: 'authoritative', timestamp: 200 })
+    expect(final.session.messages).toHaveLength(1)
+    expect(final.session.messages[0]).toMatchObject({ id: 'authoritative', content: 'Recovered reply', isStreaming: false, isPending: false })
+  })
   it('overwrites existing streaming message id with authoritative messageId', () => {
     const state = makeState([
       {

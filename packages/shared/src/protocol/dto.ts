@@ -43,6 +43,22 @@ export type SessionStatus = string
 
 export type BuiltInStatusId = 'todo' | 'in-progress' | 'needs-review' | 'done' | 'cancelled'
 
+/** Live task state returned to a newly connected client; never persisted as history. */
+export interface SessionBackgroundTask {
+  id: string
+  type: 'agent' | 'shell' | 'workflow'
+  isSubagent: boolean
+  toolUseId: string
+  startTime: number
+  elapsedSeconds: number
+  lastSignalAt: number
+  intent?: string
+  status: 'running'
+  workflowId?: string
+  agentsCompleted?: number
+  activity?: { summary?: string; lastToolName?: string; toolUses?: number }
+}
+
 /**
  * Electron-specific Session type (includes runtime state).
  * Extends core Session with messages array and processing state.
@@ -58,6 +74,8 @@ export interface Session {
   lastMessageAt: number
   messages: Message[]
   isProcessing: boolean
+  /** Omitted by older servers; an empty array authoritatively clears live tasks. */
+  backgroundTasks?: SessionBackgroundTask[]
   isFlagged?: boolean
   /** Permission mode for this session ('safe', 'ask', 'guarded', 'allow-all') */
   permissionMode?: PermissionMode

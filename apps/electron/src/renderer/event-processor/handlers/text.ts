@@ -41,6 +41,7 @@ export function handleTextDelta(
   // Output may have been batched before a retry began. Only an explicit retry
   // lifecycle event can clear the backoff indicator.
   const { session, streaming } = state
+  const streamingIndex = findStreamingMessage(session.messages, event.turnId)
 
   // Accumulate in streaming state
   const newStreaming: StreamingState = streaming
@@ -50,13 +51,11 @@ export function handleTextDelta(
         turnId: event.turnId ?? streaming.turnId
       }
     : {
-        content: event.delta,
+        content: (streamingIndex !== -1 ? session.messages[streamingIndex]!.content : '') + event.delta,
         turnId: event.turnId
       }
 
   // Find existing streaming message by turnId
-  const streamingIndex = findStreamingMessage(session.messages, event.turnId)
-
   if (streamingIndex !== -1) {
     // Message exists - update its content
     const currentMsg = session.messages[streamingIndex]
