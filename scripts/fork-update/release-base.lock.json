@@ -41,7 +41,7 @@
     "packages/server-core/src/services/session-attention/derived-status.ts": "22a5939cc38d4671226608ab8cbdc95c969b8cd1e7442b6b5b21c5403deb7347",
     "packages/shared/src/pr-watch/rules.ts": "fe3a8588742890eb0a1f612a67bc2b3eee3fce2c59895963620f6da1474c01c0",
     "packages/shared/src/i18n/locales/en.json": "3aa74d0d2c1b5191c74a4789d38ee08a0f3f261debf174cbdcff01ed9fe27a47",
-    "apps/electron/src/renderer/components/app-shell/chat-header/pr-watch/ChatHeaderPrChip.tsx": "f74130113f564e1a8c69bc3342bf724d0416d1cac4b348564ae19aafb37104b0",
+    "apps/electron/src/renderer/components/app-shell/chat-header/pr-watch/ChatHeaderPrChip.tsx": "02d745ca79922378a66d013a9672c840fba08ef9a78a61059138cd2cde8943b4",
     "apps/electron/src/renderer/components/app-shell/chat-header/pr-watch/pr-quick-actions.ts": "bd307e4f89f0e8292172e88b74c603c077e590e77e798b86edc694e18dcc22e3",
     "packages/server-core/src/pr-watch/operations.ts": "d5e22df7e2bfd075944f8e68abd808d15e83918eaa879221ed85e25313d0cb35"
   },
