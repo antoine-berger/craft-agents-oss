@@ -126,6 +126,7 @@ try {
     } catch (error) { send({ type: 'error', message: error.message }); }
   }).on('close', () => { void stop('SIGKILL'); });
   process.on('SIGTERM', () => stop('SIGKILL'));
+  process.on('SIGINT', () => stop('SIGKILL'));
 } catch (error) { if (terminal) terminal.kill('SIGKILL'); send({ type: 'error', message: error.message }); process.exitCode = 1; }
 `
 

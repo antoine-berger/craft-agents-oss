@@ -41,7 +41,7 @@
     "packages/server-core/src/services/repositories/worktree-stack.ts": "de69226b05b9e692639266a6271e5c2a0b3ddfe147daf3f3fc57be8bcb7bdbeb",
     "packages/server-core/src/services/repositories/change-summary.ts": "78c6d90e7fdc35e6ea21ca1d443f98d5580677a773239204c29efbebd68b1745",
     "packages/server-core/src/services/terminal/session-terminal.ts": "3522cbb8994b8b2b427dbc61e69f66a879235eaef8c1cd30919d68b3cb6b61ce",
-    "packages/server-core/src/services/terminal/node-pty.ts": "8772d19d82dc55431f3458759f49581fd97a6539e3327b38b751bb3f4b6a43ef",
+    "packages/server-core/src/services/terminal/node-pty.ts": "09b6c25cc0a94ee86da5cb6f7b4ae178e7d2a35becb08bbb151a2ab8140fde1b",
     "packages/server-core/src/services/worktree-files/files.ts": "44cc7b62eb8b1a9a8270173fe13a7caad66fa3d4fd253c36afed15ca9cd0eb37",
     "packages/server-core/src/services/search.ts": "361da7c0a3fc56d0d588e4f3360b7a9840921e4eb07f4c9fd4131747cf2ed353",
     "packages/server-core/src/services/ship-usage.ts": "b3bc1fba26da1bc8ad0d4a0ec669e138439f4b9b00e469ca075f0323cb281716",

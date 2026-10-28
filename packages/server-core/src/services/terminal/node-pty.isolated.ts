@@ -101,3 +101,37 @@ test('losing the parent process closes bridge stdin and stops its background job
     await rm(directory, { recursive: true, force: true })
   }
 }, 15_000)
+
+test('a shared process-group interrupt waits for terminal jobs before acknowledging shutdown', async () => {
+  if (process.platform === 'win32') return
+  const directory = await mkdtemp(join(tmpdir(), 'craft-terminal-interrupt-'))
+  const adapter = new URL('./node-pty.ts', import.meta.url).pathname
+  const service = new URL('./session-terminal.ts', import.meta.url).pathname
+  const job = `bash -c 'trap "" HUP; printf "%s" $$ > "${directory}/job.pid"; exec sleep 60' >/dev/null 2>&1 &\r`
+  const script = `
+    import { spawnSessionPty } from ${JSON.stringify(adapter)};
+    import { SessionTerminalService } from ${JSON.stringify(service)};
+    const terminals = new SessionTerminalService({resolveSession:async()=>({workspaceId:'qa',directory:${JSON.stringify(directory)}}),spawn:spawnSessionPty,push(){}});
+    process.on('SIGINT', async()=>{try{await terminals.dispose();await Bun.write(${JSON.stringify(join(directory, 'shutdown'))},'verified');process.exit(0)}catch{process.exit(1)}});
+    const opened = await terminals.open('qa','qa',{cols:80,rows:24});
+    await terminals.write('qa',opened.id,'qa',${JSON.stringify(job)});
+    await new Promise(()=>{});
+  `
+  const parent = spawnChild(process.execPath, ['-e', script], {
+    detached: true, stdio: 'ignore', env: { ...process.env, SHELL: '/bin/bash', HOME: directory },
+  })
+  const closed = new Promise<number | null>(resolve => parent.on('close', code => resolve(code)))
+  let pid: number | undefined
+  try {
+    pid = await waitForPid(join(directory, 'job.pid'))
+    expect(isRunning(pid)).toBe(true)
+    process.kill(-parent.pid!, 'SIGINT')
+    expect(await Promise.race([closed, new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Interrupted shutdown was not acknowledged.')), 6000))])).toBe(0)
+    expect(await readFile(join(directory, 'shutdown'), 'utf8')).toBe('verified')
+    expect(isRunning(pid)).toBe(false)
+  } finally {
+    if (parent.exitCode === null) { try { process.kill(-parent.pid!, 'SIGKILL') } catch {} }
+    if (pid && isRunning(pid)) { try { process.kill(pid, 'SIGKILL') } catch {} }
+    await rm(directory, { recursive: true, force: true })
+  }
+}, 15_000)
