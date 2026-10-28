@@ -102,4 +102,5 @@ jobs:
           find artifacts -name Craft-Agents-arm64.zip -exec cp '{}' publish/ \;
           find artifacts -name craft-server-linux-x64.tar.gz -exec cp '{}' publish/ \;
           bun scripts/fork-update/manifest.ts "$FORK_VERSION" publish
-          gh release create "fork-v$FORK_VERSION" publish/* --target "$SOURCE_SHA" --title "Craft fork $FORK_VERSION" --latest --notes 'Version du fork personnel. Installation manuelle depuis Update. Le serveur nécessite une autorisation de redémarrage distincte.'
+          gh release create "fork-v$FORK_VERSION" publish/* --target "$SOURCE_SHA" --title "Craft fork $FORK_VERSION" --draft --notes 'Version du fork personnel. Installation manuelle depuis Update. Le serveur nécessite une autorisation de redémarrage distincte.'
+          gh release edit "fork-v$FORK_VERSION" --draft=false --latest
