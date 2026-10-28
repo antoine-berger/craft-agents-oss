@@ -35,7 +35,7 @@
     "packages/shared/src/agent/options.ts": "ff715a5f59d7a8178f5c6140753cd2b9e5eca52332c971aa894820bb3d550166",
     "apps/electron/resources/portable-config/skills/ship/SKILL.md": "559f7813a781fe04ff4dfc4e186a2175e99d2226372fbd192bb9f1b36f7b1577",
     "apps/electron/resources/portable-config/skills/ship-plan/SKILL.md": "463e477accab92ceb9c37caf32020a1d564036c87586e29f07489c04d29a7d37",
-    "scripts/fork-update/prepare-linux-tools.py": "971aa8ed85b6318c6bdd621410c398fd41aaeea9769345b9df1b2903f49990df"
+    "scripts/fork-update/prepare-linux-tools.py": "8e72fcaff543ac46def110d60e18f734c8dc0b7b5d719e2257a2983ab1be2bc0"
   },
   "compiledClientFiles": {
     "apps/electron/src/renderer/hooks/usePrWatch.ts": "0e2af447e5cee777cc0ddd62810a02faa91369e2bb2fbf85ac4caf454d85bbf8",
