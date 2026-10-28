@@ -456,6 +456,8 @@ function createSourceProxyServers(pool: McpClientPool): Record<string, ReturnTyp
 // buildWindowsSkillsDirError is now in backend/claude/event-adapter.ts (exported)
 const buildWindowsSkillsDirError = buildWindowsSkillsDirErrorFn;
 
+class BackgroundTurnPendingError extends Error {}
+
 export class ClaudeAgent extends BaseAgent {
   protected backendName = 'Claude';
   // The constructor's whole config is the inherited this.config (see ClaudeAgentConfig)
@@ -525,6 +527,68 @@ export class ClaudeAgent extends BaseAgent {
   private activeTurnState: { aborted: boolean } | null = null;
   /** Sink for background task events that arrive between turns (wired by the session layer). */
   private onBackgroundEvent: ((event: AgentEvent) => void) | null = null;
+  private onBackgroundTurnReady: (() => void) | null = null;
+  private pendingBackgroundTurns: Array<{ channel: PushableInputStream<SDKMessage>; state: { aborted: boolean }; userMessage: string }> = [];
+  private consumingBackgroundTurn: { aborted: boolean } | null = null;
+  private persistentUserMessage = '';
+
+  setBackgroundTurnReadyHandler(handler: (() => void) | null): void {
+    this.onBackgroundTurnReady = handler;
+  }
+
+  hasPendingBackgroundTurn(): boolean {
+    return (this.pendingBackgroundTurns?.length ?? 0) > 0;
+  }
+
+  /** No chat()/skill preprocessing or SDK input: this output already exists. */
+  async *resumeBackgroundTurn(): AsyncGenerator<AgentEvent> {
+    yield* this.pendingSteers.runTurn(this.drainBackgroundTurn());
+  }
+
+  private async *drainBackgroundTurn(continuing = false, activationMessage?: string): AsyncGenerator<AgentEvent, boolean> {
+    const turn = this.pendingBackgroundTurns.shift();
+    if (!turn) return false;
+    this.consumingBackgroundTurn = turn.state;
+    if (this.persistentAbortController) this.currentQueryAbortController = this.persistentAbortController;
+    const previousMessage = this.getCurrentTurnUserMessage();
+    const userMessage = activationMessage ?? turn.userMessage;
+    this.setCurrentTurnUserMessage(userMessage);
+    this.lastAbortReason = null;
+    const events = this.drainSdkTurn(turn.channel.stream, turn.state, userMessage,
+        getSessionPath(this.workspaceRootPath, this.config.session?.id || 'background'));
+    try {
+      let complete = false;
+      while (true) {
+        const step = await events.next();
+        if (step.done) {
+          if (step.value.handedOff) return true;
+          break;
+        }
+        const event = step.value;
+        if (turn.state.aborted) throw new AbortError('Request was aborted.');
+        if (event.type === 'complete') complete = true;
+        yield event.type === 'complete' && continuing ? { ...event, continuing: true } : event;
+      }
+      const flushed = this.eventAdapter.flushPending();
+      if (flushed) yield flushed;
+      if (!complete) throw new Error('Claude continuation ended before its result');
+      return false;
+    } finally {
+      await events.return({ handedOff: false, receivedComplete: false, receivedAssistantContent: false, suppressedSessionExpiredError: false, suppressedBranchCutoffError: false });
+      if (!continuing) this.lastAbortReason = null;
+      if (this.consumingBackgroundTurn === turn.state) this.consumingBackgroundTurn = null;
+      this.setCurrentTurnUserMessage(previousMessage);
+    }
+  }
+
+  private discardBackgroundTurns(): void {
+    for (const turn of this.pendingBackgroundTurns ?? []) {
+      turn.state.aborted = true;
+      turn.channel.end();
+    }
+    this.pendingBackgroundTurns = [];
+    if (this.consumingBackgroundTurn) this.consumingBackgroundTurn.aborted = true;
+  }
 
   /**
    * A turn stopped with `stopTurn` that the CLI has not ended yet. Its leftover messages, up to and
@@ -540,6 +604,11 @@ export class ClaudeAgent extends BaseAgent {
    * so the subprocess dies even if the graceful close is ignored.
    */
   private teardownPersistentQuery(reason: string = 'teardown'): void {
+    if (reason === 'consumer-exit') {
+      for (const turn of this.pendingBackgroundTurns ?? []) turn.channel.end();
+    } else {
+      this.discardBackgroundTurns();
+    }
     if (!this.persistentInput && !this.persistentIterator && !this.persistentAbortController) {
       return; // already torn down
     }
@@ -576,7 +645,8 @@ export class ClaudeAgent extends BaseAgent {
     if (!this.persistentInput || !this.currentQuery) {
       // First turn: create the persistent query + consumer.
       this.persistentInput = createPushableInputStream<SDKUserMessage>();
-      this.persistentAbortController = this.currentQueryAbortController;
+      this.persistentAbortController = options.abortController ?? this.currentQueryAbortController;
+      this.currentQueryAbortController = this.persistentAbortController;
       this.currentQuery = query({ prompt: this.persistentInput.stream, options });
       this.persistentThinkingKey = claudeThinkingKey(thinking);
       this.persistentIterator = this.currentQuery[Symbol.asyncIterator]();
@@ -592,11 +662,26 @@ export class ClaudeAgent extends BaseAgent {
       // settings call before the query itself finishes): do not start the turn on a dying query.
       if (!this.persistentInput || !this.currentQuery) throw new AbortError('Persistent query closed while preparing the turn');
     }
+    if (this.hasPendingBackgroundTurn()) throw new BackgroundTurnPendingError();
     const channel = createPushableInputStream<SDKMessage>();
     this.activeTurnChannel = channel;
     this.activeTurnState = { aborted: false };
+    this.persistentUserMessage = this.getCurrentTurnUserMessage() ?? this.persistentUserMessage;
     this.persistentInput.push(prompt);
     return channel.stream;
+  }
+
+  /** Drain output already produced before atomically assigning a channel to new input. */
+  private async *beginPersistentTurnAfterBackground(
+    prompt: SDKUserMessage, options: Options, thinking: Partial<Options>, userMessage: string,
+  ): AsyncGenerator<AgentEvent, AsyncIterable<SDKMessage> | null> {
+    while (true) {
+      while (this.hasPendingBackgroundTurn()) {
+        if (yield* this.drainBackgroundTurn(true, this.getCurrentTurnUserMessage() ?? userMessage)) return null;
+      }
+      try { return await this.beginPersistentTurn(prompt, options, thinking); }
+      catch (error) { if (!(error instanceof BackgroundTurnPendingError)) throw error; }
+    }
   }
 
   /**
@@ -679,7 +764,25 @@ export class ClaudeAgent extends BaseAgent {
               channel.end();
             }
           } else {
-            this.routeBackgroundMessage(value);
+            const type = value.type;
+            if (this.currentQuery && (type === 'assistant' || type === 'stream_event' || type === 'user' || type === 'result'
+              || (type === 'system' && (value.subtype === 'compact_boundary' || (value.subtype === 'status' && typeof value.status === 'string' && value.status.length > 0))))) {
+              const nativeChannel = createPushableInputStream<SDKMessage>();
+              const state = { aborted: false };
+              this.activeTurnChannel = nativeChannel;
+              this.activeTurnState = state;
+              this.pendingBackgroundTurns ??= [];
+              this.pendingBackgroundTurns.push({ channel: nativeChannel, state, userMessage: this.persistentUserMessage });
+              nativeChannel.push(value);
+              if (type === 'result') {
+                this.activeTurnChannel = null;
+                this.activeTurnState = null;
+                nativeChannel.end();
+              }
+              this.onBackgroundTurnReady?.();
+            } else {
+              this.routeBackgroundMessage(value);
+            }
           }
         }
       } catch (err) {
@@ -1033,6 +1136,251 @@ export class ClaudeAgent extends BaseAgent {
     // Only return token if explicitly provided via config
     // Sources handle their own authentication
     return this.config.mcpToken ?? null;
+  }
+
+  /** Adapt foreground and autonomous SDK output through exactly the same guards. */
+  private async *drainSdkTurn(
+    turnMessageSource: AsyncIterable<SDKMessage>,
+    persistentTurn: { aborted: boolean } | null,
+    userMessage: string,
+    metadataSessionDir: string,
+    wasResuming = false,
+    _isRetry = true,
+    attemptedBranchCutoff = false,
+    manualCompaction = false,
+    outcome = { receivedComplete: false, receivedAssistantContent: false, suppressedSessionExpiredError: false, suppressedBranchCutoffError: false },
+  ): AsyncGenerator<AgentEvent, { handedOff: boolean; receivedComplete: boolean; receivedAssistantContent: boolean; suppressedSessionExpiredError: boolean; suppressedBranchCutoffError: boolean }> {
+    // Session directory prevents race condition when concurrent sessions clobber toolMetadataStore.
+    this.eventAdapter.updateSessionDir(metadataSessionDir);
+    this.eventAdapter.startTurn();
+    if (manualCompaction) {
+      this.eventAdapter.expectManualCompaction();
+    }
+
+    // Process SDK messages and convert to AgentEvents
+    // Track whether we received any assistant content (for empty response detection)
+    // When SDK returns empty response (e.g., failed resume), we need to detect and recover
+    // Source-activation auto-restart drain controller (#790). Captures the
+    // pending restart on the first triggering tool_result and drains sibling
+    // tool_results from the same parallel-tool batch before firing
+    // `source_activated` + `forceAbort` — otherwise the session journal
+    // ends up with orphan `tool_use` IDs that block subsequent sends.
+    const sourceActivationDrain = new SourceActivationDrainController('batch-boundary');
+    // Flag-OFF: `turnMessageSource === this.currentQuery` (unchanged). Flag-ON:
+    // it's the per-turn channel, so breaking/ending here never closes the query.
+    for await (const message of turnMessageSource) {
+      // Track if we got any text content from assistant
+      if ('type' in message && message.type === 'assistant' && 'message' in message) {
+        const assistantMsg = message.message as { content?: unknown[] };
+        if (assistantMsg.content && Array.isArray(assistantMsg.content) && assistantMsg.content.length > 0) {
+          outcome.receivedAssistantContent = true;
+        }
+      }
+      // Also track text_delta events as assistant content (nested in stream_event)
+      if ('type' in message && message.type === 'stream_event' && 'event' in message) {
+        const event = (message as { event: { type: string } }).event;
+        if (event.type === 'content_block_delta' || event.type === 'message_start') {
+          outcome.receivedAssistantContent = true;
+        }
+      }
+
+      // Capture session ID for conversation continuity (only when it changes)
+      if ('session_id' in message && message.session_id && message.session_id !== this.sessionId) {
+        this.sessionId = message.session_id;
+        // Notify caller of new SDK session ID (for immediate persistence)
+        this.config.onSdkSessionIdUpdate?.(message.session_id);
+        // Retire in-memory branch fork metadata (persistence handled by callback)
+        if (this.branchFromSdkSessionId) {
+          debug(`[ClaudeAgent] Branch fork established, retiring in-memory fork metadata`);
+          this.branchFromSdkSessionId = null;
+          this.branchFromSdkCwd = null;
+          this.branchFromSdkTurnId = null;
+        }
+      }
+
+      const events = await this.eventAdapter.adapt(message);
+      for (const event of events) {
+        this.releaseToolHandoffOn(event);
+
+        // After source_test (or any session-scoped tool) successfully activates a
+        // new source, activateSourceInSessionFn stashes a restart descriptor on the
+        // agent. The drain controller captures the descriptor on the first
+        // triggering tool_result and short-circuits per-event handling for any
+        // sibling tool_results / synthetic background events in the same
+        // adapted batch. The fire (yield source_activated + forceAbort) happens
+        // at end-of-batch below, NOT here — see #790 for the symptoms when
+        // siblings were dropped.
+        if (sourceActivationDrain.observe(event, () => this.consumePendingSourceActivationRestart())) {
+          yield event;
+          continue;
+        }
+
+        // Check for tool-not-found errors on inactive sources and attempt auto-activation
+        const inactiveSourceError = this.detectInactiveSourceToolError(event, this.eventAdapter.getToolIndex());
+
+        if (inactiveSourceError && this.onSourceActivationRequest) {
+          const { sourceSlug, toolName } = inactiveSourceError;
+
+          this.onDebug?.(`Detected tool call to inactive source "${sourceSlug}", attempting activation...`);
+
+          try {
+            const activated = await this.onSourceActivationRequest(sourceSlug);
+
+            if (activated) {
+              this.onDebug?.(`Source "${sourceSlug}" activated successfully, interrupting turn for auto-retry`);
+
+              // Yield source_activated event immediately for auto-retry
+              yield {
+                type: 'source_activated' as const,
+                sourceSlug,
+                // What the user typed, without this turn's host guidance (turnContext).
+                originalMessage: this.getCurrentTurnUserMessage() ?? userMessage,
+              };
+
+              // Interrupt the turn - no point letting the model continue without the tools
+              // The abort will cause the loop to exit and emit 'complete'
+              this.forceAbort(AbortReason.SourceActivated);
+              return { handedOff: true, ...outcome }; // Exit the generator
+            } else {
+              this.onDebug?.(`Source "${sourceSlug}" activation failed (may need auth)`);
+              // Let the original error through, but with more context
+              const toolResultEvent = event as Extract<AgentEvent, { type: 'tool_result' }>;
+              yield {
+                type: 'tool_result' as const,
+                toolUseId: toolResultEvent.toolUseId,
+                toolName: toolResultEvent.toolName,
+                result: `Source "${sourceSlug}" could not be activated. It may require authentication. Please check the source status in the sources panel.`,
+                isError: true,
+                input: toolResultEvent.input,
+                turnId: toolResultEvent.turnId,
+                parentToolUseId: toolResultEvent.parentToolUseId,
+              };
+              continue;
+            }
+          } catch (error) {
+            this.onDebug?.(`Source "${sourceSlug}" activation error: ${error}`);
+            // Let original error through
+          }
+        }
+
+        // Reset prerequisite state on compaction (LLM loses guide content)
+        if (event.type === 'info' && event.message === 'Compacted Conversation') {
+          this.resetPrerequisiteState();
+        }
+
+        // Intercept large/binary/media-rich tool results for the session's copy: save assets
+        // to disk and preview oversized text. The model has already seen this result (MCP
+        // results were guarded in PostToolUse, built-in tools cap their own output), so no
+        // summary is generated here: it would cost a model call for a copy nobody reads.
+        if (event.type === 'tool_result' && !event.isError && event.result) {
+          const guarded = await guardLargeResult(event.result, {
+            sessionPath: metadataSessionDir,
+            toolName: event.toolName || 'unknown',
+            input: event.input,
+            contextWindow: this.usageTracker.getContextWindow(),
+          });
+          if (guarded) {
+            // The summary drops the output text; keep its password-entry lines, which the host
+            // needs to redact the stored input.
+            const result = isCanonicalBrowserToolName(event.toolName ?? '') ? keepPasswordEntryLines(event.result, guarded) : guarded;
+            yield { ...event, result };
+            continue;
+          }
+        }
+
+        // Suggest CLI tools when Read fails on convertible file types
+        if (event.type === 'tool_result' && event.toolName === 'Read' && event.isError && event.result) {
+          const filePath = typeof event.input?.file_path === 'string' ? event.input.file_path : undefined;
+          if (filePath) {
+            const ext = filePath.split('.').pop()?.toLowerCase();
+            const hint = ext ? CONVERTIBLE_FILE_HINTS[ext] : undefined;
+            if (hint) {
+              // Split "or" alternatives into separate backtick-wrapped commands
+              const commands = hint.split(' or ').map(cmd => `\`${cmd} "${filePath}"\``).join(' or ');
+              yield { ...event, result: `${event.result}\n\nTip: Use ${commands} to convert this file to readable text.` };
+              continue;
+            }
+          }
+        }
+
+        // Suppress session-expired errors during resume/fork — don't yield
+        // them to the caller. The post-loop recovery (wasResuming check)
+        // will handle the retry. Without this, the error event reaches the
+        // SessionManager which shows it as a toast before recovery runs.
+        if (
+          wasResuming && !_isRetry &&
+          event.type === 'error' &&
+          'message' in event && typeof event.message === 'string' &&
+          event.message.includes('No conversation found with session ID')
+        ) {
+          debug('[SESSION_DEBUG] Suppressing session-expired error event for recovery:', event.message);
+          outcome.suppressedSessionExpiredError = true;
+          continue;
+        }
+
+        // Suppress resumeSessionAt branch-cutoff failures when the requested
+        // parent message UUID no longer exists server-side (e.g., compaction/TTL).
+        // We'll retry once without resumeSessionAt.
+        if (
+          attemptedBranchCutoff && wasResuming && !_isRetry &&
+          event.type === 'error' &&
+          'message' in event && typeof event.message === 'string' &&
+          event.message.includes('No message found with message.uuid')
+        ) {
+          debug('[SESSION_DEBUG] Suppressing missing-UUID branch cutoff error for fallback:', event.message);
+          outcome.suppressedBranchCutoffError = true;
+          continue;
+        }
+
+        // Also suppress the complete event that follows a suppressed error —
+        // recovery will produce its own completion flow.
+        if ((outcome.suppressedSessionExpiredError || outcome.suppressedBranchCutoffError) && event.type === 'complete') {
+          debug('[SESSION_DEBUG] Suppressing complete event after suppressed resume/fork error');
+          outcome.receivedComplete = true; // prevent duplicate complete emission
+          continue;
+        }
+
+        if (event.type === 'complete') {
+          outcome.receivedComplete = true;
+        }
+        yield event;
+      }
+
+      // End-of-batch fire (#790): if the drain controller captured a
+      // pending source-activation restart while iterating this adapted
+      // SDK message, all sibling tool_results / interleaved synthetic
+      // events have now been yielded. Emit `source_activated` and abort.
+      const sourceActivationFire = sourceActivationDrain.shouldFireAtBoundary();
+      if (sourceActivationFire) {
+        this.onDebug?.(`source_test activated "${sourceActivationFire.sourceSlug}", drained sibling tool_results, restarting turn`);
+        yield sourceActivationFire;
+        this.forceAbort(AbortReason.SourceActivated);
+        return { handedOff: true, ...outcome };
+      }
+    }
+
+    // Keep-alive: a Stop (forceAbort) tears the persistent query down and only ends this turn's
+    // channel, so the loop finishes without the AbortError a per-turn query throws. Take the
+    // interruption path below instead of the empty-response recovery, which would clear the
+    // SDK session and re-run the message the user just stopped.
+    if (persistentTurn?.aborted) throw new AbortError('Request was aborted.');
+
+    // Stream-end fallback (#790): the SDK stream ended without any batch
+    // boundary firing — defensive against the SDK closing in the same
+    // adapted batch the capture happened in. `return` is critical here —
+    // without it we fall through to flushPending + the defensive
+    // `complete` emission below, which would corrupt the auto-restart
+    // contract (renderer expects `source_activated` to be the final event).
+    const sourceActivationFireAtEnd = sourceActivationDrain.shouldFireAtBoundary();
+    if (sourceActivationFireAtEnd) {
+      this.onDebug?.(`source_test activated "${sourceActivationFireAtEnd.sourceSlug}", stream ended mid-batch, restarting turn`);
+      yield sourceActivationFireAtEnd;
+      this.forceAbort(AbortReason.SourceActivated);
+      return { handedOff: true, ...outcome };
+    }
+
+
+    return { handedOff: false, ...outcome };
   }
 
   protected async *chatImpl(
@@ -1750,11 +2098,15 @@ This is a branched conversation. All prior messages in this conversation are par
           message: { role: 'user', content: trimmedMessage },
           parent_tool_use_id: null,
         };
-        turnMessageSource = await this.beginPersistentTurn(sdkMessage, optionsWithAbort, thinkingOptions);
+        const source = yield* this.beginPersistentTurnAfterBackground(sdkMessage, optionsWithAbort, thinkingOptions, userMessage);
+        if (!source) return; // Source activation replays this owner request through the host.
+        turnMessageSource = source;
         persistentTurn = this.activeTurnState;
       } else if (this.keepBackgroundTasksAlive && !isSlashCommand) {
         const sdkMessage = this.buildSDKUserMessage(effectiveUserMessage, attachments);
-        turnMessageSource = await this.beginPersistentTurn(sdkMessage, optionsWithAbort, thinkingOptions);
+        const source = yield* this.beginPersistentTurnAfterBackground(sdkMessage, optionsWithAbort, thinkingOptions, userMessage);
+        if (!source) return; // Source activation replays this owner request through the host.
+        turnMessageSource = source;
         persistentTurn = this.activeTurnState;
       } else if (isSlashCommand) {
         // Send slash commands directly to SDK without context wrapping.
@@ -1776,246 +2128,17 @@ This is a branched conversation. All prior messages in this conversation are par
         turnMessageSource = this.currentQuery;
       }
 
-      // Initialize event adapter for this turn
-      // Session directory prevents race condition when concurrent sessions clobber toolMetadataStore.
       const metadataSessionDir = getSessionPath(this.workspaceRootPath, sessionId);
-      this.eventAdapter.updateSessionDir(metadataSessionDir);
-      this.eventAdapter.startTurn();
-      if (isSlashCommand && commandName === 'compact') {
-        this.eventAdapter.expectManualCompaction();
-      }
-
-      // Process SDK messages and convert to AgentEvents
-      let receivedComplete = false;
-      // Track whether we received any assistant content (for empty response detection)
-      // When SDK returns empty response (e.g., failed resume), we need to detect and recover
-      let receivedAssistantContent = false;
-      let suppressedSessionExpiredError = false;
-      let suppressedBranchCutoffError = false;
-      // Source-activation auto-restart drain controller (#790). Captures the
-      // pending restart on the first triggering tool_result and drains sibling
-      // tool_results from the same parallel-tool batch before firing
-      // `source_activated` + `forceAbort` — otherwise the session journal
-      // ends up with orphan `tool_use` IDs that block subsequent sends.
-      const sourceActivationDrain = new SourceActivationDrainController('batch-boundary');
+      const drainState = { receivedComplete: false, receivedAssistantContent: false, suppressedSessionExpiredError: false, suppressedBranchCutoffError: false };
       try {
-        // Flag-OFF: `turnMessageSource === this.currentQuery` (unchanged). Flag-ON:
-        // it's the per-turn channel, so breaking/ending here never closes the query.
-        for await (const message of turnMessageSource) {
-          // Track if we got any text content from assistant
-          if ('type' in message && message.type === 'assistant' && 'message' in message) {
-            const assistantMsg = message.message as { content?: unknown[] };
-            if (assistantMsg.content && Array.isArray(assistantMsg.content) && assistantMsg.content.length > 0) {
-              receivedAssistantContent = true;
-            }
-          }
-          // Also track text_delta events as assistant content (nested in stream_event)
-          if ('type' in message && message.type === 'stream_event' && 'event' in message) {
-            const event = (message as { event: { type: string } }).event;
-            if (event.type === 'content_block_delta' || event.type === 'message_start') {
-              receivedAssistantContent = true;
-            }
-          }
-
-          // Capture session ID for conversation continuity (only when it changes)
-          if ('session_id' in message && message.session_id && message.session_id !== this.sessionId) {
-            this.sessionId = message.session_id;
-            // Notify caller of new SDK session ID (for immediate persistence)
-            this.config.onSdkSessionIdUpdate?.(message.session_id);
-            // Retire in-memory branch fork metadata (persistence handled by callback)
-            if (this.branchFromSdkSessionId) {
-              debug(`[ClaudeAgent] Branch fork established, retiring in-memory fork metadata`);
-              this.branchFromSdkSessionId = null;
-              this.branchFromSdkCwd = null;
-              this.branchFromSdkTurnId = null;
-            }
-          }
-
-          const events = await this.eventAdapter.adapt(message);
-          for (const event of events) {
-            this.releaseToolHandoffOn(event);
-
-            // After source_test (or any session-scoped tool) successfully activates a
-            // new source, activateSourceInSessionFn stashes a restart descriptor on the
-            // agent. The drain controller captures the descriptor on the first
-            // triggering tool_result and short-circuits per-event handling for any
-            // sibling tool_results / synthetic background events in the same
-            // adapted batch. The fire (yield source_activated + forceAbort) happens
-            // at end-of-batch below, NOT here — see #790 for the symptoms when
-            // siblings were dropped.
-            if (sourceActivationDrain.observe(event, () => this.consumePendingSourceActivationRestart())) {
-              yield event;
-              continue;
-            }
-
-            // Check for tool-not-found errors on inactive sources and attempt auto-activation
-            const inactiveSourceError = this.detectInactiveSourceToolError(event, this.eventAdapter.getToolIndex());
-
-            if (inactiveSourceError && this.onSourceActivationRequest) {
-              const { sourceSlug, toolName } = inactiveSourceError;
-
-              this.onDebug?.(`Detected tool call to inactive source "${sourceSlug}", attempting activation...`);
-
-              try {
-                const activated = await this.onSourceActivationRequest(sourceSlug);
-
-                if (activated) {
-                  this.onDebug?.(`Source "${sourceSlug}" activated successfully, interrupting turn for auto-retry`);
-
-                  // Yield source_activated event immediately for auto-retry
-                  yield {
-                    type: 'source_activated' as const,
-                    sourceSlug,
-                    // What the user typed, without this turn's host guidance (turnContext).
-                    originalMessage: this.getCurrentTurnUserMessage() ?? userMessage,
-                  };
-
-                  // Interrupt the turn - no point letting the model continue without the tools
-                  // The abort will cause the loop to exit and emit 'complete'
-                  this.forceAbort(AbortReason.SourceActivated);
-                  return; // Exit the generator
-                } else {
-                  this.onDebug?.(`Source "${sourceSlug}" activation failed (may need auth)`);
-                  // Let the original error through, but with more context
-                  const toolResultEvent = event as Extract<AgentEvent, { type: 'tool_result' }>;
-                  yield {
-                    type: 'tool_result' as const,
-                    toolUseId: toolResultEvent.toolUseId,
-                    toolName: toolResultEvent.toolName,
-                    result: `Source "${sourceSlug}" could not be activated. It may require authentication. Please check the source status in the sources panel.`,
-                    isError: true,
-                    input: toolResultEvent.input,
-                    turnId: toolResultEvent.turnId,
-                    parentToolUseId: toolResultEvent.parentToolUseId,
-                  };
-                  continue;
-                }
-              } catch (error) {
-                this.onDebug?.(`Source "${sourceSlug}" activation error: ${error}`);
-                // Let original error through
-              }
-            }
-
-            // Reset prerequisite state on compaction (LLM loses guide content)
-            if (event.type === 'info' && event.message === 'Compacted Conversation') {
-              this.resetPrerequisiteState();
-            }
-
-            // Intercept large/binary/media-rich tool results for the session's copy: save assets
-            // to disk and preview oversized text. The model has already seen this result (MCP
-            // results were guarded in PostToolUse, built-in tools cap their own output), so no
-            // summary is generated here: it would cost a model call for a copy nobody reads.
-            if (event.type === 'tool_result' && !event.isError && event.result) {
-              const guarded = await guardLargeResult(event.result, {
-                sessionPath: metadataSessionDir,
-                toolName: event.toolName || 'unknown',
-                input: event.input,
-                contextWindow: this.usageTracker.getContextWindow(),
-              });
-              if (guarded) {
-                // The summary drops the output text; keep its password-entry lines, which the host
-                // needs to redact the stored input.
-                const result = isCanonicalBrowserToolName(event.toolName ?? '') ? keepPasswordEntryLines(event.result, guarded) : guarded;
-                yield { ...event, result };
-                continue;
-              }
-            }
-
-            // Suggest CLI tools when Read fails on convertible file types
-            if (event.type === 'tool_result' && event.toolName === 'Read' && event.isError && event.result) {
-              const filePath = typeof event.input?.file_path === 'string' ? event.input.file_path : undefined;
-              if (filePath) {
-                const ext = filePath.split('.').pop()?.toLowerCase();
-                const hint = ext ? CONVERTIBLE_FILE_HINTS[ext] : undefined;
-                if (hint) {
-                  // Split "or" alternatives into separate backtick-wrapped commands
-                  const commands = hint.split(' or ').map(cmd => `\`${cmd} "${filePath}"\``).join(' or ');
-                  yield { ...event, result: `${event.result}\n\nTip: Use ${commands} to convert this file to readable text.` };
-                  continue;
-                }
-              }
-            }
-
-            // Suppress session-expired errors during resume/fork — don't yield
-            // them to the caller. The post-loop recovery (wasResuming check)
-            // will handle the retry. Without this, the error event reaches the
-            // SessionManager which shows it as a toast before recovery runs.
-            if (
-              wasResuming && !_isRetry &&
-              event.type === 'error' &&
-              'message' in event && typeof event.message === 'string' &&
-              event.message.includes('No conversation found with session ID')
-            ) {
-              debug('[SESSION_DEBUG] Suppressing session-expired error event for recovery:', event.message);
-              suppressedSessionExpiredError = true;
-              continue;
-            }
-
-            // Suppress resumeSessionAt branch-cutoff failures when the requested
-            // parent message UUID no longer exists server-side (e.g., compaction/TTL).
-            // We'll retry once without resumeSessionAt.
-            if (
-              attemptedBranchCutoff && wasResuming && !_isRetry &&
-              event.type === 'error' &&
-              'message' in event && typeof event.message === 'string' &&
-              event.message.includes('No message found with message.uuid')
-            ) {
-              debug('[SESSION_DEBUG] Suppressing missing-UUID branch cutoff error for fallback:', event.message);
-              suppressedBranchCutoffError = true;
-              continue;
-            }
-
-            // Also suppress the complete event that follows a suppressed error —
-            // recovery will produce its own completion flow.
-            if ((suppressedSessionExpiredError || suppressedBranchCutoffError) && event.type === 'complete') {
-              debug('[SESSION_DEBUG] Suppressing complete event after suppressed resume/fork error');
-              receivedComplete = true; // prevent duplicate complete emission
-              continue;
-            }
-
-            if (event.type === 'complete') {
-              receivedComplete = true;
-            }
-            yield event;
-          }
-
-          // End-of-batch fire (#790): if the drain controller captured a
-          // pending source-activation restart while iterating this adapted
-          // SDK message, all sibling tool_results / interleaved synthetic
-          // events have now been yielded. Emit `source_activated` and abort.
-          const sourceActivationFire = sourceActivationDrain.shouldFireAtBoundary();
-          if (sourceActivationFire) {
-            this.onDebug?.(`source_test activated "${sourceActivationFire.sourceSlug}", drained sibling tool_results, restarting turn`);
-            yield sourceActivationFire;
-            this.forceAbort(AbortReason.SourceActivated);
-            return;
-          }
-        }
-
-        // Keep-alive: a Stop (forceAbort) tears the persistent query down and only ends this turn's
-        // channel, so the loop finishes without the AbortError a per-turn query throws. Take the
-        // interruption path below instead of the empty-response recovery, which would clear the
-        // SDK session and re-run the message the user just stopped.
-        if (persistentTurn?.aborted) throw new AbortError('Request was aborted.');
-
-        // Stream-end fallback (#790): the SDK stream ended without any batch
-        // boundary firing — defensive against the SDK closing in the same
-        // adapted batch the capture happened in. `return` is critical here —
-        // without it we fall through to flushPending + the defensive
-        // `complete` emission below, which would corrupt the auto-restart
-        // contract (renderer expects `source_activated` to be the final event).
-        const sourceActivationFireAtEnd = sourceActivationDrain.shouldFireAtBoundary();
-        if (sourceActivationFireAtEnd) {
-          this.onDebug?.(`source_test activated "${sourceActivationFireAtEnd.sourceSlug}", stream ended mid-batch, restarting turn`);
-          yield sourceActivationFireAtEnd;
-          this.forceAbort(AbortReason.SourceActivated);
-          return;
-        }
+        const drained = yield* this.drainSdkTurn(turnMessageSource, persistentTurn, userMessage, metadataSessionDir,
+          wasResuming, _isRetry, attemptedBranchCutoff, !!(isSlashCommand && commandName === 'compact'), drainState);
+        if (drained.handedOff) return;
 
         // Missing-UUID fallback: branch cutoff failed because resumeSessionAt target
         // no longer exists server-side. Retry once by resuming the child session
         // that was already established (without re-applying resumeSessionAt).
-        if (suppressedBranchCutoffError && !_isRetry && this.sessionId) {
+        if (drainState.suppressedBranchCutoffError && !_isRetry && this.sessionId) {
           debug('[SESSION_DEBUG] >>> DETECTED MISSING-UUID BRANCH CUTOFF ERROR - retrying on child session without cutoff');
           yield { type: 'info', message: 'Branch point was compacted on server, retrying with nearest available context...' };
           yield* this.chat(userMessage, attachments);
@@ -2024,8 +2147,8 @@ This is a branched conversation. All prior messages in this conversation are par
 
         // Detect empty response when resuming - SDK silently fails resume if session is invalid
         // In this case, we got a new session ID but no assistant content
-        debug('[SESSION_DEBUG] Post-loop check: wasResuming=', wasResuming, 'receivedAssistantContent=', receivedAssistantContent, '_isRetry=', _isRetry);
-        if (wasResuming && !receivedAssistantContent && !_isRetry) {
+        debug('[SESSION_DEBUG] Post-loop check: wasResuming=', wasResuming, 'drainState.receivedAssistantContent=', drainState.receivedAssistantContent, '_isRetry=', _isRetry);
+        if (wasResuming && !drainState.receivedAssistantContent && !_isRetry) {
           debug('[SESSION_DEBUG] >>> DETECTED EMPTY RESPONSE - triggering recovery');
           const wasBranchFork = !!this.branchFromSdkSessionId;
           if (wasBranchFork) {
@@ -2063,7 +2186,7 @@ This is a branched conversation. All prior messages in this conversation are par
         }
 
         // Defensive: emit complete if SDK didn't send result message
-        if (!receivedComplete) {
+        if (!drainState.receivedComplete) {
           yield { type: 'complete' };
         }
       } catch (sdkError) {
@@ -2084,7 +2207,7 @@ This is a branched conversation. All prior messages in this conversation are par
           // clear session ID to prevent broken resume state where SDK session file is empty/invalid.
           // For later messages (messageCount > 0), keep the session ID to preserve conversation history.
           // The SDK session file should have valid previous turns we can resume from.
-          if (!receivedAssistantContent && this.sessionId) {
+          if (!drainState.receivedAssistantContent && this.sessionId) {
             // Check if there are previous messages (completed turns) in this session
             // If yes, keep the session ID to preserve history on resume
             const hasCompletedTurns = this.config.getRecoveryMessages && this.config.getRecoveryMessages().length > 0;
@@ -2215,16 +2338,16 @@ This is a branched conversation. All prior messages in this conversation are par
         // through different paths depending on version/timing.
         const SESSION_EXPIRED_MARKER = 'No conversation found with session ID';
         const isSessionExpired =
-          suppressedSessionExpiredError ||  // stream-level suppression already detected this
+          drainState.suppressedSessionExpiredError ||  // stream-level suppression already detected this
           errorMsg.includes(SESSION_EXPIRED_MARKER) ||
           (rawErrorMsg || '').includes(SESSION_EXPIRED_MARKER) ||
           (stderrContext || '').includes(SESSION_EXPIRED_MARKER);
-        debug('[SESSION_DEBUG] isSessionExpired:', isSessionExpired, 'suppressedSessionExpiredError:', suppressedSessionExpiredError);
+        debug('[SESSION_DEBUG] isSessionExpired:', isSessionExpired, 'drainState.suppressedSessionExpiredError:', drainState.suppressedSessionExpiredError);
 
         // Missing-UUID fallback may surface as a generic process-exit error in catch,
         // even after we suppressed the underlying stream error event above.
         // If branch cutoff failed but child session is established, retry once without cutoff.
-        if (suppressedBranchCutoffError && wasResuming && !_isRetry && this.sessionId) {
+        if (drainState.suppressedBranchCutoffError && wasResuming && !_isRetry && this.sessionId) {
           debug('[SESSION_DEBUG] >>> TAKING PATH: missing-UUID branch-cutoff fallback from catch');
           yield { type: 'info', message: 'Branch point was compacted on server, retrying with nearest available context...' };
           yield* this.chat(userMessage, attachments);
@@ -3032,6 +3155,7 @@ This is a branched conversation. All prior messages in this conversation are par
     const query = this.currentQuery;
     if (!query || !this.persistentInput || !this.activeTurnChannel) return false;
     this.lastAbortReason = AbortReason.UserStop;
+    this.discardBackgroundTurns();
     if (this.activeTurnState) this.activeTurnState.aborted = true;
     this.activeTurnChannel.end();
     this.activeTurnChannel = null;
@@ -3066,6 +3190,7 @@ This is a branched conversation. All prior messages in this conversation are par
    */
   forceAbort(reason: AbortReason = AbortReason.UserStop): void {
     this.lastAbortReason = reason;
+    this.discardBackgroundTurns();
     if (this.activeTurnState) this.activeTurnState.aborted = true;
     // Keep-alive: end the stopped turn now, not when the killed CLI finally exits (seconds later).
     if (this.activeTurnChannel) {
@@ -3232,6 +3357,15 @@ This is a branched conversation. All prior messages in this conversation are par
   isProcessing(): boolean {
     return this.currentQuery !== null;
   }
+
+  /** A keep-alive query exists even while idle, so isProcessing() cannot answer this. */
+  canReleaseIdleRuntime(): boolean {
+    return !this.activeTurnChannel && !this.activeTurnState && !this.stoppedTurn
+      && !this.hasPendingBackgroundTurn() && !this.consumingBackgroundTurn
+      && this.pendingPermissions.size === 0 && !this.pendingSteers.isAccepting()
+      && (!this.currentQuery || (this.keepBackgroundTasksAlive && !!this.persistentInput));
+  }
+
 
   /**
    * Get current permission mode.

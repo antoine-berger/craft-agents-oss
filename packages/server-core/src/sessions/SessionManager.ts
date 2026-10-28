@@ -5861,6 +5861,7 @@ export class SessionManager implements ISessionManager {
       managed.agent.setBackgroundEventSink?.((event: AgentEvent) => {
         void this.processEvent(managed, event)
       })
+      managed.agent.setBackgroundTurnReadyHandler?.(() => this.resumeBackgroundTurn(managed))
 
       // Wire up onSourceActivationRequest to auto-enable sources when agent tries to use them
       managed.agent.onSourceActivationRequest = async (sourceSlug: string): Promise<boolean> => {
@@ -7175,6 +7176,7 @@ export class SessionManager implements ISessionManager {
       return await this.sendMessageInternal(sessionId, message, attachments, storedAttachments, options, existingMessageId, _isAuthRetry, onAck, rpcContext)
     } finally {
       managed.checkpointPendingSends = Math.max(0, (managed.checkpointPendingSends ?? 1) - 1)
+      this.resumeBackgroundTurn(managed)
     }
   }
 
@@ -7726,7 +7728,7 @@ export class SessionManager implements ISessionManager {
 
         // Handle complete event - SDK always sends this (even after interrupt)
         // This is the central place where processing ends
-        if (event.type === 'complete') {
+        if (event.type === 'complete' && !event.continuing) {
           // Skip normal completion handling if auth retry is in progress
           // The retry will handle its own completion
           if (managed.authRetryInProgress) {
@@ -8179,12 +8181,60 @@ export class SessionManager implements ISessionManager {
    * @param sessionId - The session that stopped processing
    * @param reason - Why processing stopped ('complete' | 'interrupted' | 'error')
    */
+  private readonly backgroundTurnCleanups = new WeakMap<ManagedSession, number>()
+
+  /** Reserve the normal session lifecycle synchronously; never synthesize a user message. */
+  private resumeBackgroundTurn(managed: ManagedSession): void {
+    const agent = managed.agent
+    if (this.sessions.get(managed.id) !== managed || managed.isArchived || managed.isDeleting
+      || managed.isProcessing || managed.stopRequested || managed.isRestoringCheckpoint
+      || managed.checkpointPendingSends || this.backgroundTurnCleanups.get(managed)
+      || !agent?.resumeBackgroundTurn || !agent.hasPendingBackgroundTurn?.()) return
+    const generation = ++managed.processingGeneration
+    managed.turnFromUser = false
+    const stopEpoch = managed.stopEpoch ?? 0
+    this.setProcessing(managed, true)
+    managed.streamingText = ''
+    managed.streamingTurnId = undefined
+    managed.turnStartFinalMessageId = this.getLastFinalAssistantMessageId(managed.messages)
+    void (async () => {
+      let reason: 'complete' | 'interrupted' | 'error' = 'complete'
+      try {
+        for await (const event of agent.resumeBackgroundTurn!()) {
+          if (managed.agent !== agent || managed.processingGeneration !== generation
+            || managed.isArchived || managed.isDeleting || (managed.stopEpoch ?? 0) !== stopEpoch) return
+          if (event.type === 'error' || event.type === 'typed_error') reason = 'error'
+          await this.processEvent(managed, event)
+        }
+      } catch (error) {
+        if ((managed.stopEpoch ?? 0) !== stopEpoch) reason = 'interrupted'
+        else {
+          reason = 'error'
+          sessionLog.error(`Claude continuation failed for ${managed.id}:`, error)
+          await this.processEvent(managed, { type: 'error', message: error instanceof Error ? error.message : String(error) })
+        }
+      } finally {
+        if (managed.agent === agent && managed.processingGeneration === generation
+          && !managed.isArchived && !managed.isDeleting) {
+          if ((managed.stopEpoch ?? 0) !== stopEpoch) reason = 'interrupted'
+          managed.turnFromUser = false
+          await this.onProcessingStopped(managed.id, reason)
+          this.persistSession(managed)
+        }
+      }
+    })().catch(error => sessionLog.error(`Claude continuation cleanup failed for ${managed.id}:`, error))
+  }
+
   private async onProcessingStopped(
     sessionId: string,
     reason: 'complete' | 'interrupted' | 'error' | 'timeout'
   ): Promise<void> {
     const managed = this.sessions.get(sessionId)
-    if (!managed || managed.isDeleting) return
+    if (!managed || managed.isDeleting || managed.isArchived) return
+    const stopEpoch = managed.stopEpoch ?? 0
+    const generation = managed.processingGeneration
+    this.backgroundTurnCleanups.set(managed, (this.backgroundTurnCleanups.get(managed) ?? 0) + 1)
+    try {
 
     sessionLog.info(`Processing stopped for session ${sessionId}: ${reason}`)
     getSessionAttentionService()?.setAutoFixActive(sessionId, null)
@@ -8225,6 +8275,8 @@ export class SessionManager implements ISessionManager {
         sessionLog.warn(`Browser-pane visual clear failed for ${sessionId} (continuing):`, err)
       }
     }
+
+    if (managed.isArchived || managed.isDeleting || managed.processingGeneration !== generation || (managed.stopEpoch ?? 0) !== stopEpoch) return
 
     // 2. Handle unread state based on whether user is viewing this session
     //    This is the explicit state machine for NEW badge:
@@ -8269,6 +8321,11 @@ export class SessionManager implements ISessionManager {
       this.applyExternalSessionMetadata(managed, pendingHeader)
     }
 
+    if (managed.isArchived || managed.isDeleting || managed.processingGeneration !== generation || (managed.stopEpoch ?? 0) !== stopEpoch) return
+
+    // SDK output already produced belongs before a queued owner prompt.
+    if (managed.agent?.hasPendingBackgroundTurn?.()) return
+
     // 5. Check queue and process or complete
     if (managed.messageQueue.length > 0) {
       // Has queued messages - process next
@@ -8290,6 +8347,8 @@ export class SessionManager implements ISessionManager {
           sessionLog.warn(`Browser-pane teardown failed for ${sessionId} (continuing to completion):`, err)
         }
       }
+
+      if (managed.isArchived || managed.isDeleting || managed.processingGeneration !== generation || (managed.stopEpoch ?? 0) !== stopEpoch) return
 
       // No queue - emit complete to UI (include tokenUsage and hasUnread for state updates)
       this.sendEvent({
@@ -8332,6 +8391,12 @@ export class SessionManager implements ISessionManager {
     // 6. Always persist
     this.persistSession(managed)
     if (managed.isArchived) void this.cleanupSessionWorktree(managed)
+    } finally {
+      const remaining = (this.backgroundTurnCleanups.get(managed) ?? 1) - 1
+      if (remaining) this.backgroundTurnCleanups.set(managed, remaining)
+      else this.backgroundTurnCleanups.delete(managed)
+      this.resumeBackgroundTurn(managed)
+    }
   }
 
   /**
@@ -10059,7 +10124,7 @@ export class SessionManager implements ISessionManager {
         // A stop the user asked for from the chip is not news to report back: it wakes nothing. A task
         // step still wakes, since its run waits for the turn that follows its background work.
         const stoppedByUser = event.status === 'stopped' && !!priorEntry?.stopRequestedAt && !managed?.taskRunId
-        if (managed && this.keepBackgroundTasksAlive && !managed.isProcessing && launchedHereAndRunning && !stoppedByUser) {
+        if (managed && this.keepBackgroundTasksAlive && !managed.agent?.resumeBackgroundTurn && !managed.isProcessing && launchedHereAndRunning && !stoppedByUser) {
           const taskIntent = priorEntry?.intent
           const outputFile = event.outputFile || managed.backgroundTaskOutputs.get(event.taskId)?.outputFile
           const label = taskIntent ? `"${taskIntent}"` : `task ${event.taskId}`
