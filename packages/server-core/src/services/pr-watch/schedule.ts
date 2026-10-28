@@ -10,14 +10,8 @@ import type { PrWatchState } from '@craft-agent/shared/protocol'
 export const POLL = {
   /** A PR displayed in a chat header. */
   foreground: 5_000,
-  /** Checks running: results land within minutes */
-  checksRunning: 15_000,
-  /** Open PR that changed recently: reviews and CI tend to arrive in bursts */
-  recentChange: 30_000,
-  /** How long "recently" lasts */
-  recentWindow: 10 * 60_000,
-  /** Open PR, nothing moving; also a branch without a PR yet (a `gh pr create` is caught at turn end) */
-  quiet: 2 * 60_000,
+  /** Sidebar/attention watchers share the budget with the displayed chat. */
+  background: 5 * 60_000,
   /** First retry after an error; doubles per consecutive error */
   errorBase: 30_000,
   errorMax: 10 * 60_000,
@@ -29,19 +23,17 @@ export interface ScheduleInput {
   state: PrWatchState
   foreground?: boolean
   now: number
-  /** When the summary last changed (anything but fetchedAt) */
-  lastChangeAt: number
   consecutiveErrors: number
   rateLimit?: { remaining: number; resetAt: number }
 }
 
 /** Milliseconds until the next poll, or `null` to stop polling (triggers still refresh). */
-export function nextPollDelay({ state, foreground = false, now, lastChangeAt, consecutiveErrors, rateLimit }: ScheduleInput): number | null {
+export function nextPollDelay({ state, foreground = false, now, consecutiveErrors, rateLimit }: ScheduleInput): number | null {
   let delay: number | null
   if (consecutiveErrors > 0) {
     delay = Math.min(POLL.errorBase * 2 ** (consecutiveErrors - 1), POLL.errorMax)
   } else if (state.kind === 'none' || state.kind === 'loading') {
-    delay = foreground ? POLL.foreground : POLL.quiet
+    delay = foreground ? POLL.foreground : POLL.background
   } else if (state.kind === 'unavailable') {
     // Not a repo, not GitHub, no credential: nothing to poll until something re-subscribes
     delay = null
@@ -49,9 +41,7 @@ export function nextPollDelay({ state, foreground = false, now, lastChangeAt, co
     const { summary } = state
     if (summary.state === 'merged' || summary.state === 'closed') delay = null
     else if (foreground) delay = POLL.foreground
-    else if (summary.checks === 'pending') delay = POLL.checksRunning
-    else if (now - lastChangeAt < POLL.recentWindow) delay = POLL.recentChange
-    else delay = POLL.quiet
+    else delay = POLL.background
   }
   if (delay !== null && rateLimit && rateLimit.remaining < POLL.rateLimitFloor && rateLimit.resetAt > now) {
     delay = Math.max(delay, rateLimit.resetAt - now)

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 import type { BoundPr, PrEntry, PrWatchSessionState } from '@craft-agent/shared/protocol'
-import { GitHubRequestError } from './github-client'
+import { GitHubRateLimitError, GitHubRequestError } from './github-client'
 import type { GqlPullRequestSummary, GqlRepoMergeSettings } from './github-queries'
 import type { LocalStatus, RepoInfo } from './local-git'
 import { PrWatchRegistry, type PrWatchDeps } from './registry'
@@ -181,12 +181,12 @@ describe('PrWatchRegistry gating', () => {
     expect(t.calls).toHaveLength(0)
   })
 
-  it('reports none when the branch has no PR and keeps looking every 2 min', async () => {
+  it('reports none when the branch has no PR and keeps looking every five minutes', async () => {
     const t = setup({ prs: [] })
     await t.registry.subscribe(sub())
     await t.flush()
     expect(t.pushes.at(-1)?.state).toEqual({ kind: 'none' })
-    expect(t.nextDelay()).toBe(POLL.quiet)
+    expect(t.nextDelay()).toBe(POLL.background)
   })
 })
 
@@ -203,8 +203,8 @@ describe('PrWatchRegistry fetching and pushing', () => {
     expect(entry?.origin).toBe('branch')
     expect(entry?.summary).toMatchObject({ number: 7, checks: 'success', localAhead: 1, localDirty: true, via: 'gh' })
     expect(t.calls[0]?.variables).toEqual({ owner: 'acme', name: 'app', branch: 'feat/x' })
-    // Just changed: next poll in 30 s
-    expect(t.nextDelay()).toBe(POLL.recentChange)
+    // Background sessions use the shared five-minute cadence.
+    expect(t.nextDelay()).toBe(POLL.background)
   })
 
   it('shares one branch watcher between subscriptions and returns the current state to a newcomer', async () => {
@@ -220,14 +220,14 @@ describe('PrWatchRegistry fetching and pushing', () => {
 
   it('does not re-push an unchanged aggregate, but pushes changes', async () => {
     const t = setup()
-    await t.registry.subscribe(sub())
+    await t.registry.subscribe({ ...sub(), foreground: true })
     await t.flush()
     const count = t.pushes.length
-    await t.advance(POLL.recentChange)
+    await t.advance(POLL.foreground)
     expect(t.calls).toHaveLength(2)
     expect(t.pushes.length).toBe(count)
     t.setPrs([{ ...PR, commits: { nodes: [{ commit: { statusCheckRollup: { state: 'FAILURE' } } }] } }])
-    await t.advance(POLL.recentChange)
+    await t.advance(POLL.foreground)
     expect(firstPr(t.pushes.at(-1)?.state)?.summary.checks).toBe('failure')
   })
 
@@ -498,6 +498,29 @@ describe('server attention observers', () => {
       expect(peak).toBe(4)
     } finally { registry.dispose(); for (const resolve of release) resolve() }
   })
+
+  it('stops queued requests across all repositories when their shared credential hits its quota', async () => {
+    let calls = 0
+    const release: Array<() => void> = []
+    const registry = new PrWatchRegistry({
+      graphql: async () => {
+        calls++
+        await new Promise<void>(resolve => release.push(resolve))
+        throw new GitHubRateLimitError(403, 600_000)
+      },
+      candidates: async () => [{ id: 'gh', label: 'gh', getToken: async () => 'same-token' }],
+      push: () => {}, resolveRepo: async dir => ({ ...REPO, root: dir, repo: { ...REPO.repo!, repo: dir } }),
+      watchRefs: () => () => {}, setTimer: () => 0, clearTimer: () => {}, now: () => 0,
+    })
+    try {
+      for (let i = 0; i < 100; i++) await registry.subscribe(sub(`s${i}`, 'internal', `/repo/${i}`))
+      expect(calls).toBe(4)
+      for (const resolve of release) resolve()
+      await new Promise(resolve => setTimeout(resolve, 0))
+      expect(calls).toBe(4)
+      for (let i = 0; i < 100; i++) expect(registry.cachedSessionState(`s${i}`)).toEqual({ kind: 'unavailable', reason: 'error' })
+    } finally { registry.dispose(); for (const resolve of release) resolve() }
+  })
 })
 
 describe('foreground freshness', () => {
@@ -516,11 +539,11 @@ describe('foreground freshness', () => {
     const t = setup()
     await t.registry.subscribe(sub('background', 'internal'))
     await t.flush()
-    expect(t.nextDelay()).toBe(POLL.recentChange)
+    expect(t.nextDelay()).toBe(POLL.background)
     const foreground = await t.registry.subscribe({ ...sub(), foreground: true })
     expect(t.nextDelay()).toBe(5_000)
     t.registry.unsubscribe(foreground.subscriptionId)
-    expect(t.nextDelay()).toBe(POLL.recentChange)
+    expect(t.nextDelay()).toBe(POLL.background)
     t.registry.dispose()
   })
   it('ignores a stale open snapshot of a merged PR, but accepts a new PR on the branch', async () => {

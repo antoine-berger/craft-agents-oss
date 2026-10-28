@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { GitHubAuthError, GitHubRequestError } from './github-client'
+import { GitHubAuthError, GitHubRateLimitError, GitHubRequestError } from './github-client'
 import { TokenChain, tokenCandidates, type TokenCandidate } from './token-chain'
 
 const candidate = (id: string, token: string | null): TokenCandidate => ({ id, label: id, getToken: async () => token })
@@ -39,6 +39,29 @@ describe('TokenChain', () => {
     const chain = new TokenChain()
     const failing = async () => { throw new GitHubRequestError('rate limit', 403, 60_000) }
     await expect(chain.run('k', [candidate('gh', 'cli')], failing)).rejects.toBeInstanceOf(GitHubRequestError)
+  })
+
+  it('shares a quota cooldown across repositories and credential aliases, then recovers', async () => {
+    let now = 0
+    let calls = 0
+    const chain = new TokenChain(() => now)
+    const attempt = async () => {
+      calls++
+      if (calls === 1) throw new GitHubRateLimitError(403, 600_000)
+      return 'ok'
+    }
+    await expect(chain.run('acme/app', [candidate('source:github', 'same-token')], attempt)).rejects.toBeInstanceOf(GitHubRateLimitError)
+    now = 60_000
+    for (let i = 0; i < 100; i++) {
+      const error = await chain.run(`other/repo-${i}`, [candidate('gh', 'same-token')], attempt).catch(error => error)
+      expect(error.retryAfterMs).toBe(540_000)
+    }
+    expect(calls).toBe(1)
+    // Another account has its own budget.
+    expect(await chain.run('acme/app', [candidate('gh', 'different-token')], attempt)).toEqual({ result: 'ok', via: 'gh' })
+    now = 600_000
+    expect(await chain.run('acme/app', [candidate('gh', 'same-token')], attempt)).toEqual({ result: 'ok', via: 'gh' })
+    expect(calls).toBe(3)
   })
 })
 

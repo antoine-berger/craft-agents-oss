@@ -10,16 +10,17 @@ const summary: PrSummary = {
 const pr = (overrides: Partial<PrSummary> = {}): PrWatchState => ({ kind: 'pr', summary: { ...summary, ...overrides } })
 const NOW = 1_000_000_000
 const at = (state: PrWatchState, extra: Partial<Parameters<typeof nextPollDelay>[0]> = {}) =>
-  nextPollDelay({ state, now: NOW, lastChangeAt: NOW - 60 * 60_000, consecutiveErrors: 0, ...extra })
+  nextPollDelay({ state, now: NOW, consecutiveErrors: 0, ...extra })
 
 describe('nextPollDelay', () => {
-  it('polls fast while checks run', () => {
-    expect(at(pr({ checks: 'pending' }))).toBe(POLL.checksRunning)
+  it('keeps background CI checks within the shared budget', () => {
+    expect(at(pr({ checks: 'pending' }))).toBe(POLL.background)
   })
 
-  it('polls every 30 s right after a change, then every 2 min', () => {
-    expect(at(pr(), { lastChangeAt: NOW - 60_000 })).toBe(POLL.recentChange)
-    expect(at(pr())).toBe(POLL.quiet)
+  it('polls background PRs every five minutes regardless of their checks', () => {
+    for (const checks of ['pending', 'success', 'failure', 'none'] as const) {
+      expect(at(pr({ checks }))).toBe(300_000)
+    }
   })
 
   it('stops for merged and closed PRs and when the watcher cannot run', () => {
@@ -30,7 +31,7 @@ describe('nextPollDelay', () => {
   })
 
   it('keeps looking for a PR on a branch without one', () => {
-    expect(at({ kind: 'none' })).toBe(POLL.quiet)
+    expect(at({ kind: 'none' })).toBe(POLL.background)
   })
 
   it('backs off exponentially on errors, capped', () => {
@@ -42,14 +43,14 @@ describe('nextPollDelay', () => {
   it('waits for the rate-limit reset when the budget runs low', () => {
     const resetAt = NOW + 20 * 60_000
     expect(at(pr({ checks: 'pending' }), { rateLimit: { remaining: 50, resetAt } })).toBe(20 * 60_000)
-    expect(at(pr({ checks: 'pending' }), { rateLimit: { remaining: 4000, resetAt } })).toBe(POLL.checksRunning)
+    expect(at(pr({ checks: 'pending' }), { rateLimit: { remaining: 4000, resetAt } })).toBe(POLL.background)
   })
 })
 
 describe('foreground polling', () => {
   it('uses five seconds for displayed PRs while preserving background pacing', () => {
     expect(at(pr(), { foreground: true })).toBe(5_000)
-    expect(at(pr())).toBe(POLL.quiet)
+    expect(at(pr())).toBe(POLL.background)
     expect(at(pr({ checks: 'pending' }), { foreground: true })).toBe(5_000)
   })
   it('retains error, quota and terminal-state safeguards in the foreground', () => {

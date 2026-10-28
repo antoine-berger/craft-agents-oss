@@ -7,7 +7,8 @@
  */
 
 import { execFile } from 'node:child_process'
-import { GitHubAuthError } from './github-client'
+import { createHash } from 'node:crypto'
+import { GitHubAuthError, GitHubRateLimitError } from './github-client'
 import { isGitHubDotCom } from './remote-url'
 
 export interface TokenCandidate {
@@ -24,6 +25,7 @@ const REJECTED_FOR_MS = 10 * 60_000
 export class TokenChain {
   private readonly preferred = new Map<string, string>()
   private readonly rejected = new Map<string, number>()
+  private readonly rateLimited = new Map<string, { until: number; status: number }>()
 
   constructor(private readonly now: () => number = Date.now) {}
 
@@ -39,12 +41,20 @@ export class TokenChain {
       if (rejectedAt !== undefined && this.now() - rejectedAt < REJECTED_FOR_MS) continue
       const token = await candidate.getToken().catch(() => null)
       if (!token) continue
+      // Key by credential, not source name or repository; aliases share the same GitHub budget.
+      const tokenId = createHash('sha256').update(token).digest('hex')
+      const cooldown = this.rateLimited.get(tokenId)
+      if (cooldown && cooldown.until > this.now()) throw new GitHubRateLimitError(cooldown.status, cooldown.until - this.now())
+      this.rateLimited.delete(tokenId)
       try {
         const result = await attempt(token)
         this.preferred.set(repoKey, candidate.id)
         this.rejected.delete(`${repoKey}|${candidate.id}`)
         return { result, via: candidate.label }
       } catch (error) {
+        if (error instanceof GitHubRateLimitError) {
+          this.rateLimited.set(tokenId, { until: this.now() + (error.retryAfterMs ?? 60_000), status: error.status ?? 429 })
+        }
         if (!(error instanceof GitHubAuthError)) throw error
         this.rejected.set(`${repoKey}|${candidate.id}`, this.now())
         if (this.preferred.get(repoKey) === candidate.id) this.preferred.delete(repoKey)

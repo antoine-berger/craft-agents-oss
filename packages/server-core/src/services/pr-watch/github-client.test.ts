@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { GitHubAuthError, GitHubRefusedError, GitHubRequestError, githubGraphql, type FetchLike } from './github-client'
+import { GitHubAuthError, GitHubRateLimitError, GitHubRefusedError, GitHubRequestError, githubGraphql, type FetchLike } from './github-client'
 
 function respond(status: number, body: unknown, headers: Record<string, string> = {}): FetchLike {
   return async () => ({
@@ -58,5 +58,18 @@ describe('githubGraphql', () => {
     const timedOut = await githubGraphql('github.com', 't', 'q', {}, { fetch: hang, timeoutMs: 20 }).then(() => null, (e: Error) => e)
     expect(timedOut).toBeInstanceOf(GitHubRequestError)
     expect(timedOut?.message).toContain('timed out')
+  })
+
+  it('honors the primary quota reset, including GitHub errors without a type', async () => {
+    const reset = Math.ceil(Date.now() / 1000) + 600
+    for (const response of [
+      respond(403, {}, { 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': String(reset) }),
+      respond(200, { errors: [{ message: 'API rate limit already exceeded for user ID 123.' }] }, { 'x-ratelimit-reset': String(reset) }),
+    ]) {
+      const error = await call(response).catch(error => error)
+      expect(error).toBeInstanceOf(GitHubRateLimitError)
+      expect(error.retryAfterMs).toBeGreaterThan(599_000)
+      expect(error.retryAfterMs).toBeLessThanOrEqual(601_000)
+    }
   })
 })

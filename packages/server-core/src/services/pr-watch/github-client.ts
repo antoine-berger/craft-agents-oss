@@ -26,6 +26,14 @@ export class GitHubRequestError extends Error {
   }
 }
 
+/** A credential's quota is shared by every repository/session using it. */
+export class GitHubRateLimitError extends GitHubRequestError {
+  constructor(status: number, retryAfterMs: number) {
+    super('GitHub rate limit', status, retryAfterMs)
+    this.name = 'GitHubRateLimitError'
+  }
+}
+
 /**
  * GitHub answered and said no (e.g. a mutation it rejected: "Auto merge is not allowed for this
  * repository"). The message is GitHub's reason; retrying or another credential won't change it.
@@ -79,11 +87,13 @@ export async function githubGraphql<T>(
 
   const retryAfter = Number(response.headers.get('retry-after'))
   const retryAfterMs = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : undefined
+  const resetAt = Number(response.headers.get('x-ratelimit-reset')) * 1000
+  const quotaRetryMs = retryAfterMs ?? (resetAt > Date.now() ? resetAt - Date.now() : 60_000)
   if (response.status === 401) throw new GitHubAuthError('GitHub rejected the credential', 401)
   if (response.status === 403 || response.status === 429) {
     // Secondary rate limits come as 403 with Retry-After or x-ratelimit-remaining: 0
     if (retryAfterMs !== undefined || response.headers.get('x-ratelimit-remaining') === '0' || response.status === 429) {
-      throw new GitHubRequestError('GitHub rate limit', response.status, retryAfterMs ?? 60_000)
+      throw new GitHubRateLimitError(response.status, quotaRetryMs)
     }
     throw new GitHubAuthError('GitHub denied access', 403)
   }
@@ -94,8 +104,8 @@ export async function githubGraphql<T>(
     // Private repo this credential can't see (e.g. an org that restricts OAuth apps)
     throw new GitHubAuthError(body.errors.map(error => error.message).join('; ') || 'Repository not found')
   }
-  if (body.errors?.some(error => error.type === 'RATE_LIMITED')) {
-    throw new GitHubRequestError('GitHub rate limit', 200, retryAfterMs ?? 60_000)
+  if (body.errors?.some(error => error.type === 'RATE_LIMITED' || /API rate limit (?:already )?exceeded/i.test(error.message ?? ''))) {
+    throw new GitHubRateLimitError(200, quotaRetryMs)
   }
   if (!body.data) throw new GitHubRequestError(body.errors?.map(error => error.message).join('; ') || 'GitHub returned no data')
   // A rejected mutation still sends `data`, with every field null, and the reason in `errors`

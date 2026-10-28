@@ -108,7 +108,6 @@ interface Watcher {
   state: PrWatchState
   /** The repository, number and node id of the PR the state describes */
   pr: { coords: RepoCoordinates; number: number; headOid: string; nodeId: string } | null
-  lastChangeAt: number
   consecutiveErrors: number
   rateLimit?: { remaining: number; resetAt: number }
   retryAfterUntil?: number
@@ -618,7 +617,6 @@ export class PrWatchRegistry {
       subscriptions: new Set(),
       state: { kind: 'loading' },
       pr: null,
-      lastChangeAt: this.now(),
       consecutiveErrors: 0,
       timer: null,
       inFlight: null,
@@ -663,7 +661,7 @@ export class PrWatchRegistry {
   // ── credentials ─────────────────────────────────────────────────────────
 
   private runWithCredential<T>(coords: RepoCoordinates, workspaceRootPath: string, attempt: (token: string) => Promise<T>): Promise<{ result: T; via: string } | null> {
-    return this.deps.candidates(coords.host, workspaceRootPath).then(candidates => this.chain.run(coordsKey(coords), candidates, token => this.limited(() => attempt(token))))
+    return this.limited(async () => this.chain.run(coordsKey(coords), await this.deps.candidates(coords.host, workspaceRootPath), attempt))
   }
 
   private withToken<T>(watcher: Watcher, coords: RepoCoordinates, attempt: (token: string) => Promise<T>): Promise<{ result: T; via: string } | null> {
@@ -789,7 +787,6 @@ export class PrWatchRegistry {
   private setState(watcher: Watcher, state: PrWatchState): void {
     const changed = !sameState(watcher.state, state)
     watcher.state = state
-    if (changed) watcher.lastChangeAt = this.now()
     const sessions = new Set<string>()
     for (const id of watcher.subscriptions) {
       const subscription = this.subscriptions.get(id)
@@ -810,7 +807,6 @@ export class PrWatchRegistry {
       state: watcher.state,
       foreground: [...watcher.subscriptions].some(id => this.subscriptions.get(id)?.foreground),
       now,
-      lastChangeAt: watcher.lastChangeAt,
       consecutiveErrors: watcher.consecutiveErrors,
       rateLimit: watcher.rateLimit,
     })
