@@ -64,6 +64,7 @@ const pr = (overrides: Partial<GqlPullRequestSummary>): GqlPullRequestSummary =>
 describe('mapSummary', () => {
   it('maps the live #479 response', () => {
     expect(mapSummary(PR_479, { localAhead: 2, localDirty: true }, { fetchedAt: 1000, via: 'gh' })).toEqual({
+      quickActions: { canMerge: false, methods: ['merge', 'rebase'], defaultMethod: 'merge', mergeQueue: false },
       headOid: PR_479.headRefOid,
       attentionFeedback: [],
       number: 479,
