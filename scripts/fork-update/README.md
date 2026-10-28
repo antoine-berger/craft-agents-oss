@@ -63,6 +63,14 @@ systemd override. The previous release and `/etc/craft-agents.env` remain intact
 A failed authenticated health check restores the previous override and starts the
 old release. The updater never merges, migrates or removes projects/worktrees.
 
+For the Ubuntu host's unchanged TypeScript repository hooks, run
+`python3 scripts/fork-update/prepare-linux-tools.py` as root from the verified
+staged release. It exposes the already installed Node 24.22.1 tools in
+`/usr/local/bin` and installs tsx 4.21.0 there. It records the previous links,
+refuses conflicting executables, and never edits hook/repository files or
+restarts a service. npm cache and temporary installation files stay on disk.
+This environment preparation is separate from activating the server release.
+
 Adding `--force` bypasses only the activity checks after explicit restart consent.
 RPC health, archive verification, both backups and rollback remain required.
 The service flushes conversation history on shutdown; in-flight commands are
