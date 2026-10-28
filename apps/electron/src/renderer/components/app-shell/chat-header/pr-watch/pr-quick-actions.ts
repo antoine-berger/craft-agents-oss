@@ -8,6 +8,7 @@ export function nextPrQuickAction(state: PrWatchState, origin?: PrEntry['origin'
   if (state.kind === 'none') return 'create'
   if (state.kind !== 'pr') return null
   const pr = state.summary
+  if (pr.attentionStale) return null
   if (pr.state === 'merged') return origin === 'bound' ? null : 'archive'
   if (pr.state === 'closed') return null
   if (pr.quickActions?.queued) return 'queued'

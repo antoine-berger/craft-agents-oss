@@ -21,6 +21,12 @@ function harness(name = 'Old chat', archived = false) {
 }
 
 describe('chat titles follow the primary PR', () => {
+  test('saved stale metadata cannot overwrite the current chat name', async () => {
+    const h = harness('Current title'), cached = entry('branch', 'Old saved title')
+    cached.summary.attentionStale = true
+    await syncSessionTitleFromPr(h.manager, 'chat', ready(cached))
+    expect(h.renames).toEqual([])
+  })
   test('uses the exact branch PR title even when a dependency is listed first', async () => {
     const h = harness()
     const title = 'feat(outbound-http): shared door [SAP-4127] 🚪'

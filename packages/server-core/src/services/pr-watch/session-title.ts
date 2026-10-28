@@ -13,7 +13,7 @@ export async function syncSessionTitleFromPr(
   const primary = state.prs.find(pr => pr.origin === 'branch')
     ?? (state.prs.length === 1 ? state.prs[0] : undefined)
   const title = primary?.summary.title
-  if (!title?.trim()) return
+  if (!title?.trim() || primary?.summary.attentionStale) return
   const session = manager.getSessionSnapshot(sessionId)
   if (!session || session.name === title) return
   await manager.renameSession(sessionId, title)

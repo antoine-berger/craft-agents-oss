@@ -5,6 +5,10 @@ import type { GqlPullRequestSummary, GqlRepoMergeSettings } from './github-queri
 import type { LocalStatus, RepoInfo } from './local-git'
 import { PrWatchRegistry, type PrWatchDeps } from './registry'
 import { POLL } from './schedule'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { diskPrAssociations, associatePr, type PrAssociationStore } from './association-store'
 
 const REPO: RepoInfo = {
   root: '/work/app',
@@ -51,7 +55,113 @@ function firstPr(state: PrWatchSessionState | undefined): PrEntry | undefined {
   return entriesOf(state)[0]
 }
 
-function setup(options: { repos?: Record<string, RepoInfo | null>; prs?: GqlPullRequestSummary[]; byNumber?: Record<number, GqlPullRequestSummary>; local?: LocalStatus; rateLimit?: { remaining: number; resetAt: string } } = {}) {
+describe('durable PR associations across cold starts', () => {
+  it('restores the primary link before GitHub answers and keeps it through quota/network failures', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'craft-pr-restart-'))
+    const input = { ...sub(), workspaceRootPath: dir }
+    const warm = setup({ associations: diskPrAssociations })
+    try {
+      await warm.registry.subscribe(input); await warm.flush(); warm.registry.dispose()
+      for (const error of [new GitHubRateLimitError(403, 60_000), new GitHubRequestError('offline')]) {
+        const cold = setup({ associations: { ...diskPrAssociations } })
+        try {
+          cold.failNextWith(error)
+          const initial = await cold.registry.subscribe(input)
+          expect(firstPr(initial.state)).toMatchObject({ origin: 'branch', summary: { number: 7, attentionStale: true } })
+          await cold.flush()
+          expect(firstPr(cold.registry.cachedSessionState('s1')!)).toMatchObject({ origin: 'branch',
+            summary: { number: 7, headMatchesLocal: null, checks: 'none', mergeState: 'unknown', attentionStale: true } })
+          expect(cold.calls[0]?.query).toContain('PrByNumber')
+          await cold.advance(60_000)
+          await cold.registry.nudge('s1')
+          expect(firstPr(cold.registry.cachedSessionState('s1')!)?.summary.attentionStale).toBeUndefined()
+        } finally { cold.registry.dispose() }
+      }
+    } finally { warm.registry.dispose(); rmSync(dir, { recursive: true, force: true }) }
+  })
+
+  it('does not reuse a saved primary PR after a repository or branch switch', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'craft-pr-switch-'))
+    const input = { ...sub(), workspaceRootPath: dir }
+    const warm = setup({ associations: diskPrAssociations })
+    try {
+      await warm.registry.subscribe(input); await warm.flush(); warm.registry.dispose()
+      for (const repo of [{ ...REPO, branch: 'new', remoteBranch: 'new' },
+        { ...REPO, repo: { ...REPO.repo!, repo: 'another' } }]) {
+        const cold = setup({ associations: diskPrAssociations, repos: { '/work/app': repo } })
+        try {
+          cold.failNextWith(new GitHubRequestError('offline'))
+          const initial = await cold.registry.subscribe(input)
+          expect(firstPr(initial.state)).toBeUndefined()
+          await cold.flush()
+          expect(firstPr(cold.registry.cachedSessionState('s1')!)).toBeUndefined()
+        } finally { cold.registry.dispose() }
+      }
+    } finally { warm.registry.dispose(); rmSync(dir, { recursive: true, force: true }) }
+  })
+
+  it('rediscovers a replacement PR when a saved PR closed while the backend was stopped', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'craft-pr-replaced-'))
+    const input = { ...sub(), workspaceRootPath: dir }, warm = setup({ associations: diskPrAssociations })
+    try {
+      await warm.registry.subscribe(input); await warm.flush(); warm.registry.dispose()
+      const next = { ...PR, id: 'PR_8', number: 8, url: 'https://github.com/acme/app/pull/8' }
+      const cold = setup({ associations: diskPrAssociations, byNumber: { 7: { ...PR, state: 'CLOSED' } }, prs: [next] })
+      try {
+        await cold.registry.subscribe(input); await cold.flush()
+        expect(firstPr(cold.registry.cachedSessionState('s1')!)?.summary.number).toBe(8)
+        expect(firstPr(cold.registry.cachedSessionState('s1')!)?.summary.attentionStale).toBeUndefined()
+      } finally { cold.registry.dispose() }
+    } finally { warm.registry.dispose(); rmSync(dir, { recursive: true, force: true }) }
+  })
+
+  it('rechecks a saved merged PR after a quota pause before stopping terminal polling', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'craft-pr-terminal-')), input = { ...sub(), workspaceRootPath: dir, foreground: true }
+    const merged = { ...PR, state: 'MERGED' as const }, warm = setup({ associations: diskPrAssociations, prs: [merged] })
+    try {
+      await warm.registry.subscribe(input); await warm.flush(); warm.registry.dispose()
+      const limit = { remaining: 499, resetAt: new Date(1_060_000).toISOString() }
+      const cold = setup({ associations: diskPrAssociations, prs: [merged], rateLimit: limit })
+      try {
+        await cold.registry.subscribe(input); await cold.flush()
+        expect(firstPr(cold.registry.cachedSessionState('s1')!)?.summary.attentionStale).toBe(true)
+        expect(cold.nextDelay()).toBe(60_000)
+        limit.remaining = 4000; limit.resetAt = new Date(1_120_000).toISOString()
+        await cold.advance(60_000)
+        expect(firstPr(cold.registry.cachedSessionState('s1')!)?.summary.attentionStale).toBeUndefined()
+        expect(cold.timers.size).toBe(0)
+      } finally { cold.registry.dispose() }
+    } finally { warm.registry.dispose(); rmSync(dir, { recursive: true, force: true }) }
+  })
+
+  it('restores an explicitly pinned PR without confusing it with this checkout’s primary PR', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'craft-pr-pinned-'))
+    const input = { ...sub(), workspaceRootPath: dir, boundPrs: [bound(42)] }
+    const warm = setup({ associations: diskPrAssociations, repos: { '/work/app': null } })
+    try {
+      await warm.registry.subscribe(input); await warm.flush(); warm.registry.dispose()
+      const cold = setup({ associations: diskPrAssociations, repos: { '/work/app': null } })
+      try {
+        cold.failNextWith(new GitHubRateLimitError(403, 60_000))
+        const initial = await cold.registry.subscribe(input)
+        expect(firstPr(initial.state)).toMatchObject({ origin: 'bound', summary: { number: 42, attentionStale: true } })
+      } finally { cold.registry.dispose() }
+    } finally { warm.registry.dispose(); rmSync(dir, { recursive: true, force: true }) }
+  })
+
+  it('ignores a mismatched saved record and tolerates an unwritable disk', async () => {
+    const saved = associatePr(REPO.repo!, { ...PR, headRef: 'wrong' } as any)
+    const t = setup({ associations: { load: () => saved, save: () => { throw new Error('disk full') } } })
+    try {
+      const initial = await t.registry.subscribe(sub())
+      expect(firstPr(initial.state)).toBeUndefined()
+      await t.flush()
+      expect(firstPr(t.registry.cachedSessionState('s1')!)?.summary.number).toBe(7)
+    } finally { t.registry.dispose() }
+  })
+})
+
+function setup(options: { associations?: PrAssociationStore; repos?: Record<string, RepoInfo | null>; prs?: GqlPullRequestSummary[]; byNumber?: Record<number, GqlPullRequestSummary>; local?: LocalStatus; rateLimit?: { remaining: number; resetAt: string } } = {}) {
   let now = 1_000_000
   let nextTimer = 1
   const timers = new Map<number, { at: number; fn: () => void }>()
@@ -66,6 +176,7 @@ function setup(options: { repos?: Record<string, RepoInfo | null>; prs?: GqlPull
   let local = options.local ?? { localAhead: 0, localDirty: false }
 
   const deps: PrWatchDeps = {
+    associations: options.associations,
     graphql: async <T,>(_host: string, _token: string, query: string, variables: Record<string, unknown>) => {
       calls.push({ query, variables })
       if (failNext) {

@@ -20,6 +20,7 @@ import { AUTO_FIX_CLIENT_ID, createAutoFixMonitor, type AutoFixMonitor } from '.
 import { createPrWatchOps } from '../../pr-watch/operations'
 import { githubGraphql } from '../../services/pr-watch/github-client'
 import { PrWatchRegistry } from '../../services/pr-watch/registry'
+import { diskPrAssociations } from '../../services/pr-watch/association-store'
 import { syncSessionTitleFromPr } from '../../services/pr-watch/session-title'
 import { parsePrReference } from '../../services/pr-watch/pr-ref'
 import { tokenCandidates, type GitHubSourceLike } from '../../services/pr-watch/token-chain'
@@ -85,6 +86,7 @@ export function registerPrWatchHandlers(server: RpcServer, deps: HandlerDeps): v
   registry?.dispose()
   let monitor: AutoFixMonitor | null = null
   const current = new PrWatchRegistry({
+    associations: diskPrAssociations,
     graphql: (host, token, query, variables) => githubGraphql(host, token, query, variables),
     candidates: async (host, workspaceRootPath) => tokenCandidates(host, await loadGitHubSources(workspaceRootPath).catch(() => [])),
     push: (clientId, sessionId, state) => {

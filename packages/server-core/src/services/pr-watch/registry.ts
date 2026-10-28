@@ -60,6 +60,7 @@ import { nextPollDelay, POLL } from './schedule'
 import { runGitResult } from '../git'
 import { runPrQuickOperation, rerunFailedJobs } from './quick-actions'
 import { TokenChain, type TokenCandidate } from './token-chain'
+import { associatePr, savedPrSummary, type PrAssociation, type PrAssociationStore } from './association-store'
 
 /** Details are cached this long, so a card re-asking every 15 s costs at most one query. */
 const DETAILS_TTL_MS = 10_000
@@ -69,6 +70,7 @@ const MAX_SILENT_MS = 60_000
 const NO_LOCAL: LocalStatus = { localAhead: 0, localDirty: false }
 
 export interface PrWatchDeps {
+  associations?: PrAssociationStore
   /** GitHub GraphQL call; throws GitHubAuthError / GitHubRequestError */
   graphql<T>(host: string, token: string, query: string, variables: Record<string, unknown>): Promise<T>
   /** Credentials to try for a host, in order */
@@ -111,7 +113,7 @@ interface Watcher {
   subscriptions: Set<string>
   state: PrWatchState
   /** The repository, number and node id of the PR the state describes */
-  pr: { coords: RepoCoordinates; number: number; headOid: string; nodeId: string } | null
+  pr: { coords: RepoCoordinates; number: number; headOid: string } | null
   consecutiveErrors: number
   lastFetchAt?: number
   rateLimit?: { remaining: number; resetAt: number }
@@ -141,12 +143,19 @@ function entryId(coords: RepoCoordinates, number: number): string {
   return prEntryId({ ...coords, number })
 }
 
-function branchKeyOf(repo: WatchableRepo): string {
+export function branchKeyOf(repo: WatchableRepo): string {
   return `branch|${repo.root}|${coordsKey(repo.repo)}@${repo.remoteBranch}`
 }
 
-function numberKeyOf(workspaceRootPath: string, coords: RepoCoordinates, number: number): string {
+export function numberKeyOf(workspaceRootPath: string, coords: RepoCoordinates, number: number): string {
   return `number|${workspaceRootPath}|${entryId(coords, number)}`
+}
+
+function associationMatches(target: WatcherTarget, saved: PrAssociation): boolean {
+  const sameRepo = (coords: RepoCoordinates) => coordsKey(coords).toLowerCase() === coordsKey(saved.coords).toLowerCase()
+  if (target.kind === 'number') return saved.number === target.number && sameRepo(target.coords)
+  return saved.headRef === target.repo.remoteBranch && (sameRepo(target.repo.repo)
+    || !!target.repo.upstreamRepo && sameRepo(target.repo.upstreamRepo))
 }
 
 /** Equal for the UI: everything but `fetchedAt`. */
@@ -662,6 +671,13 @@ export class PrWatchRegistry {
       stopRefWatch: () => {},
       details: null,
     }
+    try {
+      const saved = this.deps.associations?.load(workspaceRootPath, key)
+      if (saved && associationMatches(target, saved)) {
+        watcher.pr = { coords: saved.coords, number: saved.number, headOid: saved.headOid }
+        watcher.state = { kind: 'pr', summary: savedPrSummary(saved) }
+      }
+    } catch (error) { this.log(`[pr-association] read failed: ${(error as Error).message}`) }
     // A commit, checkout or push moves a ref: re-resolve the branch and refetch (branch targets only).
     if (target.kind === 'branch') {
       watcher.stopRefWatch = this.watchRefs(target.repo, () => {
@@ -792,6 +808,10 @@ export class PrWatchRegistry {
         return
       }
       if (!resolved) {
+        if (watcher.state.kind === 'pr') {
+          this.setState(watcher, { kind: 'pr', summary: { ...watcher.state.summary, attentionStale: true } })
+          return
+        }
         watcher.pr = null
         this.setState(watcher, { kind: 'none' })
         return
@@ -802,8 +822,11 @@ export class PrWatchRegistry {
       if (previous?.state === 'merged' && previous.url === node.url && node.state !== 'MERGED') return
       const local = watcher.target.kind === 'branch' ? await this.localStatus(watcher.target.repo.root, node.headRefOid) : NO_LOCAL
       if (watcher.pr?.number !== node.number || watcher.pr.headOid !== node.headRefOid) watcher.details = null
-      watcher.pr = { coords, number: node.number, headOid: node.headRefOid, nodeId: node.id }
-      this.setState(watcher, { kind: 'pr', summary: mapSummary(node, local, { fetchedAt: this.now(), via }) })
+      const summary = mapSummary(node, local, { fetchedAt: this.now(), via })
+      watcher.pr = { coords, number: node.number, headOid: node.headRefOid }
+      try { this.deps.associations?.save(watcher.workspaceRootPath, watcher.key, associatePr(coords, summary)) }
+      catch (error) { this.log(`[pr-association] write failed: ${(error as Error).message}`) }
+      this.setState(watcher, { kind: 'pr', summary })
     } catch (error) {
       if (error instanceof PollingPaused) return
       watcher.consecutiveErrors++
@@ -822,11 +845,16 @@ export class PrWatchRegistry {
     watcher?: Watcher,
     force = false,
   ): Promise<{ node: GqlPullRequestSummary; coords: RepoCoordinates; via: string } | 'no-token' | null> {
+    let previousPr: { node: GqlPullRequestSummary; coords: RepoCoordinates; via: string } | undefined
     // Like Conductor's hasPrNumber query: search the branch once, then read the known PR.
     if (watcher?.pr && !force) {
       const known = await this.resolveNumberPr(watcher.pr.coords, watcher.pr.number, workspaceRootPath, watcher, force)
       if (known && known !== 'no-token' && known.node.headRefName === repo.remoteBranch
-        && pickPullRequest([known.node], repo.repo.owner)) return known
+        && pickPullRequest([known.node], repo.repo.owner)) {
+        // A branch may have been reused while this backend was stopped.
+        if (known.node.state === 'OPEN' || watcher.state.kind !== 'pr' || !watcher.state.summary.attentionStale) return known
+        previousPr = known
+      }
     }
     const query = async (coords: RepoCoordinates) => {
       const response = await this.runWithCredential(coords, workspaceRootPath, token =>
@@ -843,7 +871,7 @@ export class PrWatchRegistry {
       found = (await query(repo.upstreamRepo)) ?? found
     }
     if (!found) return 'no-token'
-    if (!found.node) return null
+    if (!found.node) return previousPr ?? null
     return { node: found.node, coords: found.coords, via: found.via }
   }
 
@@ -902,8 +930,11 @@ export class PrWatchRegistry {
     }
     if (watcher.subscriptions.size === 0) return
     const now = this.now()
+    // A saved terminal state still needs one successful refresh after a cold start.
+    const state = watcher.state.kind === 'pr' && watcher.state.summary.attentionStale
+      ? { kind: 'loading' } as const : watcher.state
     let delay = nextPollDelay({
-      state: watcher.state,
+      state,
       foreground: this.isForeground(watcher),
       now,
       consecutiveErrors: watcher.consecutiveErrors,

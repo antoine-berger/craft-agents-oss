@@ -81,6 +81,15 @@ The root helper is intentionally outside the running backend: installing this
 updater does not require restarting that backend. Updating the helper itself is a
 separate administrator operation, never a side effect of checking for updates.
 
+## Durable PR associations
+
+Validated PR identities live in private, atomic `pr-associations/*.json` files inside
+each workspace's data directory. Records are read on demand, with no global memory
+catalogue; unchanged polling ticks do not rewrite them. Reboots restore the link as
+stale before contacting GitHub. CI, permissions and local HEAD are revalidated before
+actions; stale records cannot wake auto-fix or overwrite chat titles/statuses.
+These private records are preserved by server backups and excluded from installers.
+
 ## Verification
 
 ```sh

@@ -88,6 +88,7 @@ describe('autoFixApplies', () => {
     expect(autoFixApplies(summary({ unresolvedThreads: 1, mergeState: 'conflicting' }))).toBe(false)
     expect(autoFixApplies(summary({ unresolvedThreads: 1, state: 'merged' }))).toBe(false)
     expect(autoFixApplies(summary({ unresolvedThreads: 1, state: 'closed' }))).toBe(false)
+    expect(autoFixApplies(summary({ unresolvedThreads: 1, attentionStale: true }))).toBe(false)
   })
 })
 

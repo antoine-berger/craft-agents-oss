@@ -1,13 +1,13 @@
 {
   "schema": 1,
-  "description": "Verified fork-v0.15.16 baseline plus Conductor 0.92 PR-number reuse and shared 1,000/500-point polling safeguards.",
+  "description": "Verified fork-v0.15.17 plus disk-backed durable PR identity and read-only stale-link recovery after cold starts. Intentional pin updates require reviewed changes and regression tests.",
   "sourceFiles": {
     "packages/server-core/src/services/pr-watch/github-queries.ts": "e7f8aa04b211075ab11a6a782b71ef739046443647d332635ed9f12bdf20e7a9",
     "packages/server-core/src/services/pr-watch/map-github.ts": "63e8df57d0666dd1e4e28d720429fdda0d7d793301763942a2f8a92e224b19f0",
     "packages/server-core/src/services/session-attention/service.ts": "b2e86b54b86fb6c38c05f34c536b02fe8e327814b1d8caba81772a7c2b79e903",
-    "packages/server-core/src/services/pr-watch/registry.ts": "bd5c76023c66d99c377a7d4cb9790a57d93978a755365274bbed765a70918ff5",
+    "packages/server-core/src/services/pr-watch/registry.ts": "f3cb7ec45a5cabf6783d33d5de2899174474136195356ec0950a7cc47c5f1165",
     "packages/server-core/src/services/pr-watch/schedule.ts": "a749e55f0b8b3f1dd26409c61f7b048ba62702518b7cc226afb465a8ac76dc30",
-    "packages/server-core/src/handlers/rpc/pr-watch.ts": "72ceec3d8b3667a5000b8f59b3fc45b619f9515998d824be0b5d2dbd27af313b",
+    "packages/server-core/src/handlers/rpc/pr-watch.ts": "4c0c8b2cc8a4ed3b172a659e4bda6e8b995b539c4f722d608d64c40a830bff2e",
     "packages/server-core/src/services/pr-watch/github-client.ts": "edd0eaeae392852bb17bd96eb87a5ec2044e06eebb8ec9d3e9256976bf4228dc",
     "packages/server-core/src/services/pr-watch/token-chain.ts": "e0b1771a304402d5a2e6dd9eba0d1db8c1e583d13833537aebce8ac3ab3aa8f0",
     "apps/electron/src/renderer/hooks/usePrWatch.ts": "0e2af447e5cee777cc0ddd62810a02faa91369e2bb2fbf85ac4caf454d85bbf8",
@@ -28,20 +28,29 @@
     "apps/electron/src/transport/thin-client-updates.ts": "bff4691a5a3752391c929f7498d0099731b078a7f67064a992087dd92779b953",
     "apps/electron/src/preload/bootstrap.ts": "254272ca384beee0cb2ba4830d7de6b9f698fe1fa7d074a879b0243ca79b4b75",
     "scripts/fork-update/verify-release-base.py": "ce6c19df60a660012a2b06f7ef66c19eba39fcdd0ec03dab89a1190b9477fa39",
-    ".github/workflows/fork-release.yml": "de0e86a34de714123850f1a3095c73ce0ad0e05e5caf68254dbc9a273d9b9b30",
+    ".github/workflows/fork-release.yml": "107d86f6160193ceacbbb615e4843ecc3bdbe4f0fcf6009c394eed204612cc89",
     "apps/electron/src/shared/types.ts": "23ba4d3f2b3ef38c097fec550e265ab302f93fed2eb118fedf2b0274af48e0ce",
     "packages/shared/src/config/theme.ts": "93a3550291250e945a3d6f5f51dad6340438211ff462d3e59d80fad93911fe5d",
     "apps/electron/src/transport/channel-map.ts": "3382e6404071641adbd3485be514c095064159ae5e54ce5474237035ad5fb634",
     "packages/shared/src/agent/options.ts": "ff715a5f59d7a8178f5c6140753cd2b9e5eca52332c971aa894820bb3d550166",
     "apps/electron/resources/portable-config/skills/ship/SKILL.md": "559f7813a781fe04ff4dfc4e186a2175e99d2226372fbd192bb9f1b36f7b1577",
     "apps/electron/resources/portable-config/skills/ship-plan/SKILL.md": "463e477accab92ceb9c37caf32020a1d564036c87586e29f07489c04d29a7d37",
-    "scripts/fork-update/prepare-linux-tools.py": "8e72fcaff543ac46def110d60e18f734c8dc0b7b5d719e2257a2983ab1be2bc0"
+    "scripts/fork-update/prepare-linux-tools.py": "8e72fcaff543ac46def110d60e18f734c8dc0b7b5d719e2257a2983ab1be2bc0",
+    "packages/server-core/src/services/pr-watch/association-store.ts": "8580b63d1b35cf33bdac0290941f27158413cfc43f29f77cc5ab80ac381fd9f8",
+    "packages/server-core/src/services/pr-watch/session-title.ts": "760901dbc66b3bc39aaaae763fceec9515aa431646713fa4aca90225887aa870",
+    "packages/server-core/src/services/session-attention/derived-status.ts": "22a5939cc38d4671226608ab8cbdc95c969b8cd1e7442b6b5b21c5403deb7347",
+    "packages/shared/src/pr-watch/rules.ts": "fe3a8588742890eb0a1f612a67bc2b3eee3fce2c59895963620f6da1474c01c0",
+    "packages/shared/src/i18n/locales/en.json": "3aa74d0d2c1b5191c74a4789d38ee08a0f3f261debf174cbdcff01ed9fe27a47",
+    "apps/electron/src/renderer/components/app-shell/chat-header/pr-watch/ChatHeaderPrChip.tsx": "f74130113f564e1a8c69bc3342bf724d0416d1cac4b348564ae19aafb37104b0",
+    "apps/electron/src/renderer/components/app-shell/chat-header/pr-watch/pr-quick-actions.ts": "bd307e4f89f0e8292172e88b74c603c077e590e77e798b86edc694e18dcc22e3"
   },
   "compiledClientFiles": {
     "apps/electron/src/renderer/hooks/usePrWatch.ts": "0e2af447e5cee777cc0ddd62810a02faa91369e2bb2fbf85ac4caf454d85bbf8",
     "apps/electron/src/renderer/hooks/pr-watch-snapshots.ts": "e4b6c4480bb60e3a8f40a673f4371959794ce7bfccf20937c404c5aa3022d67c",
     "apps/electron/src/renderer/atoms/sessions.ts": "b3c9f00d10a5b0bb893679424619f152563df181fd1c423a7bdc44d39958d256",
-    "apps/electron/src/renderer/event-processor/handlers/text.ts": "e46a290e9ebb28b647d31799da3cc207e1e4d510a5cc1ddf6ce75f2567b104ca"
+    "apps/electron/src/renderer/event-processor/handlers/text.ts": "e46a290e9ebb28b647d31799da3cc207e1e4d510a5cc1ddf6ce75f2567b104ca",
+    "apps/electron/src/renderer/components/app-shell/chat-header/pr-watch/ChatHeaderPrChip.tsx": "f74130113f564e1a8c69bc3342bf724d0416d1cac4b348564ae19aafb37104b0",
+    "apps/electron/src/renderer/components/app-shell/chat-header/pr-watch/pr-quick-actions.ts": "bd307e4f89f0e8292172e88b74c603c077e590e77e798b86edc694e18dcc22e3"
   },
   "compiledNativeFeatures": {
     "bootstrap-preload.cjs": [

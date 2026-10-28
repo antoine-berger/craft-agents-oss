@@ -20,7 +20,8 @@ export function ChatHeaderPrChip({ state, nav, onReserveElChange }: ChatHeaderPr
   if (state.kind !== 'pr') return null
 
   const { summary } = state
-  const status = prChipStatus(summary)
+  const status = summary.attentionStale ? null : prChipStatus(summary)
+  const freshness = summary.attentionStale ? t('chat.prWatch.savedUnrefreshed') : null
   const multi = !!nav && nav.count > 1
   const others = multi ? nav.entries.filter((_, index) => index !== nav.index).map(entry => entry.summary) : []
   const othersStatus = mostUrgentStatus(others)
@@ -32,11 +33,12 @@ export function ChatHeaderPrChip({ state, nav, onReserveElChange }: ChatHeaderPr
       <button
         type="button"
         onClick={() => onOpenUrl(summary.url)}
-        title={t('chat.prWatch.openOnGitHub')}
+        title={[t('chat.prWatch.openOnGitHub'), freshness].filter(Boolean).join(' · ')}
         aria-label={[
           t('chat.prWatch.openOnGitHub'),
           t('chat.prWatch.chipLabel', { number: summary.number, title: summary.title }),
           t(`chat.prWatch.state.${summary.state}`),
+          freshness,
           status && statusLabel(status, summary, t),
           multi && t('chat.prWatch.otherPrs', { count: nav.count - 1 }),
           othersStatus && othersStatusSummary && statusLabel(othersStatus, othersStatusSummary, t),

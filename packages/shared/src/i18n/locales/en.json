@@ -306,6 +306,7 @@
   "chat.prWatch.merge.unknown": "Mergeability not computed yet",
   "chat.prWatch.merge.unstable": "Mergeable, but checks are failing",
   "chat.prWatch.openOnGitHub": "Open on GitHub",
+  "chat.prWatch.savedUnrefreshed": "Saved PR · status not refreshed",
   "chat.prWatch.openThreads_one": "{{count}} open thread",
   "chat.prWatch.openThreads_other": "{{count}} open threads",
   "chat.prWatch.otherPrs": "Other pull requests ({{count}})",

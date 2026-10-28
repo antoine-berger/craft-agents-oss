@@ -195,7 +195,7 @@ export function fixReviewMessage(summary: PrSummary, details: PrDetails | undefi
  * conflicts — the card's priority (conflicts first, since review fixes may have to be redone).
  */
 export function autoFixApplies(summary: PrSummary): boolean {
-  return (summary.state === 'open' || summary.state === 'draft')
+  return !summary.attentionStale && (summary.state === 'open' || summary.state === 'draft')
     && hasReviewFeedback(summary)
     && summary.mergeState !== 'conflicting'
 }

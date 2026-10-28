@@ -6,6 +6,7 @@ export function deriveSessionStatus(state: PrWatchSessionState): string | undefi
   if (state.kind !== 'ready') return undefined
   const branch = state.prs.find(pr => pr.origin === 'branch')
   if (!branch) return state.incomplete ? undefined : 'todo'
+  if (branch.summary.attentionStale) return undefined
   switch (branch.summary.state) {
     case 'open':
     case 'draft': return 'needs-review'

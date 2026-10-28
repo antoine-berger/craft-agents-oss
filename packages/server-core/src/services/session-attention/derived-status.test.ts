@@ -7,6 +7,10 @@ function pr(state: PrState, origin: PrEntry['origin'] = 'branch'): PrEntry {
 }
 
 describe('Conductor PR-derived session status', () => {
+  it('keeps the current status when a durable association has not been refreshed', () => {
+    const cached = pr('merged'); cached.summary.attentionStale = true
+    expect(deriveSessionStatus({ kind: 'ready', prs: [cached] })).toBeUndefined()
+  })
   it('maps no PR, open/draft, merged and closed PRs to the existing Craft status IDs', () => {
     expect(deriveSessionStatus({ kind: 'none' })).toBe('todo')
     for (const [state, expected] of Object.entries({ open: 'needs-review', draft: 'needs-review', merged: 'done', closed: 'cancelled' })) {
