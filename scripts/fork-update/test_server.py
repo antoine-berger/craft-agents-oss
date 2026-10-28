@@ -35,6 +35,22 @@ class ForkServerTests(unittest.TestCase):
         with patch.object(server, 'status', return_value={'available': True, 'staged': True}), patch.object(server, 'verify_file'), patch.object(server, 'assert_idle', side_effect=ValueError('command still active')), patch.object(server, 'run', side_effect=AssertionError('must not stop')):
             with self.assertRaisesRegex(ValueError, 'command still active'): server.apply('0.15.7', {}, True)
 
+    def test_preparation_uses_its_own_writable_disk_cache(self):
+        with tempfile.TemporaryDirectory() as root:
+            root = Path(root); releases = root / 'releases'; releases.mkdir()
+            cache = root / 'downloads'; cache.mkdir()
+            commands = []
+            def extract(_archive, dest):
+                for name in ['packages/server/src/index.ts', 'apps/webui/dist/index.html', 'bun.lock']:
+                    path = dest / name; path.parent.mkdir(parents=True, exist_ok=True); path.write_text('fixture')
+                (dest / 'apps/electron/resources').mkdir(parents=True)
+            with patch.object(server, 'RELEASES', releases), patch.object(server, 'CACHE', cache), patch.object(server, 'verify_file'), patch.object(server, 'safe_extract', side_effect=extract), patch.object(server, 'run', side_effect=lambda *args, **kwargs: commands.append(args)), patch.object(server, 'status', side_effect=[{'available': True, 'staged': False}, {'available': True, 'staged': True}]):
+                server.stage('0.15.7', {'sha256': 'a' * 64})
+            install = next(args for args in commands if 'install' in args)
+            self.assertTrue(any(str(arg).startswith('TMPDIR=' + str(releases)) for arg in install))
+            self.assertTrue(any(str(arg).startswith('BUN_INSTALL_CACHE_DIR=' + str(releases)) for arg in install))
+            self.assertTrue((releases / 'fork-0.15.7/.update-tmp').is_dir())
+
     def test_corrupted_cached_download_is_rejected(self):
         with tempfile.TemporaryDirectory() as root:
             file = Path(root) / 'download'; file.write_bytes(b'good')

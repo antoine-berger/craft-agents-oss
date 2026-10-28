@@ -127,11 +127,14 @@ def stage(target, asset):
         for required in ['packages/server/src/index.ts', 'apps/webui/dist/index.html', 'apps/electron/resources', 'bun.lock']:
             if not (temporary / required).exists():
                 raise ValueError(f'Incomplete server release: missing {required}')
+        install_tmp = temporary / '.update-tmp'
+        install_tmp.mkdir(mode=0o700)
         run('chown', '-R', 'craft:craft', str(temporary))
         # Installs are isolated in the new release on disk. No live node_modules,
         # environment, worktree, project or conversation is modified.
         run('runuser', '-u', 'craft', '--', 'env', 'HOME=/home/craft',
             'PATH=/home/craft/.bun/bin:/usr/local/bin:/usr/bin:/bin', 'HUSKY=0',
+            'TMPDIR=' + str(install_tmp), 'BUN_INSTALL_CACHE_DIR=' + str(install_tmp / 'bun-cache'),
             BUN, 'install', '--frozen-lockfile', cwd=temporary, timeout=1200)
         run('runuser', '-u', 'craft', '--', BUN, '-e',
             "await import('@craft-agent/shared/protocol'); await import('@craft-agent/server-core/transport')",
