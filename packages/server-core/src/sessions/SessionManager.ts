@@ -5,6 +5,7 @@ import { captureSessionCheckpoint, listSessionCheckpoints as listWorktreeCheckpo
 import type { SessionCheckpointList, SessionCheckpointRestoreResult } from '@craft-agent/shared/protocol'
 import { availableSessionSourceSlugs } from './automatic-session-sources'
 import { resolveRepositoryStart } from '../services/repositories/start-context'
+import { runGit } from '../services/git'
 import { resolveLinearStartIssue } from '../sources/linear-start-context'
 import { parsePrReference } from '../services/pr-watch/pr-ref'
 import { resolveWorktreeRepository } from '../services/repositories/worktree'
@@ -18,7 +19,7 @@ import { validateFilePath, getWorkspaceAllowedDirs } from '@craft-agent/server-c
 import { createScopedLogger, CONSOLE_LOGGER, type PlatformServices, type Logger } from '@craft-agent/server-core/runtime'
 import { basename, dirname, join } from 'path'
 import { existsSync } from 'fs'
-import { readFile, writeFile, mkdir, rename, rm } from 'fs/promises'
+import { readFile, writeFile, mkdir, rename, rm, realpath } from 'fs/promises'
 import { randomUUID } from 'node:crypto'
 import { type AgentEvent, type ChatOptions, getPermissionMode, setPermissionMode, setGuardedModeActiveResolver, clampPermissionMode, planExecutionMode, parsePermissionMode, hydratePreviousPermissionMode, getPermissionModeDiagnostics, type PermissionMode, unregisterSessionScopedToolCallbacks, mergeSessionScopedToolCallbacks, AbortReason, type AuthRequest, type AuthResult, type CredentialAuthRequest, type BrowserPaneFns, generateConversationSummary, resolveKeepBackgroundTasksAlive } from '@craft-agent/shared/agent'
 import {
@@ -142,7 +143,9 @@ import { buildBackendRuntimeSignature, buildRestartRequiredSignature, filterAtta
 import { validateArchiveTarget } from './archive-guards'
 import { resolveSessionWorktreePolicy, defaultSessionWorktreePolicy, isSessionDirectoryInWorktree } from './session-worktree'
 import { getGitHubBranchPrefix } from '../services/repositories/github'
-import { planOwnedWorktree, ensureOwnedWorktree, removeOwnedWorktree, ownedWorktreeWorkingDirectory } from '../services/repositories/owned-worktree'
+import { planOwnedWorktree, ensureOwnedWorktree, removeOwnedWorktree, ownedWorktreeWorkingDirectory, adoptExistingWorktree } from '../services/repositories/owned-worktree'
+import { captureStackParent } from '../services/repositories/worktree-stack'
+import { ensureRepositorySetup } from '../services/repositories/setup'
 import { addTurnUsage, branchStartTotals, type BranchParent } from './turn-usage'
 
 // Import from server-core domain utilities
@@ -1423,7 +1426,11 @@ export class SessionManager implements ISessionManager {
   private archiveStops = new Map<string, Promise<void>>()
   private archiveStopFailures = new Set<string>()
   private worktreeLocks: Map<string, Promise<void>> = new Map()
+  private worktreeSetupControllers = new Map<string, AbortController>()
   private checkpointRestores = new Map<string, ManagedSession>()
+  private changeSummaryRefreshes = new Set<string>()
+  private changeSummaryDisposed = false
+  private worktreeResources = new Set<import('../handlers/session-manager-interface').SessionWorktreeResource>()
   /** Monotonic clock to ensure strictly increasing message timestamps */
   private lastTimestamp = 0
 
@@ -4344,12 +4351,23 @@ export class SessionManager implements ISessionManager {
     try { return await operation() } finally { managed.checkpointAsyncWriters-- }
   }
 
+  /** Editor saves share the same exclusion boundary as checkout preparation and restoration. */
+  async withSessionWorktreeWrite<T>(sessionId: string, operation: () => Promise<T>): Promise<T> {
+    const managed = this.sessions.get(sessionId)
+    if (!managed) throw new Error('Session not found')
+    this.assertSessionRunnable(managed)
+    await this.assertNoCheckpointRestore(managed)
+    return this.withCheckpointWriter(managed, () => this.withWorktreeLock(managed, async () => {
+      this.assertSessionRunnable(managed)
+      await this.assertNoCheckpointRestore(managed)
+      return operation()
+    }))
+  }
+
   /** Check checkout paths, including aliases/subdirectories used by parent and child agents. */
   private async assertNoCheckpointRestore(managed: ManagedSession): Promise<void> {
     if (managed.isRestoringCheckpoint) throw new Error('Checkpoint restoration is in progress')
-    for (const restoring of this.checkpointRestores?.values() ?? []) {
-      const path = restoring.worktree?.owned?.path
-      if (!path) continue
+    for (const [path] of this.checkpointRestores ?? []) {
       for (const directory of [managed.workingDirectory, managed.sdkCwd, managed.branchFromSdkCwd, managed.worktree?.owned?.path]) {
         if (await isSessionDirectoryInWorktree(directory, path)) throw new Error('A checkpoint is being restored in this checkout')
       }
@@ -4357,10 +4375,10 @@ export class SessionManager implements ISessionManager {
     if (managed.isRestoringCheckpoint) throw new Error('Checkpoint restoration is in progress')
   }
 
-  private async assertCheckpointIdle(managed: ManagedSession): Promise<void> {
-    const path = managed.worktree?.owned?.path
+  private async assertCheckpointIdle(managed: ManagedSession, path = managed.worktree?.owned?.path): Promise<void> {
     if (!path || managed.isDeleting) throw new Error('This conversation has no available owned checkout')
-    const busy = (session: ManagedSession) => session.isDeleting || session.isProcessing
+    const busy = (session: ManagedSession) => [...this.worktreeResources].some(resource => resource.hasRunningSession(session.id))
+      || session.isDeleting || session.isProcessing
       || (session.checkpointPendingSends ?? 0) > 0 || (session.checkpointAsyncWriters ?? 0) > 0
       || session.messageQueue.length > 0 || (session.acceptedSteers?.size ?? 0) > 0
       || session.authRetryInProgress || !!session.autoRetryTimer || !!session.pendingActivationResend
@@ -4374,6 +4392,40 @@ export class SessionManager implements ISessionManager {
       if (sharesCheckout && busy(other)) throw new Error('Stop running agents, queued messages, background tasks and title operations in this checkout before restoring')
     }
     if (busy(managed)) throw new Error('This conversation is still busy')
+  }
+
+  async adoptSessionCheckpointWorktree(sessionId: string): Promise<SessionCheckpointList> {
+    const managed = this.sessions.get(sessionId)
+    if (!managed) throw new Error('Session not found')
+    this.assertSessionRunnable(managed)
+    const stopEpoch = managed.stopEpoch ?? 0
+    return this.withWorktreeLock(managed, async () => {
+      this.assertSessionRunnable(managed, stopEpoch)
+      await this.assertNoCheckpointRestore(managed)
+      if (managed.worktree?.owned) return this.listSessionCheckpoints(sessionId)
+      const directory = managed.workingDirectory
+      if (!directory) throw new Error('This session has no working checkout to associate')
+      const checkout = await runGit(expandPath(directory), ['rev-parse', '--show-toplevel'])
+      if (!checkout) throw new Error('This session is not in a Git worktree')
+      const path = await realpath(checkout)
+      this.assertSessionRunnable(managed, stopEpoch)
+      if (this.checkpointRestores.has(path)) throw new Error('This checkout is busy with checkpoint work')
+      managed.isRestoringCheckpoint = true
+      this.checkpointRestores.set(path, managed)
+      try {
+        await this.assertCheckpointIdle(managed, path)
+        const owned = await adoptExistingWorktree({ directory, ownerId: `${managed.workspace.id}/${managed.id}` })
+        this.assertSessionRunnable(managed, stopEpoch)
+        await this.assertCheckpointIdle(managed, path)
+        managed.worktree = { ...managed.worktree, repositoryPath: managed.worktree?.repositoryPath ?? directory, cleanupOnArchive: false, owned }
+        await this.persistWorktreeState(managed, { checkpointTransaction: true })
+        this.sendEvent({ type: 'working_directory_changed', sessionId, workingDirectory: directory, worktree: { ...managed.worktree } }, managed.workspace.id)
+        return this.listSessionCheckpoints(sessionId)
+      } finally {
+        managed.isRestoringCheckpoint = false
+        if (this.checkpointRestores.get(path) === managed) this.checkpointRestores.delete(path)
+      }
+    })
   }
 
   async listSessionCheckpoints(sessionId: string): Promise<SessionCheckpointList> {
@@ -4433,6 +4485,7 @@ export class SessionManager implements ISessionManager {
           managed.lastFinalMessageId = this.getLastFinalAssistantMessageId(messages)
           managed.lastReadMessageId = messages.at(-1)?.id
           managed.hasUnread = false
+          if (managed.worktree) managed.worktree.changeSummary = undefined
           managed.tokenUsage = stored.tokenUsage
           if (managed.tokenUsage) managed.tokenUsage = { ...managed.tokenUsage, contextTokens: 0, contextUsage: undefined, lastRunningTotals: undefined }
           managed.sdkSessionId = undefined
@@ -4529,7 +4582,7 @@ export class SessionManager implements ISessionManager {
       if (managed.worktree?.owned && await commonGitDir(repositoryPath) !== managed.worktree.owned.gitDir) {
         throw new Error(i18n.t('worktree.session.folderLocked'))
       }
-      if (!managed.worktree?.owned) managed.worktree = { repositoryPath, cleanupOnArchive: false }
+      if (!managed.worktree?.owned) managed.worktree = { repositoryPath, cleanupOnArchive: false, setup: managed.worktree?.setup ?? {} }
       await this.prepareSessionWorktree(managed)
       const owned = managed.worktree!.owned!
       this.notifySessionCreated(workspaceId, sessionId)
@@ -4538,8 +4591,9 @@ export class SessionManager implements ISessionManager {
   }
 
   /** The queue logs I/O failures; confirm ownership reached disk before touching Git. */
-  private async persistWorktreeState(managed: ManagedSession): Promise<void> {
-    this.persistSession(managed)
+  private async persistWorktreeState(managed: ManagedSession, options?: { checkpointTransaction: true }): Promise<void> {
+    if (options?.checkpointTransaction) this.enqueuePersist(managed)
+    else this.persistSession(managed)
     await this.flushSession(managed.id)
     const header = readSessionHeader(getSessionFilePath(managed.workspace.rootPath, managed.id))
     if (JSON.stringify(header?.worktree) !== JSON.stringify(managed.worktree)) {
@@ -4549,10 +4603,21 @@ export class SessionManager implements ISessionManager {
 
   /** Called under the worktree lock, before any backend is constructed. */
   private async prepareSessionWorktree(managed: ManagedSession): Promise<void> {
+    const preparationStopEpoch = managed.stopEpoch ?? 0
     if (managed.isDeleting) throw new DOMException('Session was deleted', 'AbortError')
     const metadata = managed.worktree
     if (!metadata) return
     if (metadata.needsRepository) throw new Error(i18n.t('chat.worktree.chooseRepository'))
+
+    // Imported SDK transcripts keep their original storage cwd; association only enables snapshots.
+    if (metadata.owned?.adopted) {
+      this.assertSessionRunnable(managed, preparationStopEpoch)
+      const ready = await ensureOwnedWorktree(metadata.owned)
+      if (!managed.workingDirectory || await realpath(expandPath(managed.workingDirectory)) !== ownedWorktreeWorkingDirectory(ready)) throw new Error('The associated worktree no longer matches this session directory')
+      metadata.owned = ready
+      await this.persistWorktreeState(managed)
+      return
+    }
 
     const ownerId = `${managed.workspace.id}/${managed.id}`
     if (metadata.owned && metadata.owned.ownerId !== ownerId) {
@@ -4599,6 +4664,14 @@ export class SessionManager implements ISessionManager {
         taskTitle: metadata.resolvedStart?.taskTitle ?? sanitizeForTitle(managed.messages.find(message => message.role === 'user' && !message.hidden)?.content ?? managed.name ?? managed.id),
       })
     }
+    const stackStart = metadata.pendingRepository?.start
+    if (!metadata.stackParent && stackStart && 'copy' in stackStart && stackStart.copy) {
+      const requestedBranch = stackStart.kind === 'branch' ? stackStart.branch : metadata.resolvedStart?.baseBranch
+      if (requestedBranch) metadata.stackParent = await captureStackParent({
+        sessionId: managed.id, workspaceId: managed.workspace.id, requestedBranch,
+        plan: metadata.owned, sessions: this.getSessions(managed.workspace.id),
+      })
+    }
     delete metadata.pendingRepository
     delete metadata.repositoryResolved
     // Recheck even after a previous failed persistence attempt, or after a restart.
@@ -4623,6 +4696,31 @@ export class SessionManager implements ISessionManager {
       invalidateContextFileCache(workingDirectory)
       invalidateSkillsCache()
       this.sendEvent({ type: 'working_directory_changed', sessionId: managed.id, workingDirectory, worktree: { ...metadata, owned: { ...ready } } }, managed.workspace.id)
+    }
+    if (metadata.setup !== undefined && !managed.importedFrom) {
+      const controller = new AbortController()
+      this.assertSessionRunnable(managed, preparationStopEpoch)
+      this.worktreeSetupControllers.set(managed.id, controller)
+      try {
+        await ensureRepositorySetup({
+          repositoryPath: metadata.repositoryPath,
+          worktreePath: ready.path,
+          sessionDirectory: getSessionStoragePath(managed.workspace.rootPath, managed.id),
+          leaseDirectory: join(ready.gitDir, 'craft-session-worktrees', 'setup'),
+          projectSetup: metadata.setup,
+          signal: controller.signal,
+          onProgress: state => {
+            const message = state.status === 'running' ? 'Preparing repository before starting the agent…'
+              : state.status === 'ready' ? 'Repository setup and readiness checks completed.'
+              : state.status === 'skipped' ? 'No repository setup configured. Add a setup command in Project settings or .craft/setup.json to prepare dependencies automatically.'
+              : `Repository setup ${state.status}. Send a message to retry. Log: ${state.logPath}`
+            this.sendEvent({ type: 'info', sessionId: managed.id, message, timestamp: Date.now() }, managed.workspace.id)
+          },
+        })
+        this.assertSessionRunnable(managed, preparationStopEpoch)
+      } finally {
+        if (this.worktreeSetupControllers.get(managed.id) === controller) this.worktreeSetupControllers.delete(managed.id)
+      }
     }
   }
 
@@ -6238,6 +6336,7 @@ export class SessionManager implements ISessionManager {
 
     // Lock synchronously, before any await: no concurrent send/steer can enter.
     managed.isArchived = true
+    this.worktreeSetupControllers.get(sessionId)?.abort()
     managed.recovery = null
     managed.archivedAt = Date.now()
     if (managed.isProcessing) managed.wasInterrupted = true
@@ -6255,6 +6354,8 @@ export class SessionManager implements ISessionManager {
     const stopped = (async () => {
       this.persistSession(managed)
       await this.flushSession(managed.id)
+      await Promise.all([...this.worktreeResources].map(resource => resource.stopSession(sessionId)))
+      await this.withWorktreeLock(managed, async () => {})
       // An initialization already awaiting I/O must settle before the owner can restore this chat.
       await this.agentPreparations.get(sessionId)?.catch(() => {})
       const runtime = { agent: managed.agent, poolServer: managed.poolServer, mcpPool: managed.mcpPool }
@@ -7058,7 +7159,7 @@ export class SessionManager implements ISessionManager {
       }
 
       // Changing a new session's repository still isolates it before the first agent starts.
-      managed.worktree = managed.worktree ? { repositoryPath: path, cleanupOnArchive: false } : undefined
+      managed.worktree = managed.worktree ? { repositoryPath: path, cleanupOnArchive: false, setup: managed.worktree.setup } : undefined
       managed.workingDirectory = path
 
       // Invalidate filesystem caches that depend on working directory
@@ -7331,10 +7432,12 @@ export class SessionManager implements ISessionManager {
     if (managed.isRestoringCheckpoint) throw new Error('Wait for checkpoint restoration before deleting this session')
     this.clearIdleRuntimeTimer(managed)
     managed.isDeleting = true
+    this.worktreeSetupControllers.get(sessionId)?.abort()
     managed.stopEpoch = (managed.stopEpoch ?? 0) + 1
+    await Promise.all([...this.worktreeResources].map(resource => resource.stopSession(sessionId)))
     // Let any already-started Git operation finish before deleting its recovery metadata.
     // Deleting a conversation keeps its Git branch/checkout; archive cleanup is opt-in.
-    if (managed.worktree) await this.withWorktreeLock(managed, async () => {})
+    await this.withWorktreeLock(managed, async () => {})
 
     // Get workspace slug before deleting
     const workspaceRootPath = managed.workspace.rootPath
@@ -7547,7 +7650,7 @@ export class SessionManager implements ISessionManager {
           throw new Error('The repository is fixed after the chat starts')
         }
         managed.worktree = { repositoryPath: choice.kind === 'local' ? choice.gitDir : '',
-          pendingRepository: choice, needsRepository: false, baseBranch: managed.worktree?.baseBranch, cleanupOnArchive: managed.worktree?.cleanupOnArchive ?? false }
+          pendingRepository: choice, needsRepository: false, baseBranch: managed.worktree?.baseBranch, cleanupOnArchive: managed.worktree?.cleanupOnArchive ?? false, setup: managed.worktree?.setup ?? (!managed.importedFrom ? {} : undefined) }
         await this.persistWorktreeState(managed)
       })
     }
@@ -8201,6 +8304,7 @@ export class SessionManager implements ISessionManager {
   }
 
   async cancelProcessing(sessionId: string, silent = false): Promise<void> {
+    this.worktreeSetupControllers.get(sessionId)?.abort()
     const managed = this.sessions.get(sessionId)
     if (!managed?.isProcessing) {
       return // Not processing, nothing to cancel
@@ -10740,6 +10844,30 @@ export class SessionManager implements ISessionManager {
     return () => this.turnCompleteListeners.delete(listener)
   }
 
+  private async refreshSessionChangeSummary(sessionId: string): Promise<void> {
+    const managed = this.sessions.get(sessionId)
+    const worktree = managed?.worktree
+    const directory = managed?.workingDirectory
+    const base = worktree?.owned?.baseCommit
+    if (this.changeSummaryDisposed || !managed || !worktree || !directory || !base || managed.isArchived || managed.isDeleting
+      || this.changeSummaryRefreshes.has(sessionId)) return
+    this.changeSummaryRefreshes.add(sessionId)
+    try {
+      await this.withCheckpointWriter(managed, async () => {
+        await this.assertNoCheckpointRestore(managed)
+        const { readSessionChangeSummary } = await import('../services/repositories/change-summary')
+        const summary = await readSessionChangeSummary(directory, base)
+        if (this.changeSummaryDisposed || managed.isArchived || managed.isDeleting || managed.worktree !== worktree
+          || managed.workingDirectory !== directory || worktree.owned?.baseCommit !== base) return
+        worktree.changeSummary = summary
+        this.persistSession(managed)
+        this.sendEvent({ type: 'working_directory_changed', sessionId, workingDirectory: directory, worktree: { ...worktree } }, managed.workspace.id)
+      })
+    } catch (error) {
+      sessionLog.warn('Could not refresh tracked change counts:', error)
+    } finally { this.changeSummaryRefreshes.delete(sessionId) }
+  }
+
   private sendEvent(event: SessionEvent, workspaceId?: string): void {
     // UI attention is derived from real runtime events; opening a conversation never clears it.
     const attention = getSessionAttentionService()
@@ -10755,6 +10883,7 @@ export class SessionManager implements ISessionManager {
     }
 
     if (event.type === 'complete') {
+      void this.refreshSessionChangeSummary(event.sessionId)
       for (const listener of this.turnCompleteListeners) {
         try {
           listener(event.sessionId)
@@ -11386,7 +11515,21 @@ export class SessionManager implements ISessionManager {
    * Clean up all resources held by the SessionManager.
    * Should be called on app shutdown to prevent resource leaks.
    */
+  registerWorktreeResource(resource: import('../handlers/session-manager-interface').SessionWorktreeResource): () => void {
+    this.worktreeResources.add(resource)
+    return () => { this.worktreeResources.delete(resource) }
+  }
+
   cleanup(): void {
+    this.changeSummaryDisposed = true
+    this.changeSummaryRefreshes.clear()
+    for (const controller of this.worktreeSetupControllers.values()) controller.abort()
+    this.worktreeSetupControllers.clear()
+    for (const resource of this.worktreeResources) {
+      try { Promise.resolve(resource.dispose()).catch(error => sessionLog.error('Worktree resource cleanup failed:', error)) }
+      catch (error) { sessionLog.error('Worktree resource cleanup failed:', error) }
+    }
+    this.worktreeResources.clear()
     for (const managed of this.sessions.values()) this.clearIdleRuntimeTimer(managed)
     disposeSessionAttention()
     sessionLog.info('Cleaning up resources...')

@@ -1,4 +1,4 @@
-import type { ShipWorkflowAPI } from '@craft-agent/shared/protocol'
+import type { ShipWorkflowAPI, WorktreeFilesAPI, SessionTerminalAPI, WorktreeStackAPI, ShipUsageAPI } from '@craft-agent/shared/protocol'
 // =============================================================================
 // Protocol re-exports (channels, DTOs, events, wire types)
 // =============================================================================
@@ -215,6 +215,7 @@ import type {
   RefreshTitleResult,
   FileSearchResult,
   SessionSearchResult,
+  SessionSearchResponse,
   LlmConnectionSetup,
   TestLlmConnectionParams,
   TestLlmConnectionResult,
@@ -242,7 +243,7 @@ import type {
 /** Native window material the renderer may paint translucently over (see ThemeContext data-vibrancy). */
 export type WindowVibrancy = 'under-window' | 'mica'
 
-export interface ElectronAPI extends ShipWorkflowAPI {
+export interface ElectronAPI extends ShipWorkflowAPI, WorktreeFilesAPI, SessionTerminalAPI, WorktreeStackAPI, ShipUsageAPI {
   getSessionAttention(workspaceId: string): Promise<import('@craft-agent/shared/protocol').WorkspaceAttention>
   onSessionAttentionChanged(callback: (snapshot: import('@craft-agent/shared/protocol').WorkspaceAttention) => void): () => void
   getProviderQuotas(request?: import('@craft-agent/shared/protocol').ProviderQuotasRequest): Promise<import('@craft-agent/shared/protocol').ProviderQuotasSnapshot>
@@ -530,6 +531,7 @@ export interface ElectronAPI extends ShipWorkflowAPI {
 
   // Session content search (full-text search via ripgrep)
   searchSessionContent(workspaceId: string, query: string, searchId?: string): Promise<SessionSearchResult[]>
+  searchSessionContent(workspaceId: string, query: string, searchId: string, options: { includeStatus: true; cancel?: boolean }): Promise<SessionSearchResponse>
 
   // Sources change listener (live updates when sources are added/removed)
   onSourcesChanged(callback: (workspaceId: string, sources: LoadedSource[]) => void): () => void
@@ -662,6 +664,7 @@ export interface ElectronAPI extends ShipWorkflowAPI {
   /** Read the chosen repository origin without scanning or fetching GitHub repositories. */
   getRepositoryIdentity(dirPath: string): Promise<string | null>
   listSessionCheckpoints(sessionId: string): Promise<import('@craft-agent/shared/protocol').SessionCheckpointList>
+  adoptSessionCheckpointWorktree(sessionId: string): Promise<import('@craft-agent/shared/protocol').SessionCheckpointList>
   restoreSessionCheckpoint(sessionId: string, checkpointId: string): Promise<import('@craft-agent/shared/protocol').SessionCheckpointRestoreResult>
   getGitReview(sessionId: string): Promise<import('@craft-agent/shared/protocol').GitReviewSnapshot>
   /** Repository picker: local repos (workspace folder + these recent folders) and `gh repo list` */

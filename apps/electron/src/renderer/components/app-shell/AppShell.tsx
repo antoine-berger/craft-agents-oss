@@ -77,6 +77,7 @@ import type { SidebarItem as SidebarNavItem } from "./LeftSidebar"
 import { SidebarPane } from "./SidebarPane"
 import { SessionFilterMenu } from "./SessionFilterMenu"
 import { ShellResizeHandle } from "./ShellResizeHandle"
+import { fitNavigationWidths, MIN_DESKTOP_SHELL_WIDTH, NAVIGATION_WIDTHS } from "./navigation-sizing"
 import { useSession } from "@/hooks/useSession"
 import { ensureSessionMessagesLoadedAtom } from "@/atoms/sessions"
 import { AppShellProvider, WORKSPACE_SETTINGS_CHANGED_EVENT, type AppShellContextType } from "@/context/AppShellContext"
@@ -241,11 +242,11 @@ function AppShellContent({
     return storage.get(storage.KEYS.sidebarVisible, !defaultCollapsed)
   })
   const [sidebarWidth, setSidebarWidth] = React.useState(() => {
-    return storage.get(storage.KEYS.sidebarWidth, 232)
+    return storage.get<number>(storage.KEYS.sidebarWidth, NAVIGATION_WIDTHS.sidebar.default)
   })
   // Session list width in pixels (min 240, max 480)
   const [sessionListWidth, setSessionListWidth] = React.useState(() => {
-    return storage.get(storage.KEYS.sessionListWidth, 304)
+    return storage.get<number>(storage.KEYS.sessionListWidth, NAVIGATION_WIDTHS.list.default)
   })
 
   // Hides both sidebar and navigator (CMD+. toggle)
@@ -259,10 +260,6 @@ function AppShellContent({
   // desktop (narrow window or small screen).
   const shellRef = useRef<HTMLDivElement>(null)
   const shellWidth = useContainerWidth(shellRef)
-  const MOBILE_THRESHOLD = 768
-  const isAutoCompact = shellWidth > 0 && shellWidth < MOBILE_THRESHOLD
-
-  const effectiveSidebarAndNavigatorHidden = isSidebarAndNavigatorHidden || isAutoCompact
 
   // What's New overlay
   const [showWhatsNew, setShowWhatsNew] = React.useState(false)
@@ -335,6 +332,19 @@ function AppShellContent({
   // Pages behaves the same way: both the library grid and an open page render
   // full-width in the content area — there is no pages navigator list.
   const isPagesView = isPagesNavigation(navState)
+  const desktopThreshold = !isSidebarAndNavigatorHidden && isSidebarVisible && !isBoardView && !isPagesView
+    ? MIN_DESKTOP_SHELL_WIDTH : 768
+  const isAutoCompact = shellWidth > 0 && shellWidth < desktopThreshold
+  const effectiveSidebarAndNavigatorHidden = isSidebarAndNavigatorHidden || isAutoCompact
+  // Responsive fitting never overwrites the user's saved drag widths.
+  const navigationWidths = fitNavigationWidths({
+    shellWidth, sidebarWidth, listWidth: sessionListWidth,
+    sidebarVisible: isSidebarVisible && !effectiveSidebarAndNavigatorHidden,
+    navigatorVisible: !effectiveSidebarAndNavigatorHidden && !isBoardView && !isPagesView,
+    contentVisible: panelCount > 0,
+  })
+  const renderedSidebarWidth = navigationWidths.sidebar
+  const renderedSessionListWidth = navigationWidths.list
 
   // Derive source filter from navigation state (only when in sources navigator)
   const sourceFilter: SourceFilter | null = isSourcesNavigation(navState) ? navState.filter ?? null : null
@@ -1086,7 +1096,7 @@ function AppShellContent({
           setSidebarHandleY(e.clientY - rect.top)
         }
       } else if (isResizing === 'session-list') {
-        const offset = isSidebarVisible ? sidebarWidth : 0
+        const offset = isSidebarVisible ? renderedSidebarWidth : 0
         const newWidth = Math.min(Math.max(e.clientX - offset, 240), 480)
         setSessionListWidth(newWidth)
         if (sessionListHandleRef.current) {
@@ -1118,6 +1128,7 @@ function AppShellContent({
     isResizing,
     sidebarWidth,
     sessionListWidth,
+    renderedSidebarWidth,
     isSidebarVisible,
   ])
 
@@ -2427,7 +2438,7 @@ function AppShellContent({
           sidebarSlot={
             <SidebarPane
               paneRef={sidebarRef}
-              width={sidebarWidth}
+              width={renderedSidebarWidth}
               focused={sidebarFocused}
               onKeyDown={handleSidebarKeyDown}
               links={sidebarLinks}
@@ -2440,10 +2451,10 @@ function AppShellContent({
               newSessionHotkey={newChatHotkey}
             />
           }
-          sidebarWidth={effectiveSidebarAndNavigatorHidden ? 0 : (isSidebarVisible ? sidebarWidth : 0)}
+          sidebarWidth={effectiveSidebarAndNavigatorHidden ? 0 : (isSidebarVisible ? renderedSidebarWidth : 0)}
           navigatorSlot={
             <div
-              style={{ width: isAutoCompact ? '100%' : sessionListWidth }}
+              style={{ width: isAutoCompact ? '100%' : renderedSessionListWidth }}
               className="h-full flex flex-col min-w-0 relative z-panel"
             >
             <PanelHeader
@@ -2690,7 +2701,7 @@ function AppShellContent({
             )}
             </div>
           }
-          navigatorWidth={isAutoCompact ? sessionListWidth : (effectiveSidebarAndNavigatorHidden || isBoardView || isPagesView ? 0 : sessionListWidth)}
+          navigatorWidth={isAutoCompact ? renderedSessionListWidth : (effectiveSidebarAndNavigatorHidden || isBoardView || isPagesView ? 0 : renderedSessionListWidth)}
           isSidebarAndNavigatorHidden={effectiveSidebarAndNavigatorHidden}
           isRightSidebarVisible={false}
           isCompact={isAutoCompact}
@@ -2702,7 +2713,7 @@ function AppShellContent({
         {!effectiveSidebarAndNavigatorHidden && (
           <ShellResizeHandle
             handleRef={resizeHandleRef}
-            left={isSidebarVisible ? sidebarWidth + (PANEL_GAP / 2) - PANEL_SASH_HALF_HIT_WIDTH : -PANEL_GAP}
+            left={isSidebarVisible ? renderedSidebarWidth + (PANEL_GAP / 2) - PANEL_SASH_HALF_HIT_WIDTH : -PANEL_GAP}
             hoverY={sidebarHandleY}
             onHoverYChange={setSidebarHandleY}
             keepHoverOnLeave={!!isResizing}
@@ -2714,7 +2725,7 @@ function AppShellContent({
         {!effectiveSidebarAndNavigatorHidden && !isBoardView && !isPagesView && (
           <ShellResizeHandle
             handleRef={sessionListHandleRef}
-            left={(isSidebarVisible ? sidebarWidth + PANEL_GAP : PANEL_EDGE_INSET) + sessionListWidth - PANEL_SASH_HALF_HIT_WIDTH}
+            left={(isSidebarVisible ? renderedSidebarWidth + PANEL_GAP : PANEL_EDGE_INSET) + renderedSessionListWidth - PANEL_SASH_HALF_HIT_WIDTH}
             hoverY={sessionListHandleY}
             onHoverYChange={setSessionListHandleY}
             keepHoverOnLeave={isResizing === 'session-list'}
@@ -2743,7 +2754,7 @@ function AppShellContent({
             trigger={
               <div
                 className="fixed w-0 h-0 pointer-events-none"
-                style={{ left: sidebarWidth + 20, top: editPopoverAnchorY.current }}
+                style={{ left: renderedSidebarWidth + 20, top: editPopoverAnchorY.current }}
                 aria-hidden="true"
               />
             }
@@ -2763,7 +2774,7 @@ function AppShellContent({
             trigger={
               <div
                 className="fixed w-0 h-0 pointer-events-none"
-                style={{ left: sidebarWidth + 20, top: editPopoverAnchorY.current }}
+                style={{ left: renderedSidebarWidth + 20, top: editPopoverAnchorY.current }}
                 aria-hidden="true"
               />
             }
@@ -2799,7 +2810,7 @@ function AppShellContent({
             trigger={
               <div
                 className="fixed w-0 h-0 pointer-events-none"
-                style={{ left: sidebarWidth + 20, top: editPopoverAnchorY.current }}
+                style={{ left: renderedSidebarWidth + 20, top: editPopoverAnchorY.current }}
                 aria-hidden="true"
               />
             }
@@ -2823,7 +2834,7 @@ function AppShellContent({
               trigger={
                 <div
                   className="fixed w-0 h-0 pointer-events-none"
-                  style={{ left: sidebarWidth + 20, top: editPopoverAnchorY.current }}
+                  style={{ left: renderedSidebarWidth + 20, top: editPopoverAnchorY.current }}
                   aria-hidden="true"
                 />
               }
@@ -2840,7 +2851,7 @@ function AppShellContent({
             trigger={
               <div
                 className="fixed w-0 h-0 pointer-events-none"
-                style={{ left: sidebarWidth + 20, top: editPopoverAnchorY.current }}
+                style={{ left: renderedSidebarWidth + 20, top: editPopoverAnchorY.current }}
                 aria-hidden="true"
               />
             }
@@ -2856,7 +2867,7 @@ function AppShellContent({
             trigger={
               <div
                 className="fixed w-0 h-0 pointer-events-none"
-                style={{ left: sidebarWidth + 20, top: editPopoverAnchorY.current }}
+                style={{ left: renderedSidebarWidth + 20, top: editPopoverAnchorY.current }}
                 aria-hidden="true"
               />
             }
@@ -2872,7 +2883,7 @@ function AppShellContent({
             trigger={
               <div
                 className="fixed w-0 h-0 pointer-events-none"
-                style={{ left: sidebarWidth + 20, top: editPopoverAnchorY.current }}
+                style={{ left: renderedSidebarWidth + 20, top: editPopoverAnchorY.current }}
                 aria-hidden="true"
               />
             }

@@ -17,6 +17,17 @@ function listener(channel: string) {
 }
 
 export const CHANNEL_MAP = {
+  getSessionStack: invoke(RPC_CHANNELS.worktreeStack.GET),
+  getShipUsage: invoke(RPC_CHANNELS.shipUsage.GET),
+  openSessionTerminal: invoke(RPC_CHANNELS.terminal.OPEN),
+  writeSessionTerminal: invoke(RPC_CHANNELS.terminal.WRITE),
+  resizeSessionTerminal: invoke(RPC_CHANNELS.terminal.RESIZE),
+  closeSessionTerminal: invoke(RPC_CHANNELS.terminal.CLOSE),
+  detachSessionTerminal: invoke(RPC_CHANNELS.terminal.DETACH),
+  onSessionTerminalChanged: listener(RPC_CHANNELS.terminal.CHANGED),
+  getWorktreeFiles: invoke(RPC_CHANNELS.worktreeFiles.LIST),
+  readWorktreeFile: invoke(RPC_CHANNELS.worktreeFiles.READ),
+  writeWorktreeFile: invoke(RPC_CHANNELS.worktreeFiles.WRITE),
   // Session management
   getSessions: invoke(RPC_CHANNELS.sessions.GET),
   getUnreadSummary: invoke(RPC_CHANNELS.sessions.GET_UNREAD_SUMMARY),
@@ -366,6 +377,7 @@ export const CHANNEL_MAP = {
   getProviderQuotas: invoke(RPC_CHANNELS.providerQuotas.GET),
   getGitReview: invoke(RPC_CHANNELS.git.GET_REVIEW),
   listSessionCheckpoints: invoke(RPC_CHANNELS.sessions.LIST_CHECKPOINTS),
+  adoptSessionCheckpointWorktree: invoke(RPC_CHANNELS.sessions.ADOPT_CHECKPOINT_WORKTREE),
   restoreSessionCheckpoint: invoke(RPC_CHANNELS.sessions.RESTORE_CHECKPOINT),
   listRepositories: invoke(RPC_CHANNELS.git.LIST_REPOS),
   createSessionWorktree: invoke(RPC_CHANNELS.git.CREATE_WORKTREE),

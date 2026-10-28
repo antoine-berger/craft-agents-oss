@@ -28,12 +28,13 @@
   "dependencies": {
     "@craft-agent/core": "workspace:*",
     "@craft-agent/shared": "workspace:*",
+    "@earendil-works/pi-ai": "1.1.0",
     "heic-convert": "^2.1.0",
     "jose": "^6.0.0",
+    "node-pty": "1.1.0",
     "playwright-core": "1.64.1",
-    "ws": "^8.19.0",
     "sharp": "0.34.5",
-    "@earendil-works/pi-ai": "1.1.0"
+    "ws": "^8.19.0"
   },
   "devDependencies": {
     "typescript": "^5.8.2",

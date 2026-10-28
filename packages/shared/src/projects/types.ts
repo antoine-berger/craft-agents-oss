@@ -37,6 +37,10 @@ export interface ProjectWorktreeSettings {
   baseBranch?: string;
   /** Remove clean checkouts on archive, keeping their branches. Defaults to false. */
   cleanupOnArchive?: boolean;
+  /** Runs in each new checkout before its agent starts; omitted uses repository setup config. */
+  setupCommand?: string;
+  /** Optional readiness check after setup (for dependencies, services or required environment). */
+  setupVerifyCommand?: string;
 }
 
 /**

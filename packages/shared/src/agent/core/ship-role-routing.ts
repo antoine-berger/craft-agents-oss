@@ -10,6 +10,22 @@ export const SHIP_CLAUDE_MODEL_ENV = {
   ANTHROPIC_DEFAULT_SONNET_MODEL: 'claude-sonnet-5-5',
 };
 
+/** A declared role is a finite contract in the prompt, not an extra SDK tool argument. */
+export const SHIP_REVIEWER_ROLES = ['factcheck', 'omissions', 'bugs', 'comments', 'light', 'external-factcheck', 'performance', 'e2e'] as const;
+export type ShipReviewerRole = typeof SHIP_REVIEWER_ROLES[number];
+export const SHIP_NATIVE_ROLE_MODELS = {
+  'external-factcheck': { model: 'opus', role: 'ship-factchecker' },
+  performance: { model: 'opus', role: 'ship-perf-reviewer' },
+  e2e: { model: 'sonnet', role: 'ship-e2e' },
+} as const;
+
+export function declaredShipRole(prompt: string): ShipReviewerRole | 'invalid' | undefined {
+  const firstLine = prompt.trimStart().split(/\r?\n/, 1)[0] ?? '';
+  if (!/^Ship-Role\s*:/i.test(firstLine)) return;
+  const value = /^Ship-Role: ([a-z0-9-]+)$/.exec(firstLine)?.[1];
+  return SHIP_REVIEWER_ROLES.includes(value as ShipReviewerRole) ? value as ShipReviewerRole : 'invalid';
+}
+
 const CODEX_ROLES = [
   ['factcheck', /\b(?:codex[-_ ]factchecker|code[-/ ]docs? (?:checker|fact.?check(?:er)?)|code[-/ ]doc fact.?check(?:er)?|code[- ](?:checker|fact.?check(?:er)?))\b/i],
   ['omissions', /\b(?:codex[-_ ]omissions|plan[-_ ]omissions|omissions? (?:checker|reviewer|review)|omissions?)\b/i],
@@ -18,13 +34,14 @@ const CODEX_ROLES = [
   ['bugs', /\b(?:astra|bugs?[-/ ]security|bugs?[-_ ]review(?:er)?|correctness[-/ ]security|review\s+(?:r\d+\s+)?bugs?)\b/i],
 ] as const;
 
-export function routeShipReviewer(toolName: string, input: Record<string, unknown>, workspaceRoot: string, shipWorkingDirectory = false): ShipRoleRouting {
+export function routeShipReviewer(toolName: string, input: Record<string, unknown>, workspaceRoot: string, shipWorkingDirectory = false, cliProxyConnection = false): ShipRoleRouting {
   if (!['Agent', 'Task'].includes(toolName) || typeof input.prompt !== 'string') return { type: 'allow' };
   const subtype = typeof input.subagent_type === 'string' ? input.subagent_type : '';
   const description = typeof input.description === 'string' ? input.description : '';
   const prompt = input.prompt;
+  const declaredRole = declaredShipRole(prompt);
   const explicitActor = prompt.match(/(?:^|\n)\s*["']?actor["']?\s*[:=]\s*["']?([\w-]+)/i)?.[1];
-  const inShip = shipWorkingDirectory || /^ship-(?:factchecker|perf-reviewer|e2e)$/.test(subtype)
+  const inShip = declaredRole !== undefined || shipWorkingDirectory || /^ship-(?:factchecker|perf-reviewer|e2e)$/.test(subtype)
     || /(?:\.context\/ship\/|\bPLAN_DIR\b|["']?gate["']?\s*[:=]\s*["']?(?:g1|review|e2e)\b)/i.test(prompt);
   if (!inShip) return { type: 'allow' };
 
@@ -32,6 +49,17 @@ export function routeShipReviewer(toolName: string, input: Record<string, unknow
   const identity = [subtype, explicitActor ?? '', description, prompt.split('\n')[0]].join(' ');
   const helper = `${workspaceRoot}/skills/ship-plan/scripts/codex-review.ts`;
   const refresh = `The owner requires Conductor's Claude/Codex split through CLIProxyAPI, including resumed chats. Read ${workspaceRoot}/skills/ship-plan/SKILL.md and ${workspaceRoot}/skills/ship/SKILL.md from disk; cached skill text may be stale. Preserve this chat, worktree, PR, owner approvals and current round. Do not restart the workflow, redo completed checks, create chats or relabel an old Claude verdict as Codex.`;
+
+  if (declaredRole === 'invalid') return { type: 'block', role: 'invalid', reason: `Use exactly one first-line Ship-Role: ${SHIP_REVIEWER_ROLES.join('|')} declaration. Unknown roles cannot inherit the parent model.` };
+  if (declaredRole !== undefined) {
+    if (declaredRole in SHIP_NATIVE_ROLE_MODELS) {
+      const native = SHIP_NATIVE_ROLE_MODELS[declaredRole as keyof typeof SHIP_NATIVE_ROLE_MODELS];
+      if (!cliProxyConnection) return { type: 'block', role: native.role, reason: 'Ship reviewers require CLIProxyAPI. Select the Claude · Account pool connection for this chat before running this role; direct Claude credentials cannot run Ship reviewers.' };
+      if (declaredRole === 'e2e' && input.resume) return { type: 'block', role: native.role, reason: `${refresh} E2E requires a fresh independent Agent with model="sonnet" through CLIProxyAPI.` };
+      return input.model === native.model ? { type: 'allow' } : { type: 'modify', input: { ...input, model: native.model }, role: native.role };
+    }
+    return { type: 'block', role: declaredRole, reason: `${refresh} Run this declared Codex role with /home/craft/.bun/bin/bun ${helper} --role ${declaredRole} --round <current-round> --key <TICKET>-${declaredRole}-<batch> --input <input-file>. Keep the existing Codex thread on rechecks. Native Claude cannot execute this role.` };
+  }
 
   let nativeModel: string | undefined;
   let nativeRole: string | undefined;
@@ -47,6 +75,7 @@ export function routeShipReviewer(toolName: string, input: Record<string, unknow
     nativeRole = 'ship-factchecker';
   }
   if (nativeModel && nativeRole) {
+    if (!cliProxyConnection) return { type: 'block', role: nativeRole, reason: 'Ship reviewers require CLIProxyAPI. Select the Claude · Account pool connection for this chat before running this role; direct Claude credentials cannot run Ship reviewers.' };
     return input.model === nativeModel ? { type: 'allow' } : { type: 'modify', input: { ...input, model: nativeModel }, role: nativeRole };
   }
   const matches = CODEX_ROLES.filter(([, pattern]) => pattern.test(identity));

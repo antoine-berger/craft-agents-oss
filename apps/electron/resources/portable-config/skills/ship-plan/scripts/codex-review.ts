@@ -1,10 +1,11 @@
 #!/usr/bin/env bun
 // One local reviewer, using Conductor's frozen role contract and the existing proxy account pool.
-import { readFileSync, writeFileSync, mkdirSync, unlinkSync, existsSync } from 'node:fs';
+import { appendFileSync, readFileSync, writeFileSync, mkdirSync, unlinkSync, existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
 import { spawn, spawnSync } from 'node:child_process';
+import { reviewerUsage } from './usage';
 
 const here = import.meta.dir;
 const roles = JSON.parse(readFileSync(join(here, 'roles.json'), 'utf8'));
@@ -18,7 +19,7 @@ const role = option('role') ?? '';
 const spec = roles[role];
 const round = Number(option('round'));
 const key = option('key') ?? role;
-if (!spec || !Number.isInteger(round) || round < 1 || !/^[a-zA-Z0-9_-]+$/.test(key) || !option('input')) throw Error('Invalid arguments; use --help');
+if (!Object.hasOwn(roles, role) || !spec || !Number.isInteger(round) || round < 1 || !/^[a-zA-Z0-9_-]+$/.test(key) || !option('input')) throw Error('Invalid arguments; use --help');
 const cwd = process.cwd();
 function git(...argv: string[]) {
   const result = spawnSync('git', ['-C', cwd, ...argv], { encoding: 'utf8' });
@@ -41,8 +42,9 @@ if (existsSync(lock)) {
 }
 writeFileSync(lock, String(process.pid), { flag: 'wx', mode: 0o600 });
 let child: ReturnType<typeof spawn> | undefined;
+let recordInterrupted: (() => void) | undefined;
 function stop() { if (child?.pid) { try { process.kill(-child.pid, 'SIGKILL'); } catch {} } }
-function clean() { stop(); try { unlinkSync(lock); } catch {} }
+function clean() { try { recordInterrupted?.(); } catch {} stop(); try { unlinkSync(lock); } catch {} }
 process.on('exit', clean);
 for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) process.on(signal, () => process.exit(130));
 
@@ -95,26 +97,35 @@ try {
   const deadline = Date.now() + 540_000;
   const models = thread ? [previous.model] : spec.models;
   for (const model of models) {
+    const startedAt = Date.now();
     const prefix = join(outputDir, `r${round}-${Date.now()}-${model}`);
     const reportPath = prefix + '.json';
     writeFileSync(prefix + '.prompt.md', prompt, { mode: 0o600 });
     const command = ['exec', ...(thread ? ['resume'] : []), ...common, '-m', model, '-o', reportPath, ...(thread ? [thread] : []), '-'];
+    let stdout = '', stderr = '', recorded = false;
+    const recordUsage = (status: 'completed' | 'failed') => {
+      if (recorded) return;
+      appendFileSync(join(outputDir, 'usage.jsonl'), JSON.stringify(reviewerUsage({ role, requestedModel: model, effort: spec.effort, round, startedAt, finishedAt: Date.now(), status, events: stdout })) + '\n', { mode: 0o600 });
+      recorded = true; recordInterrupted = undefined;
+    };
+    recordInterrupted = () => recordUsage('failed');
     child = spawn(codex, command, {
       cwd, detached: true, env: {
         PATH: '/usr/local/bin:/usr/bin:/bin', HOME: reviewerHome, CODEX_HOME: join(reviewerHome, '.codex'),
         LANG: 'C.UTF-8', CRAFT_REVIEW_PROXY_KEY: token,
       }, stdio: ['pipe', 'pipe', 'pipe'],
     });
-    let stdout = '', stderr = '';
     child.stdout!.on('data', data => { stdout += data; });
     child.stderr!.on('data', data => { stderr += data; });
     child.stdin!.end(prompt);
     const timeout = setTimeout(stop, Math.max(1, deadline - Date.now()));
-    const status = await new Promise<number | null>((res, rej) => { child!.on('error', rej); child!.on('close', res); }).finally(() => clearTimeout(timeout));
+    const status = await new Promise<number | null>((res, rej) => { child!.on('error', rej); child!.on('close', res); })
+      .catch(error => { recordUsage('failed'); throw error; }).finally(() => clearTimeout(timeout));
     child = undefined;
     stdout = stdout.replaceAll(token, '[redacted]'); stderr = stderr.replaceAll(token, '[redacted]');
     writeFileSync(prefix + '.events.jsonl', stdout, { mode: 0o600 });
     writeFileSync(prefix + '.stderr', stderr, { mode: 0o600 });
+    recordUsage(status === 0 ? 'completed' : 'failed');
     if (status !== 0) {
       const modelDenied = /model.{0,100}(not supported|not found|does not exist|not available|not have access)|unsupported_model|model_not_found/i.test(stdout + stderr);
       if (!thread && modelDenied && model !== models.at(-1) && Date.now() < deadline) continue;

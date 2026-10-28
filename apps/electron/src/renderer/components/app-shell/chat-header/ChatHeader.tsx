@@ -12,7 +12,7 @@
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 import { useSetAtom } from 'jotai'
-import { History, Info, MoreHorizontal, Pencil, GitCompareArrows } from 'lucide-react'
+import { History, Info, MoreHorizontal, Pencil, GitCompareArrows, PanelRight } from 'lucide-react'
 import { PanelHeaderCenterButton } from '@/components/ui/PanelHeaderCenterButton'
 import { RenameDialog } from '@/components/ui/rename-dialog'
 import { DropdownMenu, DropdownMenuTrigger, StyledDropdownMenuContent, StyledDropdownMenuItem, StyledDropdownMenuSeparator } from '@/components/ui/styled-dropdown'
@@ -41,6 +41,8 @@ export interface ChatHeaderProps {
   sharedUrl?: string | null
   onOpenHistory?: () => void
   onReviewChanges?: () => void
+  onToggleWorkbench?: () => void
+  workbenchOpen?: boolean
   workingDirectory?: string
   sessionFolderPath?: string
   /** The active pull request; shown on the desktop layout */
@@ -81,6 +83,8 @@ function sameHeaderProps(prev: ChatHeaderProps, next: ChatHeaderProps): boolean 
     && prev.sharedUrl === next.sharedUrl
     && prev.onOpenHistory === next.onOpenHistory
     && prev.onReviewChanges === next.onReviewChanges
+    && prev.onToggleWorkbench === next.onToggleWorkbench
+    && prev.workbenchOpen === next.workbenchOpen
     && prev.workingDirectory === next.workingDirectory
     && prev.sessionFolderPath === next.sessionFolderPath
     && prev.prWatch === next.prWatch
@@ -102,6 +106,8 @@ export const ChatHeader = React.memo(function ChatHeader({
   isRegeneratingTitle,
   sharedUrl,
   onReviewChanges,
+  onToggleWorkbench,
+  workbenchOpen,
   onOpenHistory,
   workingDirectory,
   sessionFolderPath,
@@ -248,6 +254,7 @@ export const ChatHeader = React.memo(function ChatHeader({
   const moreLabel = t('session.actionsFor', { title })
   const actions = (
     <div className="flex items-center gap-1">
+      {onToggleWorkbench && <PanelHeaderCenterButton icon={<PanelRight className="size-4" />} tooltip="Worktree tools · ⌘⇧B" aria-pressed={workbenchOpen} onClick={onToggleWorkbench} />}
       {onReviewChanges && <PanelHeaderCenterButton
         icon={<><GitCompareArrows className="h-4 w-4" />{!compact && <span>{t('gitReview.shortTitle', { defaultValue: 'Changes' })}</span>}</>}
         className={compact ? undefined : 'w-auto gap-1.5 px-2 text-label-sm'}

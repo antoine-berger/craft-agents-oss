@@ -138,6 +138,43 @@ function sendHarness() {
 }
 
 describe('SessionManager worktree lifecycle', () => {
+  it('finishes repository setup and readiness verification before constructing the agent', async () => {
+    mkdirSync(join(repository, '.craft'))
+    writeFileSync(join(repository, '.craft/setup.json'), JSON.stringify({ command: 'mkdir -p node_modules && printf ready > node_modules/ready', verifyCommand: 'test -f node_modules/ready' }))
+    const { manager, createChat, backendStarts } = harness()
+    const chat = createChat({ worktree: { repositoryPath: repository, baseBranch: 'main', setup: {} } })
+    await manager.getOrCreateAgent(chat)
+    expect(backendStarts).toHaveLength(1)
+    expect(readFileSync(join(backendStarts[0]!.cwd!, 'node_modules/ready'), 'utf8')).toBe('ready')
+    const setupState = JSON.parse(readFileSync(join(workspace.rootPath, 'sessions', chat.id, 'data/worktree-setup.json'), 'utf8'))
+    expect(setupState.status).toBe('ready')
+    expect(existsSync(join(repository, 'node_modules/ready'))).toBe(false)
+  })
+
+  it('blocks agent startup on failed setup and retries that same checkout', async () => {
+    mkdirSync(join(repository, '.craft'))
+    const config = join(repository, '.craft/setup.json')
+    writeFileSync(config, JSON.stringify({ command: 'exit 19' }))
+    const { manager, createChat, backendStarts } = harness()
+    const chat = createChat({ worktree: { repositoryPath: repository, baseBranch: 'main', setup: {} } })
+    await expect(manager.getOrCreateAgent(chat)).rejects.toThrow('19')
+    expect(backendStarts).toHaveLength(0)
+    const path = chat.worktree!.owned!.path
+    writeFileSync(config, JSON.stringify({ command: 'mkdir -p node_modules && printf fixed > node_modules/ready' }))
+    await manager.getOrCreateAgent(chat)
+    expect(chat.worktree!.owned!.path).toBe(path)
+    expect(backendStarts).toHaveLength(1)
+  })
+
+  it('does not run repository setup for an imported conversation', async () => {
+    mkdirSync(join(repository, '.craft'))
+    writeFileSync(join(repository, '.craft/setup.json'), JSON.stringify({ command: 'exit 19' }))
+    const { manager, createChat, backendStarts } = harness()
+    const chat = createChat({ importedFrom: { provider: 'conductor', sourceId: 'original', sessionId: 'original', fingerprint: 'original', importedAt: 1 }, worktree: { repositoryPath: repository, baseBranch: 'main', setup: {} } })
+    await manager.getOrCreateAgent(chat)
+    expect(backendStarts).toHaveLength(1)
+    expect(existsSync(join(workspace.rootPath, 'sessions', chat.id, 'data/worktree-setup.json'))).toBe(false)
+  })
   it('keeps a repository choice as metadata until the first backend starts', async () => {
     const { manager, createChat } = harness()
     const chat = createChat({ messages: [], worktree: { repositoryPath: '', needsRepository: false,
@@ -599,7 +636,7 @@ describe('project worktree policy boundaries', () => {
 
   it('captures the project default for a new independent chat', () => {
     expect(resolveSessionWorktreePolicy(project, { workingDirectory: 'user_default' })).toEqual({
-      repositoryPath: '/server/repo', baseBranch: 'main', cleanupOnArchive: true,
+      repositoryPath: '/server/repo', baseBranch: 'main', cleanupOnArchive: true, setup: { command: undefined, verifyCommand: undefined },
     })
     expect(resolveSessionWorktreePolicy({ ...project, worktreeSettings: { enabled: false } })).toBeUndefined()
   })

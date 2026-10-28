@@ -30,6 +30,12 @@ import type {
 import type { SessionBundle, DispatchMode } from '@craft-agent/shared/sessions'
 import type { EventSink } from '../transport'
 
+export interface SessionWorktreeResource {
+  hasRunningSession(sessionId: string): boolean
+  stopSession(sessionId: string): Promise<void> | void
+  dispose(): Promise<void> | void
+}
+
 export interface ISessionManager {
   // ---------------------------------------------------------------------------
   // Lifecycle
@@ -38,6 +44,7 @@ export interface ISessionManager {
   waitForInit(): Promise<void>
   initialize(): Promise<void>
   cleanup(): void
+  registerWorktreeResource(resource: SessionWorktreeResource): () => void
   setEventSink(sink: EventSink): void
   flushAllSessions(): Promise<void>
 
@@ -62,7 +69,9 @@ export interface ISessionManager {
   onTurnComplete?(listener: (sessionId: string) => void): () => void
   deleteSession(sessionId: string): Promise<void>
   listSessionCheckpoints(sessionId: string): Promise<import('@craft-agent/shared/protocol').SessionCheckpointList>
+  adoptSessionCheckpointWorktree(sessionId: string): Promise<import('@craft-agent/shared/protocol').SessionCheckpointList>
   restoreSessionCheckpoint(sessionId: string, checkpointId: string): Promise<import('@craft-agent/shared/protocol').SessionCheckpointRestoreResult>
+  withSessionWorktreeWrite<T>(sessionId: string, operation: () => Promise<T>): Promise<T>
 
   // ---------------------------------------------------------------------------
   // Session state

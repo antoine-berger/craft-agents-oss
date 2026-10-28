@@ -126,6 +126,8 @@ export interface OwnedWorktree {
   repoPath: string;
   gitDir: string;
   path: string;
+  /** An explicitly associated existing checkout; never moved, recreated or removed by Craft. */
+  adopted?: true;
   /** Project folder relative to the source checkout root; absent in legacy/root-only plans. */
   projectSubdirectory?: string;
   /** GitHub login captured when this branch was planned; absent for legacy craft/ branches. */
@@ -142,7 +144,30 @@ export interface OwnedWorktree {
 }
 
 /** Project policy captured when a chat is created; existing chats keep their checkout. */
+export interface SessionChangeSummary {
+  additions: number;
+  deletions: number;
+  files: number;
+  binaryFiles: number;
+  baseCommit: string;
+  observedAt: number;
+  scope: 'tracked';
+}
+
 export interface SessionWorktreeMetadata {
+  /** Cached once after a turn; excludes untracked/ignored files and never implies live PR totals. */
+  changeSummary?: SessionChangeSummary;
+  /** Verified allocation base for an explicit copied branch; never an instruction to rebase. */
+  stackParent?: {
+    branch: string;
+    ref: string;
+    baseCommit: string;
+    repositoryGitDir: string;
+    parentSessionId?: string;
+    association: 'verified' | 'ambiguous' | 'unmapped';
+  };
+  /** Captured only for newly allocated independent checkouts; legacy/imported chats are untouched. */
+  setup?: { command?: string; verifyCommand?: string };
   /** A new independent session must choose a repository before it can run. */
   needsRepository?: boolean;
   repositoryPath: string;

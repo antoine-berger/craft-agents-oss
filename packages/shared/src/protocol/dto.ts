@@ -769,6 +769,13 @@ export interface SessionSearchResult {
   matches: SessionSearchMatch[]
 }
 
+export type SessionSearchStatus = 'complete' | 'partial' | 'timed_out' | 'cancelled' | 'unavailable'
+export interface SessionSearchResponse {
+  searchId: string
+  results: SessionSearchResult[]
+  status: SessionSearchStatus
+}
+
 // ---------------------------------------------------------------------------
 // Session result types
 // ---------------------------------------------------------------------------

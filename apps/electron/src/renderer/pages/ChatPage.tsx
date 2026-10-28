@@ -14,6 +14,7 @@ import { PanelHeader } from '@/components/app-shell/PanelHeader'
 import { ChatHeader } from '@/components/app-shell/chat-header/ChatHeader'
 import { SessionCheckpointControl } from '@/components/checkpoints/SessionCheckpointControl'
 import { GitReviewDialog } from '@/components/git-review/GitReviewDialog'
+import { SessionWorkbench } from '@/components/app-shell/SessionWorkbench'
 import { toast } from 'sonner'
 import { useAppShellContext, usePendingPermission, usePendingCredential, useSessionOptionsFor, useSession as useSessionData } from '@/context/AppShellContext'
 import { rendererPerf } from '@/lib/perf'
@@ -327,6 +328,10 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   }, [session?.id, session?.model, session?.llmConnection, workspaceDefaultLlmConnection, llmConnections, connectionUnavailable])
 
   const [gitReviewOpen, setGitReviewOpen] = React.useState(false)
+  const [workbenchOpen, setWorkbenchOpen] = React.useState(false)
+  const toggleWorkbench = React.useCallback(() => setWorkbenchOpen(open => !open), [])
+  const closeWorkbench = React.useCallback(() => setWorkbenchOpen(false), [])
+  React.useEffect(() => { setWorkbenchOpen(false) }, [sessionId])
   const openGitReview = React.useCallback(() => setGitReviewOpen(true), [])
   React.useEffect(() => { setGitReviewOpen(false) }, [sessionId])
   const addGitReviewComments = React.useCallback((text: string) => {
@@ -335,6 +340,16 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
 
   // Working directory for this session
   const workingDirectory = session?.workingDirectory
+  React.useEffect(() => {
+    if (!isFocusedPanel || !workingDirectory) return
+    const toggle = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey && event.key.toLowerCase() === 'b') {
+        event.preventDefault(); toggleWorkbench()
+      }
+    }
+    window.addEventListener('keydown', toggle)
+    return () => window.removeEventListener('keydown', toggle)
+  }, [isFocusedPanel, workingDirectory, toggleWorkbench])
   // The header PR chip: desktop only, with a folder. The chip itself renders only once that
   // folder is a git repo whose branch has a PR (see ChatHeaderPrChip).
   const prWatch = usePrWatch(sessionId, !!workingDirectory && !isCompactMode, workingDirectory)
@@ -532,6 +547,8 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
         sessionFolderPath={session?.sessionFolderPath}
         onOpenHistory={hasOwnedCheckpointCheckout ? requestCheckpointHistory : undefined}
         onReviewChanges={workingDirectory ? openGitReview : undefined}
+        onToggleWorkbench={workingDirectory ? toggleWorkbench : undefined}
+        workbenchOpen={workbenchOpen}
         prWatch={prWatch.state}
         prWatchNav={prWatch.nav}
         prWatchActiveOrigin={prWatch.activeOrigin}
@@ -544,7 +561,8 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
       />
       {checkpointControl}
       <GitReviewDialog key={sessionId} sessionId={sessionId} open={gitReviewOpen} onOpenChange={setGitReviewOpen} onAddToChat={addGitReviewComments} />
-      <div className="flex-1 flex flex-col min-h-0">
+      <div className="relative flex min-h-0 flex-1">
+      <div className="flex-1 flex flex-col min-h-0 min-w-0">
         <ChatDisplay
           ref={chatDisplayRef}
           session={session}
@@ -594,6 +612,8 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
           compactMode={!!isCompactMode}
           enableCompactModelPicker={!!isCompactMode}
         />
+      </div>
+      {workbenchOpen && workingDirectory && <SessionWorkbench sessionId={sessionId} archived={sessionMeta?.isArchived} compact={!!isCompactMode} onClose={closeWorkbench} />}
       </div>
     </div>
   )

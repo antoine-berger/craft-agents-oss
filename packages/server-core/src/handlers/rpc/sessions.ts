@@ -416,38 +416,41 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
   // ============================================================
 
   // Search session content using ripgrep
-  server.handle(RPC_CHANNELS.sessions.SEARCH_CONTENT, async (_ctx, workspaceId: string, query: string, searchId?: string) => {
+  server.handle(RPC_CHANNELS.sessions.SEARCH_CONTENT, async (ctx, workspaceId: string, query: string, searchId?: string, options?: { includeStatus?: boolean; cancel?: boolean }) => {
+    await sessionManager.waitForInit()
+    if (typeof query !== 'string' || query.length > 1000) throw new Error('Enter a search query of at most 1000 characters.')
     const id = searchId || Date.now().toString(36)
     log.info('[search]','ipc:request', { searchId: id, query })
 
     const workspace = getWorkspaceByNameOrId(workspaceId)
     if (!workspace) {
       log.warn('SEARCH_SESSIONS: Workspace not found:', workspaceId)
-      return []
+      return options?.includeStatus ? { searchId: id, results: [], status: 'unavailable' } : []
     }
+    const callerWorkspaceId = ctx.workspaceId ?? (ctx.webContentsId != null ? deps.windowManager?.getWorkspaceForWindow(ctx.webContentsId) : undefined)
+    if (callerWorkspaceId && getWorkspaceByNameOrId(callerWorkspaceId)?.rootPath !== workspace.rootPath) throw new Error('Search is in another workspace.')
 
-    const { searchSessions } = await import('@craft-agent/server-core/services')
+    const { searchSessionsDetailed, cancelSessionSearchRequest } = await import('@craft-agent/server-core/services')
+    if (options?.cancel) {
+      cancelSessionSearchRequest(ctx.clientId, workspace.id, id)
+      return options.includeStatus ? { searchId: id, results: [], status: 'cancelled' } : []
+    }
     const { getWorkspaceSessionsPath } = await import('@craft-agent/shared/workspaces')
 
     const sessionsDir = getWorkspaceSessionsPath(workspace.rootPath)
     log.debug(`SEARCH_SESSIONS: Searching "${query}" in ${sessionsDir}`)
 
-    const results = await searchSessions(query, sessionsDir, {
+    const allowedSessionIds = new Set(sessionManager.getSessions(workspaceId).filter(session => !session.hidden).map(session => session.id))
+    const response = await searchSessionsDetailed(query, sessionsDir, {
       timeout: 5000,
       maxMatchesPerSession: 3,
       maxSessions: 50,
       searchId: id,
+      scope: { clientId: ctx.clientId, workspaceId: workspace.id },
+      allowedSessionIds,
     })
-
-    // Filter out hidden sessions (e.g., mini edit sessions)
-    const allSessions = await sessionManager.getSessions()
-    const hiddenSessionIds = new Set(
-      allSessions.filter(s => s.hidden).map(s => s.id)
-    )
-    const filteredResults = results.filter(r => !hiddenSessionIds.has(r.sessionId))
-
-    log.info('[search]','ipc:response', { searchId: id, resultCount: filteredResults.length, totalFound: results.length })
-    return filteredResults
+    log.info('[search]','ipc:response', { searchId: id, status: response.status, resultCount: response.results.length })
+    return options?.includeStatus ? response : response.results
   })
 
   // ============================================================

@@ -1,4 +1,5 @@
 import * as React from 'react'
+import type { SessionCheckpointList } from '@craft-agent/shared/protocol'
 import { useTranslation } from 'react-i18next'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerTrigger } from '@/components/ui/drawer'
@@ -7,6 +8,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { useAppShellContext, useSession } from '@/context/AppShellContext'
 import { cn } from '@/lib/utils'
 import { SessionFilesSection } from '../right-sidebar/SessionFilesSection'
+import { Button } from '@/components/ui/button'
+import { WorktreeStackSection } from '../worktree-stack/WorktreeStackSection'
+import { ShipUsageSection } from './ShipUsageSection'
+import { navigate, routes } from '@/lib/navigate'
 
 interface SessionInfoPopoverProps {
   sessionId: string
@@ -124,11 +129,45 @@ function SessionInfoPopoverContent({ sessionId, sessionFolderPath }: { sessionId
   const session = useSession(sessionId)
   const { onRenameSession } = useAppShellContext()
   const [name, setName] = React.useState('')
+  const [associating, setAssociating] = React.useState(false)
+  const [associationError, setAssociationError] = React.useState<string>()
+  const [associated, setAssociated] = React.useState(false)
+  const [checkpointReadiness, setCheckpointReadiness] = React.useState<SessionCheckpointList>()
+  const associationRequest = React.useRef(0)
   const renameTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
 
   React.useEffect(() => {
     setName(session?.name || '')
   }, [session?.name])
+  React.useEffect(() => {
+    associationRequest.current++
+    setAssociated(false); setAssociationError(undefined); setAssociating(false); setCheckpointReadiness(undefined)
+    return () => { associationRequest.current++ }
+  }, [sessionId])
+  React.useEffect(() => {
+    if (!session?.worktree?.owned?.adopted) return
+    let cancelled = false
+    window.electronAPI.listSessionCheckpoints(sessionId).then(result => {
+      if (!cancelled) setCheckpointReadiness(result)
+    }, error => {
+      if (!cancelled) setAssociationError(error instanceof Error ? error.message : String(error))
+    })
+    return () => { cancelled = true }
+  }, [sessionId, session?.worktree?.owned?.adopted, session?.worktree?.owned?.path])
+  const associateCheckpoints = async () => {
+    if (associating || !session || session.isArchived) return
+    const requestedSession = sessionId
+    const request = ++associationRequest.current
+    setAssociating(true); setAssociationError(undefined)
+    try {
+      const readiness = await window.electronAPI.adoptSessionCheckpointWorktree(requestedSession)
+      if (associationRequest.current === request) {
+        setAssociated(true)
+        setCheckpointReadiness(readiness)
+      }
+    } catch (error) { if (associationRequest.current === request) setAssociationError(error instanceof Error ? error.message : String(error)) }
+    finally { if (associationRequest.current === request) setAssociating(false) }
+  }
 
   React.useEffect(() => {
     return () => {
@@ -154,6 +193,11 @@ function SessionInfoPopoverContent({ sessionId, sessionFolderPath }: { sessionId
     }, 500)
   }, [onRenameSession, sessionId])
 
+  const canAssociate = session?.importedFrom && session.workingDirectory && !session.worktree?.owned && !associated && !session.isArchived
+  const unsupportedReason = checkpointReadiness && !checkpointReadiness.supported
+    ? checkpointReadiness.reason || 'This worktree does not support checkpoints.'
+    : undefined
+
   return (
     <div className="flex-1 min-h-0 flex flex-col">
       {/* 16px insets, the same edge as the Session Files header and rows below */}
@@ -168,7 +212,17 @@ function SessionInfoPopoverContent({ sessionId, sessionFolderPath }: { sessionId
           placeholder={t("chat.titlePlaceholder")}
         />
       </div>
+      {(canAssociate || unsupportedReason || associationError) && <div className="shrink-0 border-b border-subtle px-4 py-3">
+        {canAssociate && <><Button variant="outline" size="sm" disabled={associating || session?.isProcessing} onClick={() => void associateCheckpoints()}>
+          {associating ? 'Associating worktree…' : 'Enable future checkpoints'}
+        </Button>
+        <p className="mt-1.5 text-label-sm text-secondary">Uses the current checkout. Existing files and history stay in place.</p></>}
+        {unsupportedReason && <p role="status" className="text-label-sm text-secondary">Checkpoints unavailable: {unsupportedReason}</p>}
+        {associationError && <p role="alert" className="mt-1.5 text-label-sm text-destructive">{associationError}</p>}
+      </div>}
       <div className="flex-1 min-h-0 overflow-y-auto">
+        {session?.workingDirectory && <WorktreeStackSection key={`stack:${sessionId}`} sessionId={sessionId} api={window.electronAPI} onOpenSession={id => navigate(routes.view.allSessions(id))} />}
+        {session?.workingDirectory && <ShipUsageSection key={`usage:${sessionId}`} sessionId={sessionId} api={window.electronAPI} />}
         <SessionFilesSection
           sessionId={sessionId}
           sessionFolderPath={sessionFolderPath}

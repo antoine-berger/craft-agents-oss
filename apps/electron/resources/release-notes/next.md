@@ -4,6 +4,11 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Features
 
+- **Worktree tools beside the chat** — Browse and edit the session's real repository files, open a persistent interactive terminal, and reconnect without replacing the conversation. Cmd+Shift+B toggles the optional panel; narrow panels use an overlay.
+- **Prepared new worktrees** — Run configured repository setup and readiness checks before the agent starts. Durable logs, cancellation and an OS-backed lease keep failed or interrupted setup retryable without overlapping installers.
+- **Future checkpoints for imported chats** — Explicitly associate an existing checkout without moving its files, changing its branch or replacing its history. Unsupported checkout reasons remain visible; adopted folders are never automatically removed or recreated.
+- **Branch stack relationships** — Record explicit copied parent branches, navigate related chats, and detect locally advanced, rewritten or missing parents without automatic Git operations.
+
 - **Independent agent-created chats** — Agents can create a new chat in the same or another project, with its own worktree and runtime. Session tools share a single normal interface; the former Coding system is removed while older conversations retain their history and SDK resume state.
 - **Read other chats when needed** — Agents can search and read bounded pages of conversations in their workspace, with project filters and source references instead of loading every history upfront.
 - **A native Ship workflow** — Plan, independent checks, explicit human approval, implementation, review, E2E and GitHub feedback run as persistent server tasks. Portable skills replace Mac-specific commands and hooks.
@@ -22,7 +27,13 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Improvements
 
+- **More room for conversations** — Compact navigation defaults preserve saved widths, adapt to available panel space, and expose complete titles on hover or focus. Cached tracked-line counts update after turns without per-row Git polling.
+- **Explicit Ship reviewer routing** — Named roles pin the Claude/Codex split and native reviewers require a verified CLIProxyAPI connection. Session details show measured Codex helper attempts, with native Claude usage and pool-account attribution explicitly outside that measurement.
+
 ## Bug Fixes
+
+- **Independent and honest searches** — Searches are isolated by client and workspace, late cancellation cannot stop a newer request, and partial results/timeouts are distinguished from a completed empty search. Final responses remain searchable after many matching intermediate messages.
+- **Reliable worktree boundaries** — Archiving drains accepted file saves and waits for terminal jobs to stop; restoration refuses a busy shared checkout. Editor drafts survive navigation conflicts and retain existing uniform line endings.
 
 ## Breaking Changes
 

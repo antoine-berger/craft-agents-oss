@@ -20,6 +20,9 @@
 @import "../../../../packages/ui/src/styles/tokens.css";
 @import "../../../../packages/ui/src/styles/base.css";
 
+/* xterm's stylesheet uses a black viewport even when the renderer theme is transparent. */
+.session-terminal .xterm-viewport { background-color: transparent !important; }
+
 /* CSS Custom Highlight API styles are injected at runtime via ChatDisplay.tsx
    to avoid LightningCSS warnings (::highlight is not yet recognized by the optimizer) */
 

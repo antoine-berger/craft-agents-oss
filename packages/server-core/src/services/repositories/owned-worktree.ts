@@ -6,7 +6,7 @@
  */
 
 import { createHash, randomUUID } from 'node:crypto'
-import { link, lstat, mkdir, readFile, realpath, rename, stat, unlink, writeFile } from 'node:fs/promises'
+import { link, lstat, mkdir, readFile, readdir, realpath, rename, stat, unlink, writeFile } from 'node:fs/promises'
 import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import type { OwnedWorktree } from '@craft-agent/shared/sessions'
 import { expandPath } from '@craft-agent/shared/utils'
@@ -194,13 +194,17 @@ async function validatePlan(plan: OwnedWorktree): Promise<void> {
   const validName = named
     ? (plan.branchNaming === 'existing' || plan.branch.startsWith(`${prefix}/`))
     : plan.branch.startsWith(`${prefix}/session-`) && plan.branch.endsWith(`-${ownerKey(plan.ownerId).slice(0, 16)}`)
-  if ((plan.branchPrefix !== undefined && !isValidGitHubLogin(plan.branchPrefix))
+  const journal = await readReservation(plan)
+  const validPath = plan.adopted === true
+    ? journal?.adopted === true && plan.path === await realpath(plan.path).catch(() => '')
+    : plan.path === expectedPath(gitDir, plan.branch, named ? plan.ownerId : undefined)
+  if ((plan.adopted !== undefined && plan.adopted !== true)
+    || (plan.branchPrefix !== undefined && !isValidGitHubLogin(plan.branchPrefix))
     || (plan.branchNaming !== undefined && !named) || !validName
-    || plan.path !== expectedPath(gitDir, plan.branch, named ? plan.ownerId : undefined)
+    || !validPath
     || !(await runGit(plan.repoPath, ['check-ref-format', '--branch', plan.branch]))) {
     throw new OwnedWorktreeError('The worktree path or branch is not owned by this session', 'invalid-plan')
   }
-  const journal = await readReservation(plan)
   if (named && !(journal && (journal.status === 'ready' || journal.checkout))) {
     try {
       const allocated = JSON.parse(await readFile(allocationPath(plan), 'utf8')) as OwnedWorktree
@@ -228,7 +232,7 @@ async function validatePlan(plan: OwnedWorktree): Promise<void> {
 }
 
 function sameReservation(left: OwnedWorktree, right: OwnedWorktree): boolean {
-  return ['version', 'ownerId', 'token', 'repoPath', 'gitDir', 'path', 'projectSubdirectory', 'branchPrefix', 'branchNaming', 'branch', 'base', 'baseCommit']
+  return ['version', 'ownerId', 'token', 'repoPath', 'gitDir', 'path', 'adopted', 'projectSubdirectory', 'branchPrefix', 'branchNaming', 'branch', 'base', 'baseCommit']
     .every(key => left[key as keyof OwnedWorktree] === right[key as keyof OwnedWorktree])
 }
 
@@ -244,6 +248,72 @@ async function readReservation(plan: OwnedWorktree): Promise<OwnedWorktree | nul
     if (error instanceof OwnedWorktreeError) throw error
     throw new OwnedWorktreeError('The worktree ownership record cannot be read', 'not-owned')
   }
+}
+
+/** Associate an existing checkout with future checkpoints, without touching its branch or files. */
+export async function adoptExistingWorktree(input: { directory: string; ownerId: string }): Promise<OwnedWorktree> {
+  if (!input.ownerId) throw new OwnedWorktreeError('A worktree requires a session owner', 'invalid-plan')
+  const directory = await realpath(expandPath(input.directory))
+  const topLevel = await runGit(directory, ['rev-parse', '--show-toplevel'])
+  const gitDir = await commonGitDir(directory)
+  if (!topLevel || !gitDir) throw new OwnedWorktreeError('This session is not in a Git worktree', 'not-a-repo')
+  const path = await realpath(topLevel)
+  const repoPath = repoCommandDir(gitDir)
+  return exclusive({ gitDir, ownerId: input.ownerId }, async () => {
+    const registry = join(gitDir, MARKER_DIRECTORY)
+    await mkdir(join(registry, 'branches'), { recursive: true })
+    await mkdir(join(registry, 'checkouts'), { recursive: true })
+    const ownerFile = join(registry, `${ownerKey(input.ownerId)}.json`)
+    if (await exists(ownerFile)) {
+      const previous = JSON.parse(await readFile(ownerFile, 'utf8')) as OwnedWorktree
+      if (!previous.adopted || previous.path !== path || previous.ownerId !== input.ownerId) throw new OwnedWorktreeError('This session already owns a different checkout', 'collision')
+      await validatePlan(previous)
+      if (!await existingOwnedWorktree(previous)) throw new OwnedWorktreeError('The associated worktree is no longer registered', 'not-owned')
+      await validateWorkingDirectory(previous)
+      return previous
+    }
+    for (const entry of await readdir(registry, { withFileTypes: true })) {
+      if (!entry.isFile() || !entry.name.endsWith('.json')) continue
+      let other: OwnedWorktree
+      try { other = JSON.parse(await readFile(join(registry, entry.name), 'utf8')) }
+      catch { throw new OwnedWorktreeError('Could not verify the checkout ownership registry', 'not-owned') }
+      if (other.path === path && other.ownerId !== input.ownerId) throw new OwnedWorktreeError('Another session already owns this checkout', 'collision')
+    }
+    const branch = await runGit(path, ['symbolic-ref', '--quiet', '--short', 'HEAD'])
+    const commit = await runGit(path, ['rev-parse', '--verify', 'HEAD^{commit}'])
+    if (!branch || !commit) throw new OwnedWorktreeError('Associate a named branch with an initial commit first', 'no-commit')
+    const entry = (await worktrees({ repoPath })).find(entry => entry.path === path)
+    if (!entry || entry.branch !== branch || entry.locked) throw new OwnedWorktreeError('The checkout must be registered and unlocked', 'not-owned')
+    const subdirectory = relative(path, directory) || undefined
+    const plan: OwnedWorktree = {
+      version: 1, ownerId: input.ownerId, token: randomUUID(), repoPath, gitDir, path,
+      adopted: true, branchNaming: 'existing', branch, base: `refs/heads/${branch}`, baseCommit: commit,
+      checkout: { branch, commit }, status: 'ready', ...(subdirectory ? { projectSubdirectory: subdirectory } : {}),
+    }
+    const checkoutLease = join(registry, 'checkouts', createHash('sha256').update(path).digest('hex') + '.json')
+    let reserved: OwnedWorktree = plan
+    try { await writeExclusivePlan(checkoutLease, plan) }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+      const saved = JSON.parse(await readFile(checkoutLease, 'utf8')) as OwnedWorktree
+      if (!saved.adopted || saved.ownerId !== input.ownerId || saved.path !== path || saved.gitDir !== gitDir || saved.projectSubdirectory !== subdirectory) throw new OwnedWorktreeError('Another session already reserved this checkout', 'collision')
+      reserved = saved
+    }
+    try { await writeExclusivePlan(allocationPath(reserved), reserved) }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+      if (!sameReservation(JSON.parse(await readFile(allocationPath(reserved), 'utf8')), reserved)) throw new OwnedWorktreeError('Another session owns the checkout branch', 'collision')
+    }
+    const [currentBranch, currentCommit] = await Promise.all([
+      runGit(path, ['symbolic-ref', '--quiet', '--short', 'HEAD']), runGit(path, ['rev-parse', '--verify', 'HEAD^{commit}']),
+    ])
+    if (currentBranch !== branch || currentCommit !== commit || await commonGitDir(path) !== gitDir) throw new OwnedWorktreeError('The checkout changed during association. Retry when it is idle.', 'not-owned')
+    reserved = { ...reserved, checkout: { branch, commit } }
+    try { await writeExclusivePlan(ownerFile, reserved) }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST' || !await readReservation(reserved)) throw error }
+    await validatePlan(reserved)
+    return reserved
+  })
 }
 
 /** Plan before Git checkout. Named branches atomically reserve private metadata for crash-safe allocation. */
@@ -415,6 +485,7 @@ export async function ensureOwnedWorktree(plan: OwnedWorktree): Promise<OwnedWor
       await validateWorkingDirectory(plan)
       return markReservation(plan, 'ready')
     }
+    if (plan.adopted) throw new OwnedWorktreeError('The associated checkout is missing; Craft will not recreate it', 'not-owned')
     const checkout = reservation.checkout ?? plan.checkout
     if (checkout && (!/^[a-f\d]{40,64}$/.test(checkout.commit)
       || (checkout.branch !== null && (typeof checkout.branch !== 'string'
@@ -474,6 +545,7 @@ async function releaseBranchAllocation(plan: OwnedWorktree): Promise<void> {
 export async function removeOwnedWorktree(plan: OwnedWorktree): Promise<RemoveOwnedWorktreeResult> {
   return exclusive(plan, async () => {
     await validatePlan(plan)
+    if (plan.adopted) return { removed: false, reason: 'Explicitly associated worktrees are retained' }
     if (!await readReservation(plan)) {
       return { removed: false, reason: 'The worktree has no session ownership record' }
     }
