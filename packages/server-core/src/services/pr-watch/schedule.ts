@@ -15,8 +15,11 @@ export const POLL = {
   /** First retry after an error; doubles per consecutive error */
   errorBase: 30_000,
   errorMax: 10 * 60_000,
-  /** Below this many GraphQL points left, wait for the reset */
-  rateLimitFloor: 200,
+  /** Conductor 0.92: reserve the last 1,000 points for the visible chat. */
+  rateLimitSlow: 1_000,
+  rateLimitForeground: 60_000,
+  /** Below 500 points, suspend automatic PR reads until the budget resets. */
+  rateLimitFloor: 500,
 } as const
 
 export interface ScheduleInput {
@@ -43,8 +46,12 @@ export function nextPollDelay({ state, foreground = false, now, consecutiveError
     else if (foreground) delay = POLL.foreground
     else delay = POLL.background
   }
-  if (delay !== null && rateLimit && rateLimit.remaining < POLL.rateLimitFloor && rateLimit.resetAt > now) {
-    delay = Math.max(delay, rateLimit.resetAt - now)
+  if (delay !== null && rateLimit && rateLimit.resetAt > now) {
+    if (rateLimit.remaining < POLL.rateLimitFloor || (!foreground && rateLimit.remaining < POLL.rateLimitSlow)) {
+      delay = Math.max(delay, rateLimit.resetAt - now)
+    } else if (rateLimit.remaining < POLL.rateLimitSlow) {
+      delay = Math.max(delay, POLL.rateLimitForeground)
+    }
   }
   return delay
 }

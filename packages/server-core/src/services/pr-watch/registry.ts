@@ -113,6 +113,7 @@ interface Watcher {
   /** The repository, number and node id of the PR the state describes */
   pr: { coords: RepoCoordinates; number: number; headOid: string; nodeId: string } | null
   consecutiveErrors: number
+  lastFetchAt?: number
   rateLimit?: { remaining: number; resetAt: number }
   retryAfterUntil?: number
   nextPollAt?: number
@@ -123,6 +124,9 @@ interface Watcher {
 }
 
 type WatchableRepo = RepoInfo & { repo: RepoCoordinates; branch: string; remoteBranch: string }
+
+/** A skipped automatic read is not a GitHub failure and must retain its cached state. */
+class PollingPaused extends Error {}
 
 function isWatchable(repo: RepoInfo): repo is WatchableRepo {
   return !!repo.branch && !!repo.remoteBranch && !!repo.repo
@@ -181,6 +185,7 @@ export class PrWatchRegistry {
   /** Each live session's per-PR monitor state (auto-fix), stamped onto its entries for the UI. */
   private readonly sessionMonitors = new Map<string, Record<string, PrMonitorState>>()
   private readonly chain: TokenChain
+  private readonly hostBudgets = new Map<string, { remaining: number; resetAt: number }>()
   private nextId = 1
   private readonly stateListeners = new Set<(sessionId: string, state: PrWatchSessionState) => void>()
   private activeRequests = 0
@@ -292,7 +297,7 @@ export class PrWatchRegistry {
           const coolingDown = (watcher.retryAfterUntil ?? 0) > now
             || (watcher.consecutiveErrors > 0 && (watcher.nextPollAt ?? 0) > now)
             || (watcher.rateLimit && watcher.rateLimit.remaining < POLL.rateLimitFloor && watcher.rateLimit.resetAt > now)
-          if (!automatic || !coolingDown) await this.refresh(watcher)
+          if (!automatic || !coolingDown) await this.refresh(watcher, !automatic)
         }
       }
     }
@@ -445,6 +450,7 @@ export class PrWatchRegistry {
    */
   async fetchReviewSignature(input: { coords: RepoCoordinates; number: number; workspaceRootPath: string }): Promise<string[] | null> {
     const { coords, number, workspaceRootPath } = input
+    if (!this.canPoll(coords.host, false)) return null
     const response = await this.runWithCredential(coords, workspaceRootPath, token =>
       this.deps.graphql<GqlReviewSignatureResponse>(coords.host, token, REVIEW_SIGNATURE_QUERY, { owner: coords.owner, name: coords.repo, number }))
     const pr = response?.result.repository?.pullRequest
@@ -455,6 +461,7 @@ export class PrWatchRegistry {
   async getDetails(sessionId: string, prId: string, clientId: string): Promise<PrDetails | null> {
     const watcher = this.watcherForEntry(sessionId, prId, clientId)
     if (!watcher?.pr) return null
+    if (!this.canPoll(watcher.pr.coords.host, true)) return watcher.details?.value ?? null
     if (watcher.details && this.now() - watcher.details.at < DETAILS_TTL_MS) return watcher.details.value
 
     const { coords, number, headOid } = watcher.pr
@@ -692,8 +699,58 @@ export class PrWatchRegistry {
 
   // ── credentials ─────────────────────────────────────────────────────────
 
-  private runWithCredential<T>(coords: RepoCoordinates, workspaceRootPath: string, attempt: (token: string) => Promise<T>): Promise<{ result: T; via: string } | null> {
-    return this.limited(async () => this.chain.run(coordsKey(coords), await this.deps.candidates(coords.host, workspaceRootPath), attempt))
+  private canPoll(host: string, foreground: boolean): boolean {
+    const budget = this.hostBudgets.get(host)
+    if (!budget || budget.resetAt <= this.now()) return true
+    return budget.remaining >= (foreground ? POLL.rateLimitFloor : POLL.rateLimitSlow)
+  }
+
+  private canPollWatcher(watcher: Watcher): boolean {
+    const host = this.watcherHost(watcher)
+    const foreground = this.isForeground(watcher)
+    if (!this.canPoll(host, foreground)) return false
+    const budget = this.hostBudgets.get(host)
+    return !budget || budget.resetAt <= this.now() || budget.remaining >= POLL.rateLimitSlow
+      || watcher.lastFetchAt === undefined || this.now() - watcher.lastFetchAt >= POLL.rateLimitForeground
+  }
+
+  private observeBudget(host: string, result: unknown): void {
+    if (!result || typeof result !== 'object' || !('rateLimit' in result)) return
+    const limit = result.rateLimit as { remaining?: unknown; resetAt?: unknown } | null
+    if (!limit || typeof limit.remaining !== 'number' || !Number.isFinite(limit.remaining)
+      || limit.remaining < 0 || typeof limit.resetAt !== 'string') return
+    const resetAt = Date.parse(limit.resetAt)
+    if (!Number.isFinite(resetAt)) return
+    const previous = this.hostBudgets.get(host)
+    const active = previous && previous.resetAt > this.now() ? previous : undefined
+    const remaining = Math.min(active?.remaining ?? Infinity, limit.remaining)
+    this.hostBudgets.set(host, { remaining, resetAt: Math.max(active?.resetAt ?? resetAt, resetAt) })
+    const band = (value: number) => value < POLL.rateLimitFloor ? 0 : value < POLL.rateLimitSlow ? 1 : 2
+    if (band(previous?.remaining ?? Infinity) !== band(remaining)) {
+      for (const watcher of this.watchers.values()) {
+        if (this.watcherHost(watcher) === host && !watcher.inFlight) this.schedule(watcher)
+      }
+    }
+  }
+
+  private watcherHost(watcher: Watcher): string {
+    return watcher.target.kind === 'branch' ? watcher.target.repo.repo.host : watcher.target.coords.host
+  }
+
+  private isForeground(watcher: Watcher): boolean {
+    return [...watcher.subscriptions].some(id => this.subscriptions.get(id)?.foreground)
+  }
+
+  private runWithCredential<T>(coords: RepoCoordinates, workspaceRootPath: string, attempt: (token: string) => Promise<T>, poll?: { watcher: Watcher; force: boolean }): Promise<{ result: T; via: string } | null> {
+    return this.limited(async () => {
+      // Recheck after waiting for a request slot: another PR may have spent the shared budget.
+      if (poll && !poll.force && !this.canPollWatcher(poll.watcher)) throw new PollingPaused()
+      return this.chain.run(coordsKey(coords), await this.deps.candidates(coords.host, workspaceRootPath), async token => {
+        const result = await attempt(token)
+        this.observeBudget(coords.host, result)
+        return result
+      })
+    })
   }
 
   private withToken<T>(watcher: Watcher, coords: RepoCoordinates, attempt: (token: string) => Promise<T>): Promise<{ result: T; via: string } | null> {
@@ -703,26 +760,27 @@ export class PrWatchRegistry {
   // ── fetching ──────────────────────────────────────────────────────────────
 
   /** One summary fetch; concurrent callers share it. */
-  private refresh(watcher: Watcher): Promise<void> {
+  private refresh(watcher: Watcher, force = false): Promise<void> {
     if (watcher.inFlight) return watcher.inFlight
     if (watcher.timer !== null) {
       this.clearTimer(watcher.timer)
       watcher.timer = null
     }
-    watcher.inFlight = this.fetchSummary(watcher).finally(() => {
+    watcher.inFlight = this.fetchSummary(watcher, force).finally(() => {
       watcher.inFlight = null
       if (this.watchers.get(watcher.key) === watcher) this.schedule(watcher)
     })
     return watcher.inFlight
   }
 
-  private async fetchSummary(watcher: Watcher): Promise<void> {
+  private async fetchSummary(watcher: Watcher, force: boolean): Promise<void> {
     try {
       const resolved = watcher.target.kind === 'branch'
-        ? await this.resolveBranchPr(watcher.target.repo, watcher.workspaceRootPath, watcher)
-        : await this.resolveNumberPr(watcher.target.coords, watcher.target.number, watcher.workspaceRootPath, watcher)
+        ? await this.resolveBranchPr(watcher.target.repo, watcher.workspaceRootPath, watcher, force)
+        : await this.resolveNumberPr(watcher.target.coords, watcher.target.number, watcher.workspaceRootPath, watcher, force)
 
       watcher.consecutiveErrors = 0
+      watcher.lastFetchAt = this.now()
       watcher.retryAfterUntil = undefined
       if (resolved === 'no-token') {
         if (watcher.state.kind === 'pr') {
@@ -747,6 +805,7 @@ export class PrWatchRegistry {
       watcher.pr = { coords, number: node.number, headOid: node.headRefOid, nodeId: node.id }
       this.setState(watcher, { kind: 'pr', summary: mapSummary(node, local, { fetchedAt: this.now(), via }) })
     } catch (error) {
+      if (error instanceof PollingPaused) return
       watcher.consecutiveErrors++
       if (error instanceof GitHubRequestError && error.retryAfterMs) watcher.retryAfterUntil = this.now() + error.retryAfterMs
       this.log(`[pr-watch] ${watcher.key}: ${(error as Error).message}`)
@@ -761,10 +820,17 @@ export class PrWatchRegistry {
     repo: WatchableRepo,
     workspaceRootPath: string,
     watcher?: Watcher,
+    force = false,
   ): Promise<{ node: GqlPullRequestSummary; coords: RepoCoordinates; via: string } | 'no-token' | null> {
+    // Like Conductor's hasPrNumber query: search the branch once, then read the known PR.
+    if (watcher?.pr && !force) {
+      const known = await this.resolveNumberPr(watcher.pr.coords, watcher.pr.number, workspaceRootPath, watcher, force)
+      if (known && known !== 'no-token' && known.node.headRefName === repo.remoteBranch
+        && pickPullRequest([known.node], repo.repo.owner)) return known
+    }
     const query = async (coords: RepoCoordinates) => {
       const response = await this.runWithCredential(coords, workspaceRootPath, token =>
-        this.deps.graphql<GqlSummaryResponse>(coords.host, token, SUMMARY_QUERY, { owner: coords.owner, name: coords.repo, branch: repo.remoteBranch }))
+        this.deps.graphql<GqlSummaryResponse>(coords.host, token, SUMMARY_QUERY, { owner: coords.owner, name: coords.repo, branch: repo.remoteBranch }), watcher ? { watcher, force } : undefined)
       if (!response) return null
       if (watcher && response.result.rateLimit) watcher.rateLimit = { remaining: response.result.rateLimit.remaining, resetAt: Date.parse(response.result.rateLimit.resetAt) }
       const node = pickPullRequest(response.result.repository?.pullRequests.nodes ?? [], repo.repo.owner)
@@ -787,9 +853,10 @@ export class PrWatchRegistry {
     number: number,
     workspaceRootPath: string,
     watcher?: Watcher,
+    force = false,
   ): Promise<{ node: GqlPullRequestSummary; coords: RepoCoordinates; via: string } | 'no-token' | null> {
     const response = await this.runWithCredential(coords, workspaceRootPath, token =>
-      this.deps.graphql<GqlByNumberResponse>(coords.host, token, PR_BY_NUMBER_QUERY, { owner: coords.owner, name: coords.repo, number }))
+      this.deps.graphql<GqlByNumberResponse>(coords.host, token, PR_BY_NUMBER_QUERY, { owner: coords.owner, name: coords.repo, number }), watcher ? { watcher, force } : undefined)
     if (!response) return 'no-token'
     if (watcher && response.result.rateLimit) watcher.rateLimit = { remaining: response.result.rateLimit.remaining, resetAt: Date.parse(response.result.rateLimit.resetAt) }
     const node = response.result.repository?.pullRequest
@@ -837,10 +904,10 @@ export class PrWatchRegistry {
     const now = this.now()
     let delay = nextPollDelay({
       state: watcher.state,
-      foreground: [...watcher.subscriptions].some(id => this.subscriptions.get(id)?.foreground),
+      foreground: this.isForeground(watcher),
       now,
       consecutiveErrors: watcher.consecutiveErrors,
-      rateLimit: watcher.rateLimit,
+      rateLimit: this.hostBudgets.get(this.watcherHost(watcher)) ?? watcher.rateLimit,
     })
     if (delay === null) return
     if (watcher.retryAfterUntil && watcher.retryAfterUntil > now) delay = Math.max(delay, watcher.retryAfterUntil - now)

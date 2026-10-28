@@ -61,7 +61,7 @@ function setup(options: { repos?: Record<string, RepoInfo | null>; prs?: GqlPull
   let stoppedRefWatchers = 0
   const repos: Record<string, RepoInfo | null> = { '/work/app': REPO, ...options.repos }
   let prs = options.prs ?? [PR]
-  const byNumber = options.byNumber ?? { 7: PR, 42: DEP_PR }
+  const byNumber = options.byNumber ?? { 42: DEP_PR }
   let failNext: Error | null = null
   let local = options.local ?? { localAhead: 0, localDirty: false }
 
@@ -115,7 +115,7 @@ function setup(options: { repos?: Record<string, RepoInfo | null>; prs?: GqlPull
         } as T
       }
       if (query.includes('PrByNumber')) {
-        const node = byNumber[variables.number as number] ?? null
+        const node = byNumber[variables.number as number] ?? prs.find(pr => pr.number === variables.number) ?? null
         return { rateLimit: options.rateLimit ?? { remaining: 4000, resetAt: '2030-01-01T00:00:00Z' }, repository: node ? { pullRequest: node } : { pullRequest: null } } as T
       }
       return { rateLimit: options.rateLimit ?? { remaining: 4000, resetAt: '2030-01-01T00:00:00Z' }, repository: { pullRequests: { nodes: prs } } } as T
@@ -591,4 +591,100 @@ it('automatic focus refresh respects the remaining GitHub quota', async () => {
   await t.registry.nudge('s1', 'c1', true)
   expect(t.calls.length).toBe(count)
   t.registry.dispose()
+})
+
+describe('Conductor PR polling', () => {
+  it('discovers a branch once, then reads its known PR by number', async () => {
+    const t = setup()
+    try {
+      await t.registry.subscribe({ ...sub(), foreground: true })
+      await t.flush()
+      await t.advance(POLL.foreground)
+      await t.advance(POLL.foreground)
+      expect(t.calls.map(call => call.query.includes('PrByNumber'))).toEqual([false, true, true])
+      expect(t.calls[1]?.variables.number).toBe(7)
+    } finally { t.registry.dispose() }
+  })
+
+  it('shares the low budget across chats and reserves requests for the visible chat', async () => {
+    const limit = { remaining: 4000, resetAt: new Date(1_360_000).toISOString() }
+    const t = setup({ rateLimit: limit })
+    try {
+      await t.registry.subscribe(sub('background', 'internal'))
+      await t.flush()
+      limit.remaining = 900
+      await t.registry.subscribe({ ...sub('visible'), dir: '/work/visible', foreground: true })
+      // Resolve a distinct branch watcher so the response updates the shared budget.
+      t.repos['/work/visible'] = { ...REPO, root: '/work/visible' }
+      await t.registry.nudge('visible')
+      const count = t.calls.length
+      await t.registry.nudge('background', 'internal', true)
+      await t.registry.nudge('visible', 'c1', true)
+      expect(t.calls.length).toBe(count)
+      await t.advance(60_000)
+      expect(t.calls.length).toBe(count + 1)
+      expect(firstPr(t.registry.cachedSessionState('background')!)?.summary.number).toBe(7)
+    } finally { t.registry.dispose() }
+  })
+
+  it('pauses every automatic read below 500, preserves cache and recovers after reset', async () => {
+    const limit = { remaining: 499, resetAt: new Date(1_060_000).toISOString() }
+    const t = setup({ rateLimit: limit })
+    try {
+      await t.registry.subscribe({ ...sub(), foreground: true })
+      await t.flush()
+      const count = t.calls.length
+      await t.registry.nudge('s1', 'c1', true)
+      await t.registry.getDetails('s1', 'github.com/acme/app#7', 'c1')
+      await t.registry.fetchReviewSignature({ coords: REPO.repo!, number: 7, workspaceRootPath: '/ws' })
+      expect(t.calls.length).toBe(count)
+      expect(firstPr(t.registry.cachedSessionState('s1')!)?.summary.attentionStale).toBeUndefined()
+      limit.remaining = 4000
+      limit.resetAt = new Date(1_120_000).toISOString()
+      await t.advance(60_000)
+      expect(t.calls.length).toBe(count + 1)
+    } finally { t.registry.dispose() }
+  })
+
+  it('does not let an older high-budget response reopen background polling', async () => {
+    const limit = { remaining: 900, resetAt: new Date(1_360_000).toISOString() }
+    const t = setup({ rateLimit: limit })
+    try {
+      await t.registry.subscribe(sub())
+      await t.flush()
+      limit.remaining = 4000
+      await t.registry.nudge('s1') // A late response carries an older, larger counter.
+      const count = t.calls.length
+      await t.registry.nudge('s1', 'c1', true)
+      expect(t.calls.length).toBe(count)
+      expect(t.nextDelay()).toBe(360_000)
+    } finally { t.registry.dispose() }
+  })
+
+  it('rechecks the shared budget before dispatching queued requests', async () => {
+    let calls = 0
+    const release: Array<(remaining: number) => void> = []
+    const registry = new PrWatchRegistry({
+      graphql: async <T,>() => {
+        calls++
+        const remaining = await new Promise<number>(resolve => release.push(resolve))
+        return { rateLimit: { remaining, resetAt: new Date(Date.now() + 600_000).toISOString() }, repository: { pullRequests: { nodes: [PR] } } } as T
+      },
+      candidates: async () => [{ id: 'gh', label: 'gh', getToken: async () => 'token' }],
+      push: () => {},
+      resolveRepo: async dir => ({ ...REPO, root: dir }),
+      localStatus: async () => ({ localAhead: 0, localDirty: false }),
+      watchRefs: () => () => {}, setTimer: () => 0, clearTimer: () => {},
+    })
+    try {
+      for (let i = 0; i < 30; i++) await registry.subscribe({ ...sub(`s${i}`), dir: `/repo/${i}` })
+      await new Promise(resolve => setTimeout(resolve, 0))
+      expect(calls).toBe(4)
+      release[0]!(900)
+      await new Promise(resolve => setTimeout(resolve, 0))
+      for (const finish of release.slice(1)) finish(4000)
+      await new Promise(resolve => setTimeout(resolve, 0))
+      expect(calls).toBe(4)
+    } finally { registry.dispose(); for (const finish of release) finish(900) }
+  })
 })

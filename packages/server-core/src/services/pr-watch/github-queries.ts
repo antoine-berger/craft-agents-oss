@@ -1,6 +1,7 @@
 /**
  * The two GraphQL queries behind the PR watcher, and the response shapes `map-github.ts` reads.
- * Each costs 1 point of GitHub's 5,000/hour GraphQL budget (checked against a live PR).
+ * Reading a known PR costs less than searching five branch candidates. Resolve its number once
+ * and reuse it for subsequent polls, as Conductor does; cost depends on the selected connections.
  */
 
 /**

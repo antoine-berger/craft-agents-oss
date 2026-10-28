@@ -59,3 +59,22 @@ describe('foreground polling', () => {
     expect(at(pr({ state: 'merged' }), { foreground: true })).toBeNull()
   })
  })
+
+describe('Conductor shared-quota thresholds', () => {
+  const budget = (remaining: number) => ({ remaining, resetAt: NOW + 600_000 })
+  it('keeps the usual cadence at 1,000 points', () => {
+    expect(at(pr(), { rateLimit: budget(1000), foreground: true })).toBe(5000)
+    expect(at(pr(), { rateLimit: budget(1000) })).toBe(300_000)
+  })
+  it('slows the visible chat to one minute and pauses the background below 1,000', () => {
+    for (const remaining of [999, 500]) {
+      expect(at(pr(), { rateLimit: budget(remaining), foreground: true })).toBe(60_000)
+      expect(at(pr(), { rateLimit: budget(remaining) })).toBe(600_000)
+    }
+  })
+  it('pauses both below 500 and ignores an expired budget', () => {
+    expect(at(pr(), { rateLimit: budget(499), foreground: true })).toBe(600_000)
+    expect(at(pr(), { rateLimit: budget(499) })).toBe(600_000)
+    expect(at(pr(), { foreground: true, rateLimit: { remaining: 0, resetAt: NOW } })).toBe(5000)
+  })
+})
