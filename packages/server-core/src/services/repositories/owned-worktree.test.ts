@@ -46,6 +46,40 @@ describe('session-owned worktrees', () => {
     await expect(ensureOwnedWorktree({ ...readyA, branch: b.branch, path: readyB.path })).rejects.toBeInstanceOf(OwnedWorktreeError)
   })
 
+  it('keeps the same workspace through branch rename, new branch, switch and detached HEAD', async () => {
+    const ready = await ensureOwnedWorktree(await plan('branch-flow'))
+    writeFileSync(join(ready.path, 'code.txt'), 'in progress\n')
+    for (const args of [['branch', '-m', 'developer/renamed'], ['switch', '-c', 'feature/next'], ['switch', 'developer/renamed'], ['checkout', '--detach']]) {
+      git(ready.path, ...args)
+      const resumed = await ensureOwnedWorktree(ready)
+      expect(resumed.path).toBe(ready.path)
+      expect(resumed.token).toBe(ready.token)
+      expect(resumed.checkout?.branch).toBe(args[0] === 'checkout' ? null : git(ready.path, 'symbolic-ref', '--short', 'HEAD'))
+      expect(readFileSync(join(ready.path, 'code.txt'), 'utf8')).toBe('in progress\n')
+    }
+  })
+
+  it.each(['renamed', 'detached'])('restores the actual clean checkout after archive: %s', async mode => {
+    const ready = await ensureOwnedWorktree(await plan('archive-'+mode))
+    git(ready.path, 'branch', '-m', 'developer/new-name')
+    if (mode === 'detached') git(ready.path, 'checkout', '--detach')
+    const head = git(ready.path, 'rev-parse', 'HEAD')
+    expect(await removeOwnedWorktree(ready)).toEqual({ removed: true })
+    if (mode === 'detached') expect(git(repo, 'for-each-ref', '--format=%(objectname)', 'refs/craft/worktrees/')).toContain(head)
+    const restored = await ensureOwnedWorktree({ ...ready, status: 'removed' })
+    expect(git(restored.path, 'rev-parse', 'HEAD')).toBe(head)
+    expect(git(restored.path, 'rev-parse', '--abbrev-ref', 'HEAD')).toBe(mode === 'detached' ? 'HEAD' : 'developer/new-name')
+  })
+
+  it('refuses restoration if another workspace now checks out the switched branch', async () => {
+    const ready = await ensureOwnedWorktree(await plan('switched-owner'))
+    git(ready.path, 'switch', '-c', 'feature/next')
+    await removeOwnedWorktree(ready)
+    const other = await ensureOwnedWorktree(await planOwnedWorktree({ repositoryPath: repo, ownerId: 'workspace/new-owner', sessionId: 'new-owner', existingBranch: 'feature/next' }))
+    await expect(ensureOwnedWorktree({ ...ready, status: 'removed' })).rejects.toThrow('another session')
+    expect(git(other.path, 'symbolic-ref', '--short', 'HEAD')).toBe('feature/next')
+  })
+
   it('recovers the exact allocation after a crash before its owner journal is published', async () => {
     const input = { repositoryPath: repo, ownerId: 'workspace/interrupted-plan', sessionId: 'interrupted-plan', branchPrefix: 'developer', taskTitle: 'Recover allocation' }
     const pending = await planOwnedWorktree(input)
@@ -347,14 +381,15 @@ describe('session-owned worktrees', () => {
     expect(existsSync(join(repo, 'code.txt'))).toBe(true)
   })
 
-  it('refuses cleanup after the worktree changes branch or is locked', async () => {
+  it('refuses locked cleanup and preserves a changed branch through cleanup', async () => {
     const ready = await ensureOwnedWorktree(await plan())
     git(repo, 'worktree', 'lock', ready.path)
     expect((await removeOwnedWorktree(ready)).removed).toBe(false)
     git(repo, 'worktree', 'unlock', ready.path)
     git(ready.path, 'switch', '-c', 'someone-else')
-    await expect(removeOwnedWorktree(ready)).rejects.toBeInstanceOf(OwnedWorktreeError)
-    expect(existsSync(ready.path)).toBe(true)
+    expect((await removeOwnedWorktree(ready)).removed).toBe(true)
+    expect(git(repo, 'rev-parse', 'refs/heads/someone-else')).toBe(ready.baseCommit)
+    expect((await ensureOwnedWorktree({ ...ready, status: 'removed' })).checkout?.branch).toBe('someone-else')
   })
 
   it('does not recreate a deleted session branch from main after cleanup', async () => {

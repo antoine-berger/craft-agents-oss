@@ -131,7 +131,10 @@ export interface OwnedWorktree {
   branchPrefix?: string;
   /** Legacy hash branches omit this; task/existing names retain durable ownership markers. */
   branchNaming?: 'task' | 'existing';
+  /** Initial branch anchors the durable directory allocation; Git may subsequently switch branches. */
   branch: string;
+  /** Last verified checkout, retained in the owner journal for archive/restoration. */
+  checkout?: { branch: string | null; commit: string };
   base: string;
   baseCommit: string;
   status: 'pending' | 'ready' | 'removed';

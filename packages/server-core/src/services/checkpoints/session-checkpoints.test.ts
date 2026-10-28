@@ -33,6 +33,25 @@ function restore(checkpointId: string, apply = async () => { writeFileSync(recor
 }
 
 describe('session turn checkpoints on real Git worktrees', () => {
+  it('captures and restores after renaming or switching branches, including detached HEAD', async () => {
+    const original = plan.branch
+    const originalHead = git(plan.path, 'rev-parse', 'HEAD')
+    const beforeRename = await captureSessionCheckpoint(context(), user.id)
+    git(plan.path, 'branch', '-m', 'developer/renamed')
+    writeFileSync(join(plan.path, 'code.txt'), 'renamed work\n')
+    git(plan.path, 'add', '.'); git(plan.path, 'commit', '-m', 'New branch commit')
+    git(plan.path, 'switch', '-c', 'feature/next')
+    const checkpoint = await captureSessionCheckpoint(context(), 'turn-two')
+    expect(checkpoint.branch).toBe('feature/next')
+    expect((await listSessionCheckpoints(context())).checkpoints).toHaveLength(2)
+    await restore(beforeRename.id)
+    expect(git(plan.path, 'symbolic-ref', '--short', 'HEAD')).toBe('feature/next')
+    expect(git(plan.path, 'rev-parse', 'HEAD')).toBe(originalHead)
+    expect(git(plan.path, 'branch', '--list', original)).toBe('')
+    git(plan.path, 'checkout', '--detach')
+    expect((await captureSessionCheckpoint(context(), 'detached-turn')).branch).toBe('HEAD')
+  })
+
   it('does not count unchanged monorepo files against changed-file limits', async () => {
     writeFileSync(join(plan.path, 'baseline.bin'), Buffer.alloc(1024 * 1024))
     git(plan.path, 'add', 'baseline.bin'); git(plan.path, 'commit', '-m', 'Existing large baseline')

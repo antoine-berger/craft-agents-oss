@@ -4368,7 +4368,7 @@ export class SessionManager implements ISessionManager {
       await this.prepareSessionWorktree(managed)
       const owned = managed.worktree!.owned!
       this.notifySessionCreated(workspaceId, sessionId)
-      return { path: ownedWorktreeWorkingDirectory(owned), branch: owned.branch, base: owned.baseCommit, cloned: false }
+      return { path: ownedWorktreeWorkingDirectory(owned), branch: owned.checkout ? owned.checkout.branch ?? 'HEAD' : owned.branch, base: owned.baseCommit, cloned: false }
     })
   }
 
@@ -4563,7 +4563,8 @@ export class SessionManager implements ISessionManager {
           await this.prepareSessionWorktree(managed)
         } catch (error) {
           if (error instanceof Error && error.name === 'AbortError') throw error
-          throw new Error(i18n.t('worktree.session.prepareFailed', { reason: error instanceof Error ? error.message : String(error) }))
+          const reason = error instanceof Error ? error.message : String(error)
+          throw new Error(i18n.t('worktree.session.prepareFailed', { reason }) || `Could not prepare worktree: ${reason}`)
         }
         if (managed.worktree?.owned) {
           const context = { plan: managed.worktree.owned, sessionDir: getSessionStoragePath(managed.workspace.rootPath, managed.id) }
