@@ -12,6 +12,7 @@
  */
 
 import * as React from 'react'
+import { PrWatchSnapshots } from './pr-watch-snapshots'
 import type { PrDetails, PrEntry, PrMergeMethod, PrSummary, PrWatchSessionState, PrWatchState } from '@craft-agent/shared/protocol'
 
 /** While the card is open, its details are re-read this often (the server caches them for 10 s). */
@@ -69,7 +70,7 @@ export interface PrWatch {
   setAutoFix: (enabled: boolean) => void
 }
 
-const LOADING: PrWatchSessionState = { kind: 'loading' }
+const snapshots = new PrWatchSnapshots()
 
 function useDocumentVisible(): boolean {
   const [visible, setVisible] = React.useState(() => typeof document === 'undefined' || document.visibilityState !== 'hidden')
@@ -90,19 +91,23 @@ function entriesOf(state: PrWatchSessionState): PrEntry[] {
 
 export function usePrWatch(sessionId: string, enabled: boolean, workingDirectory: string | undefined): PrWatch {
   const visible = useDocumentVisible()
-  // Tagged with its session: after a session switch the old state must not render even for a frame
-  const [tagged, setTagged] = React.useState<{ sessionId: string; state: PrWatchSessionState }>({ sessionId, state: LOADING })
-  const base = tagged.sessionId === sessionId ? tagged.state : LOADING
+  const snapshotKey = JSON.stringify([sessionId, workingDirectory])
+  // Tag by checkout too: a folder change must never expose the previous branch's actions.
+  const [tagged, setTagged] = React.useState<{ key: string; state: PrWatchSessionState }>(() => ({ key: snapshotKey, state: snapshots.read(snapshotKey) }))
+  const base = tagged.key === snapshotKey ? tagged.state : snapshots.read(snapshotKey)
   const setBase = React.useCallback((next: PrWatchSessionState | ((current: PrWatchSessionState) => PrWatchSessionState)) => {
     setTagged(current => {
-      const currentState = current.sessionId === sessionId ? current.state : LOADING
-      return { sessionId, state: typeof next === 'function' ? next(currentState) : next }
+      const currentState = current.key === snapshotKey ? current.state : snapshots.read(snapshotKey)
+      const value = typeof next === 'function' ? next(currentState) : next
+      return { key: snapshotKey, state: snapshots.update(snapshotKey, value) }
     })
-  }, [sessionId])
+  }, [snapshotKey])
   const [activeIndex, setActiveIndex] = React.useState(0)
   const [details, setDetails] = React.useState<{ key: string; value: PrDetails } | null>(null)
   const [refreshing, setRefreshing] = React.useState(false)
   const [cardOpen, setCardOpen] = React.useState(false)
+  const [retry, setRetry] = React.useState(0)
+  const subscribed = React.useRef(false)
   const active = enabled && visible
 
   const entries = entriesOf(base)
@@ -112,20 +117,30 @@ export function usePrWatch(sessionId: string, enabled: boolean, workingDirectory
   const countRef = React.useRef(0)
   countRef.current = entries.length
 
-  // The watcher turned off or the folder changed: start from nothing
+  // Restore only the current checkout while its subscription is being established.
   React.useEffect(() => {
-    setBase(LOADING)
+    setBase(snapshots.read(snapshotKey))
     setDetails(null)
     setActiveIndex(0)
-  }, [setBase, enabled, workingDirectory])
+  }, [setBase, enabled, snapshotKey])
+
+  React.useEffect(() => {
+    return window.electronAPI?.onReconnected?.(() => {
+      subscribed.current = false
+      setRetry(value => value + 1)
+    })
+  }, [])
 
   React.useEffect(() => {
     const api = window.electronAPI
     if (!active || !api?.prWatchSubscribe) return
     let cancelled = false
     let subscriptionId: string | null = null
+    let pushed: PrWatchSessionState | null = null
     const off = api.onPrWatchChanged((changedSessionId, state) => {
-      if (changedSessionId !== sessionId) return
+      if (cancelled || changedSessionId !== sessionId) return
+      if (state.kind === 'loading' && pushed) return
+      if (state.kind !== 'loading') pushed = state
       setBase(state)
       setRefreshing(false)
     })
@@ -136,19 +151,39 @@ export function usePrWatch(sessionId: string, enabled: boolean, workingDirectory
           return
         }
         subscriptionId = result.subscriptionId
-        // A push may already have arrived with a newer state; `loading` must not overwrite it
-        setBase(current => (result.state.kind === 'loading' && current.kind !== 'loading' ? current : result.state))
+        subscribed.current = !!subscriptionId
+        if (!pushed) {
+          setBase(result.state)
+        } else if (pushed.kind === 'ready' && pushed.incomplete && result.state.kind === 'ready') {
+          // A bound PR can push before the branch attaches. Retain the completed set,
+          // but keep newer per-PR updates received while subscribe was in flight.
+          const branchId = pushed.prs.find(entry => entry.origin === 'branch')?.id
+          const entries = new Map(result.state.prs
+            .filter(entry => !branchId || entry.origin !== 'branch' || entry.id === branchId)
+            .map(entry => [entry.id, entry]))
+          for (const entry of pushed.prs) {
+            const previous = entries.get(entry.id)
+            if (!previous
+              || (entry.origin === 'branch' && previous.origin === 'bound')
+              || (entry.origin === previous.origin && entry.summary.fetchedAt >= previous.summary.fetchedAt)) {
+              entries.set(entry.id, entry)
+            }
+          }
+          const prs = [...entries.values()].sort((a, b) => a.origin === b.origin ? 0 : a.origin === 'branch' ? -1 : 1)
+          setBase({ ...result.state, prs })
+        }
       },
       () => {
-        if (!cancelled) setBase({ kind: 'unavailable', reason: 'error' })
+        if (!cancelled && !pushed) setBase({ kind: 'unavailable', reason: 'error' })
       },
     )
     return () => {
       cancelled = true
+      subscribed.current = false
       off()
       if (subscriptionId) void api.prWatchUnsubscribe(subscriptionId)
     }
-  }, [active, sessionId, workingDirectory, setBase])
+  }, [active, sessionId, workingDirectory, setBase, retry])
 
   // Details belong to one PR (kept on screen across pushes so the card doesn't flash skeletons);
   // each push re-reads them while the card is open. Keyed by the active entry's id.
@@ -184,6 +219,7 @@ export function usePrWatch(sessionId: string, enabled: boolean, workingDirectory
     const api = window.electronAPI
     if (!api?.prWatchRefresh) return
     setRefreshing(true)
+    if (!subscribed.current) setRetry(value => value + 1)
     void api.prWatchRefresh(sessionId).then(() => setRefreshing(false), () => setRefreshing(false))
   }, [sessionId])
 
