@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "description": "Verified fork-v0.15.17 plus disk-backed durable PR identity and read-only stale-link recovery after cold starts. Intentional pin updates require reviewed changes and regression tests.",
+  "description": "Verified fork-v0.15.18 base plus live Claude connector synchronization, bounded failure-cache retries and the current manual monitor repository.start contract.",
   "sourceFiles": {
     "packages/server-core/src/services/pr-watch/github-queries.ts": "e7f8aa04b211075ab11a6a782b71ef739046443647d332635ed9f12bdf20e7a9",
     "packages/server-core/src/services/pr-watch/map-github.ts": "63e8df57d0666dd1e4e28d720429fdda0d7d793301763942a2f8a92e224b19f0",
@@ -17,7 +17,7 @@
     "packages/server-core/src/sessions/SessionManager.ts": "9dfcacea9dee388c919cab0c8003dd4d8141f87b70325e8c74596a4a1692bf82",
     "packages/shared/src/protocol/dto.ts": "3774dfc5c090bedb69d2e60a1b07b0189fc5a99411bfed28693b2434d11e9b9b",
     "packages/core/src/types/message.ts": "01bf8d075648020549e22c326e9cf7ebcbabeadf41fa2632940006bf898d8c83",
-    "packages/shared/src/agent/claude-agent.ts": "ececcc718c372332afa7f417b35d38cd40ef09b4dec769a963984f584fe84a5f",
+    "packages/shared/src/agent/claude-agent.ts": "913c280699605bba86d57dc4da3fce424c8964110dc512fc4c2d0cda8d07eed3",
     "packages/shared/src/agent/backend/types.ts": "304e6e9f8191289209000e7db4c3325cd8fbd84d0cab3114a416c9d2bbc4e881",
     "packages/shared/src/agent/backend/claude/pending-steers.ts": "bfc0da3d2a924dce2bf3fcb2bd5b96659c391a3d93f43bb47576d627ccdf08d6",
     "packages/server-core/src/services/repositories/owned-worktree.ts": "e2453516291a09f245ad95e848e4544ce8f9630b524c781717c4ec2d5551c54d",
@@ -43,7 +43,9 @@
     "packages/shared/src/i18n/locales/en.json": "3aa74d0d2c1b5191c74a4789d38ee08a0f3f261debf174cbdcff01ed9fe27a47",
     "apps/electron/src/renderer/components/app-shell/chat-header/pr-watch/ChatHeaderPrChip.tsx": "02d745ca79922378a66d013a9672c840fba08ef9a78a61059138cd2cde8943b4",
     "apps/electron/src/renderer/components/app-shell/chat-header/pr-watch/pr-quick-actions.ts": "bd307e4f89f0e8292172e88b74c603c077e590e77e798b86edc694e18dcc22e3",
-    "packages/server-core/src/pr-watch/operations.ts": "d5e22df7e2bfd075944f8e68abd808d15e83918eaa879221ed85e25313d0cb35"
+    "packages/server-core/src/pr-watch/operations.ts": "d5e22df7e2bfd075944f8e68abd808d15e83918eaa879221ed85e25313d0cb35",
+    "packages/server-core/src/services/cli-proxy/connectors.ts": "2aff0dac504f64966a1de7e8fed293cfb7890e7bb56f76294b4701ea74da2061",
+    "apps/electron/resources/portable-config/skills/monitor/SKILL.md": "1b48956b770d20804195b3b264f5d057cf1d7911ea5c4b8a6b274dda957e030b"
   },
   "compiledClientFiles": {
     "apps/electron/src/renderer/hooks/usePrWatch.ts": "0e2af447e5cee777cc0ddd62810a02faa91369e2bb2fbf85ac4caf454d85bbf8",

@@ -24,6 +24,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Bug Fixes
 
+- **Connectors recover in existing chats** — Refresh the live Claude SDK tool catalog between messages without replacing its process, retain healthy discovery results while retrying failures after five seconds, and pass pilot branch references through `repository.start`. Existing histories and background agents remain attached. (f26c1103)
+
 ## Breaking Changes
 
 - **Multiple Claude and GPT accounts** — Connect accounts in AI settings using an integrated CLIProxyAPI service, import existing CLI logins, and pause individual accounts. An optional all-proxy mode also routes legacy chats and claude.ai MCP discovery/tool calls through CLIProxyAPI, making those connectors available to Claude and GPT. (#4)
