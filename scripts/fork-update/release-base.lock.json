@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "description": "Consolidated fork-v0.15.14 + Conductor 0.92 PR lookup and shared quota policy. Change pinned hashes only after reviewing and testing the intended replacement.",
+  "description": "Verified fork-v0.15.16 baseline plus Conductor 0.92 PR-number reuse and shared 1,000/500-point polling safeguards.",
   "sourceFiles": {
     "packages/server-core/src/services/pr-watch/github-queries.ts": "e7f8aa04b211075ab11a6a782b71ef739046443647d332635ed9f12bdf20e7a9",
     "packages/server-core/src/services/pr-watch/map-github.ts": "63e8df57d0666dd1e4e28d720429fdda0d7d793301763942a2f8a92e224b19f0",
@@ -31,7 +31,11 @@
     ".github/workflows/fork-release.yml": "de0e86a34de714123850f1a3095c73ce0ad0e05e5caf68254dbc9a273d9b9b30",
     "apps/electron/src/shared/types.ts": "23ba4d3f2b3ef38c097fec550e265ab302f93fed2eb118fedf2b0274af48e0ce",
     "packages/shared/src/config/theme.ts": "93a3550291250e945a3d6f5f51dad6340438211ff462d3e59d80fad93911fe5d",
-    "apps/electron/src/transport/channel-map.ts": "3382e6404071641adbd3485be514c095064159ae5e54ce5474237035ad5fb634"
+    "apps/electron/src/transport/channel-map.ts": "3382e6404071641adbd3485be514c095064159ae5e54ce5474237035ad5fb634",
+    "packages/shared/src/agent/options.ts": "ff715a5f59d7a8178f5c6140753cd2b9e5eca52332c971aa894820bb3d550166",
+    "apps/electron/resources/portable-config/skills/ship/SKILL.md": "559f7813a781fe04ff4dfc4e186a2175e99d2226372fbd192bb9f1b36f7b1577",
+    "apps/electron/resources/portable-config/skills/ship-plan/SKILL.md": "463e477accab92ceb9c37caf32020a1d564036c87586e29f07489c04d29a7d37",
+    "scripts/fork-update/prepare-linux-tools.py": "8e72fcaff543ac46def110d60e18f734c8dc0b7b5d719e2257a2983ab1be2bc0"
   },
   "compiledClientFiles": {
     "apps/electron/src/renderer/hooks/usePrWatch.ts": "0e2af447e5cee777cc0ddd62810a02faa91369e2bb2fbf85ac4caf454d85bbf8",

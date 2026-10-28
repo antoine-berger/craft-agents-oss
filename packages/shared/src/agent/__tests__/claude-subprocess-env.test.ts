@@ -3,6 +3,7 @@ import { buildClaudeSubprocessEnv } from '../options.ts';
 
 const ENV_KEYS = [
   'CLAUDE_CODE_ENABLE_TODO_TOOLS', 'CLAUDE_CODE_OAUTH_TOKEN', 'CLAUDE_CODE_OAUTH_SCOPES', 'CRAFT_SESSION_DIR',
+  'CLAUDE_CODE_PROMPT_CACHE_TTL', 'CLAUDE_CODE_MESSAGES_PROMPT_CACHE_TTL', 'CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL',
 ] as const;
 const originalEnv = new Map(ENV_KEYS.map(key => [key, process.env[key]]));
 
@@ -15,6 +16,16 @@ afterEach(() => {
 });
 
 describe('buildClaudeSubprocessEnv', () => {
+  it.each([true, false])('uses the configured TTL for every native cache scope (extended=%j)', extended => {
+    process.env.CLAUDE_CODE_PROMPT_CACHE_TTL = extended ? '5m' : '1h';
+    const env = buildClaudeSubprocessEnv({ CLAUDE_CODE_MESSAGES_PROMPT_CACHE_TTL: '1h' }, extended);
+    for (const key of ['CLAUDE_CODE_PROMPT_CACHE_TTL', 'CLAUDE_CODE_MESSAGES_PROMPT_CACHE_TTL', 'CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL']) {
+      expect(env[key]).toBe(extended ? '1h' : '5m');
+    }
+    expect(process.env.CLAUDE_CODE_PROMPT_CACHE_TTL).toBe(extended ? '5m' : '1h');
+    expect(env.ANTHROPIC_BASE_URL).toBe(buildClaudeSubprocessEnv().ANTHROPIC_BASE_URL);
+  });
+
   it('keeps the task-tracking tools available on every model (SDK 0.3.268 default change)', () => {
     delete process.env.CLAUDE_CODE_ENABLE_TODO_TOOLS;
     expect(buildClaudeSubprocessEnv().CLAUDE_CODE_ENABLE_TODO_TOOLS).toBe('1');

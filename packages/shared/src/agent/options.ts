@@ -4,7 +4,7 @@ import { homedir } from "os";
 import { existsSync, readFileSync, writeFileSync, unlinkSync, readdirSync } from "fs";
 import { debug } from "../utils/debug";
 import { getProxyEnvVars } from "../config/proxy-env.ts";
-import { getGitBashPath } from "../config/storage.ts";
+import { getExtendedPromptCache, getGitBashPath } from "../config/storage.ts";
 
 declare const CRAFT_AGENT_CLI_VERSION: string | undefined;
 
@@ -185,6 +185,7 @@ export function getPathToClaudeCodeExecutable(): string | undefined {
  */
 export function buildClaudeSubprocessEnv(
     envOverrides?: Record<string, string>,
+    extendedPromptCache = getExtendedPromptCache(),
 ): NodeJS.ProcessEnv {
     const env: NodeJS.ProcessEnv = {
         ...process.env,
@@ -193,6 +194,13 @@ export function buildClaudeSubprocessEnv(
         // Propagate debug mode from argv flag OR existing env var
         CRAFT_DEBUG: (process.argv.includes('--debug') || process.env.CRAFT_DEBUG === '1') ? '1' : '0',
     };
+
+    // The native Claude executable cannot run the JS network interceptor. Set all
+    // cache scopes together so a default 5m block cannot precede a 1h block.
+    const cacheTtl = extendedPromptCache ? '1h' : '5m';
+    env.CLAUDE_CODE_PROMPT_CACHE_TTL = cacheTtl;
+    env.CLAUDE_CODE_MESSAGES_PROMPT_CACHE_TTL = cacheTtl;
+    env.CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL = cacheTtl;
 
     // Token-only callers (for example connection probes) cannot inherit the
     // default account's connector grants from process.env. Normal chats pass

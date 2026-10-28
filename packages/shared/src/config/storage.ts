@@ -486,7 +486,7 @@ export function setRichToolDescriptions(enabled: boolean): void {
 
 /**
  * Get whether extended prompt cache (1h TTL) is enabled.
- * When enabled, the interceptor upgrades cache_control TTL from 5m to 1h.
+ * When enabled, native Claude cache scopes and intercepted requests use 1h TTL.
  * Defaults to false if not set.
  */
 export function getExtendedPromptCache(): boolean {
