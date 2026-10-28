@@ -33,14 +33,16 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: '1.3.10'
+      - run: bun install --frozen-lockfile
+        env:
+          HUSKY: '0'
       - name: Validate version and stamp package metadata
         env:
           FORK_VERSION: ${{ inputs.version }}
         run: |
-          bun -e "import {versionParts} from './apps/electron/src/main/fork-release'; versionParts(process.env.FORK_VERSION); for(const path of ['package.json','apps/electron/package.json']){const pkg=await Bun.file(path).json();pkg.version=process.env.FORK_VERSION;await Bun.write(path,JSON.stringify(pkg,null,2)+'\n')}"
-      - run: bun install --frozen-lockfile
-        env:
-          HUSKY: '0'
+          bun -e "import {versionParts} from './apps/electron/src/main/fork-release'; versionParts(process.env.FORK_VERSION); for(const path of ['package.json','apps/electron/package.json','packages/shared/package.json']){const pkg=await Bun.file(path).json();pkg.version=process.env.FORK_VERSION;await Bun.write(path,JSON.stringify(pkg,null,2)+'\n')}"
+      - name: Refresh workspace versions in the release lockfile
+        run: bun install --lockfile-only --ignore-scripts
       - name: Focused updater checks
         run: |
           bun test apps/electron/src/main/__tests__/fork-release.test.ts
@@ -65,7 +67,9 @@ jobs:
           mkdir -p dist/fork-server
           git archive HEAD | tar -x -C dist/fork-server
           cp package.json dist/fork-server/package.json
+          cp bun.lock dist/fork-server/bun.lock
           cp apps/electron/package.json dist/fork-server/apps/electron/package.json
+          cp packages/shared/package.json dist/fork-server/packages/shared/package.json
           cp -R apps/webui/dist dist/fork-server/apps/webui/dist
           cp -R packages/pi-agent-server/dist dist/fork-server/packages/pi-agent-server/dist
           cp -R packages/messaging-whatsapp-worker/dist dist/fork-server/packages/messaging-whatsapp-worker/dist
