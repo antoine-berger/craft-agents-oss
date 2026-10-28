@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { buildClaudeSubprocessEnv } from '../options.ts';
 
 const ENV_KEYS = [
-  'CLAUDE_CODE_ENABLE_TODO_TOOLS', 'CLAUDE_CODE_OAUTH_TOKEN', 'CLAUDE_CODE_OAUTH_SCOPES', 'CRAFT_SESSION_DIR',
+  'CLAUDE_CODE_ARTIFACT', 'CLAUDE_CODE_DISABLE_ARTIFACT', 'CLAUDE_CODE_ENABLE_TODO_TOOLS', 'CLAUDE_CODE_OAUTH_TOKEN', 'CLAUDE_CODE_OAUTH_SCOPES', 'CRAFT_SESSION_DIR',
   'CLAUDE_CODE_PROMPT_CACHE_TTL', 'CLAUDE_CODE_MESSAGES_PROMPT_CACHE_TTL', 'CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL',
 ] as const;
 const originalEnv = new Map(ENV_KEYS.map(key => [key, process.env[key]]));
@@ -64,6 +64,29 @@ describe('buildClaudeSubprocessEnv', () => {
 
     expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBe('selected-account-token');
     expect(env.CLAUDE_CODE_OAUTH_SCOPES).toBe('user:inference user:profile');
+  });
+
+  it('opts in to native artifacts without changing proxy routing or borrowing an account', () => {
+    delete process.env.CLAUDE_CODE_ARTIFACT;
+    const env = buildClaudeSubprocessEnv({
+      ANTHROPIC_BASE_URL: 'http://127.0.0.1:41801',
+      ANTHROPIC_API_KEY: 'proxy-fixture',
+      CLAUDE_CODE_OAUTH_TOKEN: '',
+    });
+    expect(env.CLAUDE_CODE_ARTIFACT).toBe('1');
+    expect(env.ANTHROPIC_BASE_URL).toBe('http://127.0.0.1:41801');
+    expect(env.ANTHROPIC_API_KEY).toBe('proxy-fixture');
+    expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBe('');
+    expect(process.env.CLAUDE_CODE_ARTIFACT).toBeUndefined();
+  });
+
+  it('preserves explicit artifact opt-outs and organization checks', () => {
+    process.env.CLAUDE_CODE_ARTIFACT = '0';
+    process.env.CLAUDE_CODE_DISABLE_ARTIFACT = '1';
+    expect(buildClaudeSubprocessEnv().CLAUDE_CODE_ARTIFACT).toBe('0');
+    const env = buildClaudeSubprocessEnv({ CLAUDE_CODE_ARTIFACT: '1' });
+    expect(env.CLAUDE_CODE_ARTIFACT).toBe('1');
+    expect(env.CLAUDE_CODE_DISABLE_ARTIFACT).toBe('1');
   });
 
   it('gives each session its own CRAFT_SESSION_DIR over the one another session left in process env', () => {

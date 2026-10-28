@@ -218,6 +218,13 @@ export function buildClaudeSubprocessEnv(
         env.CLAUDE_CODE_ENABLE_TODO_TOOLS = '1';
     }
 
+    // The SDK keeps Artifact off by default even with the full claude_code
+    // tool preset. Opt in; Claude still checks account auth and organization
+    // policy, and explicit environment/settings opt-outs keep their precedence.
+    if (env.CLAUDE_CODE_ARTIFACT === undefined) {
+        env.CLAUDE_CODE_ARTIFACT = '1';
+    }
+
     // Windows: point the SDK's Bash tool at the user-configured Git Bash if set.
     // The SDK otherwise falls back to a hardcoded Program Files search that misses
     // per-user installs (e.g. AppData\Local\Programs\Git) → "No bash shell found"

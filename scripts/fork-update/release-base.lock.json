@@ -32,7 +32,7 @@
     "apps/electron/src/shared/types.ts": "23ba4d3f2b3ef38c097fec550e265ab302f93fed2eb118fedf2b0274af48e0ce",
     "packages/shared/src/config/theme.ts": "93a3550291250e945a3d6f5f51dad6340438211ff462d3e59d80fad93911fe5d",
     "apps/electron/src/transport/channel-map.ts": "3382e6404071641adbd3485be514c095064159ae5e54ce5474237035ad5fb634",
-    "packages/shared/src/agent/options.ts": "ff715a5f59d7a8178f5c6140753cd2b9e5eca52332c971aa894820bb3d550166",
+    "packages/shared/src/agent/options.ts": "af662636d424622b32e8250f83825f74eb52d44d7567ef2427792331ebfae4b5",
     "apps/electron/resources/portable-config/skills/ship/SKILL.md": "559f7813a781fe04ff4dfc4e186a2175e99d2226372fbd192bb9f1b36f7b1577",
     "apps/electron/resources/portable-config/skills/ship-plan/SKILL.md": "463e477accab92ceb9c37caf32020a1d564036c87586e29f07489c04d29a7d37",
     "scripts/fork-update/prepare-linux-tools.py": "8e72fcaff543ac46def110d60e18f734c8dc0b7b5d719e2257a2983ab1be2bc0",

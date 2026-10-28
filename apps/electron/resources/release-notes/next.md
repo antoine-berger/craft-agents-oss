@@ -49,3 +49,5 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 - **Project empty-state creation** — The New Session button inside an empty project list uses the same project-aware creation action as the global button. New drafts appear immediately in that project. (#4)
 
 - **Compact chat controls** — Remove the shortcut hint row and its reserved space, keep a static input prompt, and move Projects above Labels. Chats use Execute without a mode selector, slash-mode commands or keyboard cycling. (#4)
+
+- **Native Claude artifacts** — Opt in to the native Artifact tool for Claude chats; account eligibility and organization policy still apply. CLIProxyAPI inference routing is preserved, so API-key proxy chats still require a supported claude.ai authentication path before they can publish. No Claude Docs integration is enabled.
