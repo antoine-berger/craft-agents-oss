@@ -46,6 +46,7 @@ jobs:
       - name: Focused updater checks
         run: |
           bun test apps/electron/src/main/__tests__/fork-release.test.ts
+          bun test apps/electron/src/transport/__tests__/thin-client-updates.test.ts
           bun test ./apps/electron/src/main/__tests__/fork-update.isolated.ts
           python3 -m unittest discover -s scripts/fork-update -p 'test_*.py'
       - name: Build Mac app
