@@ -25,6 +25,28 @@ test('merge queue button does not depend on whether the chat agent is processing
   act(() => view!.unmount())
 })
 
+test('Add to queue and Queued use the reference numbered-list glyph, while direct merge keeps its merge glyph', () => {
+  const paths = ['M11 5h10', 'M11 12h10', 'M11 19h10', 'M4 4h1v5', 'M4 9h2',
+    'M6.5 20H3.4c0-1 2.6-1.925 2.6-3.5a1.5 1.5 0 0 0-2.6-1.02']
+  for (const mode of ['add', 'queued', 'merge'] as const) {
+    const summary: any = { number: 7, state: 'open', headOid: 'abc', headMatchesLocal: true,
+      localDirty: false, localAhead: 0, checks: 'success', reviewDecision: 'approved',
+      mergeState: 'clean', unresolvedThreads: 0, quickActions: {
+        canMerge: true, mergeQueue: mode !== 'merge',
+        ...(mode === 'queued' ? { queued: { state: 'QUEUED', position: 1 } } : {}),
+      } }
+    let view: ReturnType<typeof create>
+    act(() => { view = create(React.createElement(PrQuickActions, { sessionId: 's1', origin: 'branch', state: { kind: 'pr', summary } })) })
+    const button = view!.root.findByType('button')
+    expect(button.children).toContain(mode === 'add' ? 'Add to queue' : mode === 'queued' ? 'Queued' : 'Merge')
+    expect(button.props.disabled).toBe(mode === 'queued')
+    const glyph = view!.root.findByType('svg')
+    if (mode === 'merge') expect(glyph.props.className).toContain('lucide-git-merge')
+    else expect(glyph.findAllByType('path').map(path => path.props.d)).toEqual(paths)
+    act(() => view!.unmount())
+  }
+})
+
 test('reopened UI keeps the saved PR button and link without claiming fresh green checks', () => {
   const summary = savedPrSummary({ coords: { host: 'github.com', owner: 'acme', repo: 'app' }, number: 7,
     title: 'Feature', url: 'https://github.com/acme/app/pull/7', headRef: 'me/task', baseRef: 'main',
