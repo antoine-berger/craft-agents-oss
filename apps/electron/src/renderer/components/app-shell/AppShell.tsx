@@ -1405,7 +1405,9 @@ function AppShellContent({
     if (sessionFilter.kind === 'archived') return result
     const tasks = projectTaskRows(result, projectMenuOptions)
     const projectId = projectFilter.size === 1 ? [...projectFilter].find(([, mode]) => mode === 'include')?.[0] : undefined
-    return [...projectPilotRows(activeSessionMetas, projectMenuOptions, projectId), ...tasks]
+    const pilots = sessionFilter.kind === 'allSessions' || projectId
+      ? projectPilotRows(activeSessionMetas, projectMenuOptions, projectId, projectFilter) : []
+    return [...pilots, ...tasks]
   }, [workspaceSessionMetas, activeSessionMetas, sessionFilter, listFilter, labelFilter, projectFilter, labelConfigs, isPilotSession, projectMenuOptions])
 
   // Derive "pinned" (non-removable) filters from the current sessionFilter path.
@@ -2637,7 +2639,7 @@ function AppShellContent({
                 {/* Key on sidebarMode forces full remount when switching views, skipping animations */}
                 <SessionList
                   key={sessionFilter?.kind}
-                  items={searchActive ? workspaceSessionMetas : filteredSessionMetas}
+                  items={searchActive && searchQuery.length >= 2 ? workspaceSessionMetas : filteredSessionMetas}
                   onNewSession={() => handleNewChat()}
                   onDelete={handleDeleteSession}
                   onFlag={onFlagSession}

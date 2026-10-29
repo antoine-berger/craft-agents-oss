@@ -6,10 +6,12 @@ export function isProjectPilot(id: string, projects: readonly ProjectPilot[]): b
   return projects.some(project => project.pilotSessionId === id)
 }
 
-/** Pilot chats have a dedicated slot in one project, never a task-status bucket. */
-export function projectPilotRows(items: SessionMeta[], projects: readonly ProjectPilot[], projectId?: string): SessionMeta[] {
-  const pilotId = projects.find(project => project.id === projectId)?.pilotSessionId
-  return pilotId ? items.filter(item => item.id === pilotId && !item.hidden && !item.isArchived) : []
+/** Keep pilots above task groups, both in All Sessions and in the selected projects. */
+export function projectPilotRows(items: SessionMeta[], projects: readonly ProjectPilot[], projectId?: string, projectFilter: ReadonlyMap<string, 'include' | 'exclude'> = new Map()): SessionMeta[] {
+  const included = new Set([...projectFilter].filter(([, mode]) => mode === 'include').map(([id]) => id))
+  const pilotIds = new Set(projects.filter(project => (projectId === undefined || project.id === projectId)
+    && projectFilter.get(project.id) !== 'exclude' && (included.size === 0 || included.has(project.id))).map(project => project.pilotSessionId))
+  return items.filter(item => pilotIds.has(item.id) && !item.hidden && !item.isArchived)
 }
 
 export function projectTaskRows(items: SessionMeta[], projects: readonly ProjectPilot[]): SessionMeta[] {
