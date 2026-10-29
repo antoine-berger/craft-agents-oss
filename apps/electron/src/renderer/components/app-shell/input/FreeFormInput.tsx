@@ -41,6 +41,7 @@ import { ImageSupportWarningBanner } from './ImageSupportWarningBanner'
 import { ANTHROPIC_MODELS, getModelContextWindow } from '@config/models'
 import {
   resolveEffectiveConnectionSlug,
+  resolveMidStreamBehavior,
   isCompatProvider,
   isAnthropicProvider,
   isClaudeAccountConnection,
@@ -98,9 +99,10 @@ export interface FreeFormInputProps {
   /** Whether input is disabled */
   disabled?: boolean
   /** Whether the session is currently processing */
+  hasQueuedMessages?: boolean
   isProcessing?: boolean
   /** Callback when message is submitted (skillSlugs from @mentions) */
-  onSubmit: (message: string, attachments?: FileAttachment[], skillSlugs?: string[]) => void
+  onSubmit: (message: string, attachments?: FileAttachment[], skillSlugs?: string[], deliveryMode?: 'queue' | 'steer') => void
   /** Callback to stop processing. Pass silent=true to skip "Response interrupted" message */
   onStop?: (silent?: boolean) => void
   /** External ref for the input */
@@ -239,6 +241,7 @@ export function FreeFormInput({
   placeholder,
   disabled = false,
   isProcessing = false,
+  hasQueuedMessages = false,
   onSubmit,
   onStop,
   inputRef: externalInputRef,
@@ -1131,8 +1134,12 @@ export function FreeFormInput({
     }
   }
 
+  const [deliveryOverride, setDeliveryOverride] = React.useState<'queue' | 'steer' | undefined>()
+  React.useEffect(() => setDeliveryOverride(undefined), [sessionId, effectiveConnection])
+  const deliveryMode = deliveryOverride ?? (effectiveConnectionDetails ? resolveMidStreamBehavior(effectiveConnectionDetails) : 'queue')
+
   // Submit message - backend handles queueing and interruption
-  const submitMessage = React.useCallback(() => {
+  const submitMessage = React.useCallback((mode: 'queue' | 'steer' = deliveryMode) => {
     const hasContent = input.trim() || attachments.length > 0 || followUpItems.length > 0
     if (!hasContent || disabled) return false
 
@@ -1152,11 +1159,16 @@ export function FreeFormInput({
     const mentions = parseMentions(input, skillSlugs, sourceSlugs)
 
     const attachmentSnapshot = attachments
+    if (isProcessing && mode === 'steer' && (attachmentSnapshot.length > 0 || mentions.skills.length > 0 || followUpItems.length > 0)) {
+      toast.info('This message will wait for the current turn because it includes attachments, skills, or review context.')
+      mode = 'queue'
+    }
 
     onSubmit(
       input.trim(),
       attachmentSnapshot.length > 0 ? attachmentSnapshot : undefined,
-      mentions.skills.length > 0 ? mentions.skills : undefined
+      mentions.skills.length > 0 ? mentions.skills : undefined,
+      mode
     )
     setInput('')
     setAttachments([])
@@ -1172,7 +1184,7 @@ export function FreeFormInput({
     })
 
     return true
-  }, [input, attachments, followUpItems, disabled, disableSend, needsRepository, onInputChange, onAttachmentsChange, onSubmit, skills, sources, onWorkingDirectoryChange, homeDir, showAttachmentSizeProblem])
+  }, [deliveryMode, isProcessing, input, attachments, followUpItems, disabled, disableSend, needsRepository, onInputChange, onAttachmentsChange, onSubmit, skills, sources, onWorkingDirectoryChange, homeDir, showAttachmentSizeProblem])
 
   // Listen for craft:submit-input events (simulate pressing the Send button)
   React.useEffect(() => {
@@ -1245,6 +1257,14 @@ export function FreeFormInput({
     // its prompt through ChatDisplay.handleStop. The pure guard deliberately
     // treats whitespace, attachments, loading files, and follow-up chips as draft
     // content so normal editing is never hijacked.
+    if (e.key === 'ArrowUp' && !input && !attachments.length && !loadingCount && !followUpItems.length && hasQueuedMessages
+      && !disabled && !disableSend && !e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey
+      && !e.nativeEvent.isComposing && !inlineMention.isOpen && !inlineSlash.isOpen && !inlineLabel.isOpen) {
+      e.preventDefault()
+      window.dispatchEvent(new CustomEvent('craft:focus-queue', { detail: { sessionId } }))
+      return
+    }
+
     if (shouldRecallPromptOnArrowUp({
       key: e.key,
       shiftKey: e.shiftKey,
@@ -1276,10 +1296,10 @@ export function FreeFormInput({
         e.preventDefault()
         submitMessage()
       }
-      // Also allow Cmd/Ctrl+Enter to send (power user shortcut)
+      // Cmd/Ctrl+Enter sends with the opposite mid-turn behavior, as in Conductor.
       if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !e.nativeEvent.isComposing) {
         e.preventDefault()
-        submitMessage()
+        submitMessage(deliveryMode === 'queue' ? 'steer' : 'queue')
       }
     } else {
       // cmd-enter mode: ⌘/Ctrl+Enter sends, plain Enter adds newline
@@ -1730,7 +1750,8 @@ export function FreeFormInput({
           </div>
 
 
-          {/* Send/Stop Button - Always show stop when processing */}
+          {isProcessing && <button type="button" className="shrink-0 text-xs text-secondary hover:text-foreground" onClick={() => setDeliveryOverride(deliveryMode === 'queue' ? 'steer' : 'queue')} title="Choose how to send; Cmd/Ctrl+Enter uses the other action">{deliveryMode === 'queue' ? 'Queue' : 'Steer'}</button>}
+          {/* Keep sending available while a turn is running. */}
           <SendButton
             isProcessing={isProcessing}
             disabled={!hasContent || disabled || disableSend || needsRepository}

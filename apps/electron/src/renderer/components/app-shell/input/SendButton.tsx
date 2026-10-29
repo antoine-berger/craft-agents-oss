@@ -22,7 +22,7 @@ interface SendButtonProps {
 export function SendButton({ isProcessing, disabled, onStop }: SendButtonProps) {
   const { t } = useTranslation()
 
-  if (isProcessing) {
+  if (isProcessing && disabled) {
     return (
       <Button
         type="button"
@@ -39,6 +39,8 @@ export function SendButton({ isProcessing, disabled, onStop }: SendButtonProps) 
   }
 
   return (
+    <>
+    {isProcessing && <Button type="button" variant="ghost" size="icon" aria-label={t('chat.stopResponse')} onClick={onStop} className={SEND_BASE}><Square className="size-2.5 fill-current" /></Button>}
     <Button
       type="submit"
       variant="primary"
@@ -51,5 +53,6 @@ export function SendButton({ isProcessing, disabled, onStop }: SendButtonProps) 
     >
       <ArrowUp className="size-4" />
     </Button>
+    </>
   )
 }

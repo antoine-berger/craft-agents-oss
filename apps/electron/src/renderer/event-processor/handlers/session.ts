@@ -84,18 +84,6 @@ export function handleComplete(
     })
   }
 
-  // Clear isQueued from any user messages once the turn completes. Pi's steer
-  // path never emits a 'processing' status update to clear it (the message is
-  // injected mid-stream and absorbed into the current response), so this is
-  // the natural place to drop the indicator. Claude's queued path has already
-  // cleared via the 'processing' status update before this fires; this is
-  // a safe no-op for that case.
-  const hasQueuedUserBubbles = updatedMessages.some(m => m.role === 'user' && m.isQueued)
-  if (hasQueuedUserBubbles) {
-    updatedMessages = updatedMessages.map(m =>
-      m.role === 'user' && m.isQueued ? { ...m, isQueued: false } : m
-    )
-  }
 
   return {
     state: {
@@ -557,14 +545,14 @@ export function handleUserMessage(
   const { session, streaming } = state
   const { message, status } = event
 
-  // Find existing message by ID match (backend ID, optimistic ID, or content+timestamp fallback)
-  const existingIndex = session.messages.findIndex(m =>
-    m.role === 'user' && (
-      m.id === message.id ||
-      (event.optimisticMessageId && m.id === event.optimisticMessageId) ||
-      (m.content === message.content && Math.abs(m.timestamp - message.timestamp) < 5000)
-    )
-  )
+  // Identity wins even when two pending messages contain the same text.
+  let existingIndex = session.messages.findIndex(m => m.role === 'user'
+    && (m.id === message.id || m.id === event.optimisticMessageId))
+  if (existingIndex < 0 && !event.optimisticMessageId) {
+    const candidates = session.messages.map((m, index) => ({ m, index })).filter(({ m }) => m.role === 'user'
+      && m.isPending && m.content === message.content && Math.abs(m.timestamp - message.timestamp) < 5000)
+    if (candidates.length === 1) existingIndex = candidates[0]!.index
+  }
 
   let updatedMessages: Message[]
 
@@ -573,7 +561,7 @@ export function handleUserMessage(
 
     // Event sequence protection: don't regress from 'processing' back to 'queued'
     // This handles out-of-order events (e.g., 'processing' arrives before 'queued')
-    if (status === 'queued' && existingMessage.isQueued === false) {
+    if (status === 'queued' && existingMessage.isQueued === false && message.timestamp <= existingMessage.timestamp) {
       // Already progressed past queued state, ignore this late 'queued' event
       return { state, effects: [] }
     }
@@ -600,6 +588,8 @@ export function handleUserMessage(
         return {
           ...m,
           ...(status === 'processing' ? { timestamp: message.timestamp } : {}),
+          content: message.content,
+          badges: message.badges,
           isPending: false,
           isQueued: status === 'queued',
         }

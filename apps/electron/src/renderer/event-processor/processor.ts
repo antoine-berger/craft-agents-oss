@@ -208,6 +208,9 @@ export function processEvent(
     case 'plan_submitted':
       return handlePlanSubmitted(state, event)
 
+    case 'queued_message_removed':
+      return { state: { ...state, session: { ...state.session, messages: state.session.messages.filter(message => message.id !== event.messageId && message.id !== event.optimisticMessageId) } }, effects: [] }
+
     case 'user_message':
       return handleUserMessage(state, event)
 

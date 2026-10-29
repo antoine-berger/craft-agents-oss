@@ -47,7 +47,7 @@ export const SESSION_PERSISTENT_FIELDS = [
   // Sharing
   'sharedUrl', 'sharedId',
   // Plan execution
-  'pendingPlanExecution',
+  'pendingPlanExecution', 'queuePaused',
   // Archive
   'isArchived', 'archivedAt',
   // Branching
@@ -248,6 +248,7 @@ export interface SessionConfig {
   hidden?: boolean;
   /** Whether this session is archived */
   isArchived?: boolean;
+  queuePaused?: boolean;
   /** Timestamp when session was archived (for retention policy) */
   archivedAt?: number;
   /**
@@ -399,6 +400,7 @@ export interface SessionHeader {
   hidden?: boolean;
   /** Whether this session is archived */
   isArchived?: boolean;
+  queuePaused?: boolean;
   /** Timestamp when session was archived (for retention policy) */
   archivedAt?: number;
   /** One-shot hidden summary injected on the first turn after a remote transfer. */
@@ -516,6 +518,7 @@ export interface SessionMetadata {
   hidden?: boolean;
   /** Whether this session is archived */
   isArchived?: boolean;
+  queuePaused?: boolean;
   /** Timestamp when session was archived (for retention policy) */
   archivedAt?: number;
   /** Message ID that this session was branched from (hard context cutoff marker). */

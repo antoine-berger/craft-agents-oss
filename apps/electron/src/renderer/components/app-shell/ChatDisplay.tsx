@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next"
 import { useEffect, useState, useMemo, useCallback } from "react"
 import { Bot, Info } from "lucide-react"
 import { toast } from "sonner"
+import { QueuedMessages } from "./input/QueuedMessages"
 
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
@@ -145,7 +146,7 @@ function getTurnKey(turn: Turn): string {
 interface ChatDisplayProps {
   session: Session | null
   onRestoreBeforeMessage?: (userMessageId: string) => void
-  onSendMessage: (message: string, attachments?: FileAttachment[], skillSlugs?: string[]) => void
+  onSendMessage: (message: string, attachments?: FileAttachment[], skillSlugs?: string[], deliveryMode?: 'queue' | 'steer') => void
   onOpenFile: (path: string) => void
   onOpenUrl: (url: string) => void
   // Model selection
@@ -512,7 +513,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     if (!searchQuery.trim() || !session?.messages) return []
     const startTime = performance.now()
     const query = searchQuery.toLowerCase()
-    const turns = groupMessagesByTurn(session.messages, { isSessionProcessing: session.isProcessing })
+    const turns = groupMessagesByTurn(session.messages.filter(message => !message.isQueued), { isSessionProcessing: session.isProcessing })
     const matches: { matchId: string; turnId: string; turnIndex: number; matchIndexInTurn: number }[] = []
 
     for (let turnIndex = 0; turnIndex < turns.length; turnIndex++) {
@@ -565,7 +566,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
       (min, m) => m.turnIndex < min ? m.turnIndex : min,
       matchingOccurrences[0]!.turnIndex
     )
-    const totalTurns = groupMessagesByTurn(session?.messages || [], { isSessionProcessing: session?.isProcessing }).length
+    const totalTurns = groupMessagesByTurn((session?.messages || []).filter(message => !message.isQueued), { isSessionProcessing: session?.isProcessing }).length
 
     // Calculate how many turns we need to show to include all matches
     // totalTurns - visibleTurnCount = startIndex, so we need visibleTurnCount = totalTurns - earliestMatchTurnIndex + buffer
@@ -1090,7 +1091,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
 
   // Handle message submission from InputContainer
   // Backend handles interruption and queueing if currently processing
-  const handleSubmit = (message: string, attachments?: FileAttachment[], skillSlugs?: string[]) => {
+  const handleSubmit = (message: string, attachments?: FileAttachment[], skillSlugs?: string[], deliveryMode?: 'queue' | 'steer') => {
     if (isInputDisabled) return
     const hasBaseMessage = message.trim().length > 0
     const followUpSection = formatFollowUpSection(pendingFollowUpAnnotations, {
@@ -1103,7 +1104,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
 
     // Force stick-to-bottom when user sends a message
     isStickToBottomRef.current = true
-    onSendMessage(normalizedMessage, attachments, skillSlugs)
+    onSendMessage(normalizedMessage, attachments, skillSlugs, deliveryMode)
 
     // Persist sent marker on follow-up annotations so TurnCard can distinguish
     // sent vs pending follow-ups. If user edits a follow-up later, TurnCard
@@ -1277,7 +1278,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   // Memoize turn grouping - avoids O(n) iteration on every render/keystroke
   const allTurns = React.useMemo(() => {
     if (!session) return []
-    return groupMessagesByTurn(session.messages, { isSessionProcessing: session.isProcessing })
+    return groupMessagesByTurn(session.messages.filter(message => !message.isQueued), { isSessionProcessing: session.isProcessing })
   }, [session?.messages, session?.isProcessing])
 
   // Keep ref in sync for scroll handler
@@ -1745,6 +1746,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
 
           {/* === INPUT CONTAINER: FreeForm or Structured Input === */}
           <fieldset disabled={!!session.isArchived} className="min-w-0 border-0 p-0 disabled:opacity-50">
+          <QueuedMessages sessionId={session.id} messages={session.messages.filter(message => message.role === 'user' && message.isQueued && !message.hidden)} paused={session.queuePaused ?? false} disabled={isInputDisabled} />
           <ChatInputZone
             compactMode={compactMode}
             permissionMode={permissionMode}
@@ -1765,6 +1767,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
               previousPermissionMode,
               disabled: isInputDisabled,
               isProcessing: session.isProcessing,
+              hasQueuedMessages: session.messages.some(message => message.isQueued && !message.hidden),
               onAnimatedHeightChange: handleAnimatedHeightChange,
               onSubmit: handleSubmit,
               onStop: handleStop,

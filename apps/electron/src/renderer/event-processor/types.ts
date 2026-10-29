@@ -178,7 +178,7 @@ export interface SessionStatusChangedEvent {
 export interface SessionMetadataChangedEvent {
   type: 'session_metadata_changed'
   sessionId: string
-  changes: Partial<Pick<Session, 'taskNodeCount' | 'kanbanColumn' | 'taskDraft' | 'taskSlug' | 'projectId' | 'backgroundAgentCount'>>
+  changes: Partial<Pick<Session, 'taskNodeCount' | 'kanbanColumn' | 'taskDraft' | 'taskSlug' | 'projectId' | 'backgroundAgentCount' | 'queuePaused'>>
 }
 
 /**
@@ -534,6 +534,7 @@ export interface UsageUpdateEvent {
  * Union of all agent events
  */
 export type AgentEvent =
+  | Extract<SessionEvent, { type: 'queued_message_removed' }>
   | Extract<SessionEvent, { type: 'session_restored' }>
   | TextDiscardEvent
   | RetryEvent

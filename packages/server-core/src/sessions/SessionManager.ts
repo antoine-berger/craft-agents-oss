@@ -902,6 +902,10 @@ interface ManagedSession {
   }>
   // Original host payloads for backends that can return undelivered text steers.
   // Runtime-only; Pi's native steering does not opt into an acknowledgement protocol.
+  queuePaused?: boolean
+  queueReplayScheduled?: boolean
+  queueReplayMessageId?: string
+  queueReplayEntries?: ManagedSession['messageQueue']
   acceptedSteers?: Map<string, ManagedSession['messageQueue'][number]>
   // Map of taskId -> output info for background task results
   backgroundTaskOutputs: Map<string, { outputFile: string; summary: string; status: string; completedAt: number }>
@@ -1354,7 +1358,7 @@ export function canSteerTextPayload(
 ): boolean {
   if (attachments?.length || storedAttachments?.length) return false
   return !Object.entries(options ?? {}).some(([key, value]) => {
-    if (value === undefined || key === 'optimisticMessageId') return false
+    if (value === undefined || key === 'optimisticMessageId' || key === 'deliveryMode') return false
     if ((key === 'skillSlugs' || key === 'badges') && Array.isArray(value) && !value.length) return false
     if (key === 'hidden' && value === false) return false
     // Unknown future options conservatively use the full-payload path.
@@ -1714,10 +1718,12 @@ export class SessionManager implements ISessionManager {
       const previous = index > 0 ? managed.messageQueue[index - 1] : undefined
       if (!previous || !canSteerTextPayload(previous.attachments, previous.storedAttachments, previous.options)) return
       if (!canSteerTextPayload(payload.attachments, payload.storedAttachments, payload.options)) return
-      const same = await isContinuation(previous.message, payload.message, { sessionId: managed.id, log: (line) => sessionLog.info(line) })
+      const previousText = previous.message
+      const nextText = payload.message
+      const same = await isContinuation(previousText, nextText, { sessionId: managed.id, log: (line) => sessionLog.info(line) })
       // Both must still be waiting, in the same order, when the answer arrives.
       const now = managed.messageQueue.indexOf(payload)
-      if (same && now > 0 && managed.messageQueue[now - 1] === previous) payload.mergeWith = previous
+      if (same && !managed.queuePaused && previous.message === previousText && payload.message === nextText && now > 0 && managed.messageQueue[now - 1] === previous) payload.mergeWith = previous
     } catch (e) {
       sessionLog.warn(`[mid-turn] Continuation check failed for session ${managed.id}:`, e)
     }
@@ -1743,6 +1749,7 @@ export class SessionManager implements ISessionManager {
   ): Promise<void> {
     try {
       const generation = managed.processingGeneration
+      const decidedText = payload.message
       const [decided] = await Promise.all([
         this.decideMidTurnDelivery(managed, payload.message, configured),
         payload.continuationCheck,
@@ -1755,7 +1762,7 @@ export class SessionManager implements ISessionManager {
       const index = managed.messageQueue.indexOf(payload)
       const agent = managed.agent
       if (index === -1 || this.sessions.get(managed.id) !== managed || !managed.isProcessing
-        || managed.processingGeneration !== generation || !agent?.canSteerNow?.()) return
+        || managed.processingGeneration !== generation || managed.queuePaused || payload.message !== decidedText || !agent?.canSteerNow?.()) return
       managed.messageQueue.splice(index, 1)
       if (!agent.redirect(payload.message, { messageId: payload.messageId })) {
         managed.messageQueue.splice(index, 0, payload)  // canSteerNow promised otherwise; keep it queued
@@ -4450,6 +4457,7 @@ export class SessionManager implements ISessionManager {
             ? `Conversation restored to an earlier checkpoint. Use only this retained history as prior context:\n${JSON.stringify(retained.map(({ role, content }) => ({ role, content })))}` : undefined
           managed.transferredSessionSummaryApplied = false
           managed.messageQueue = []
+          managed.queuePaused = false
           managed.acceptedSteers?.clear()
           managed.replayMergedIds?.clear()
           managed.piSdkMessageToCraftMessage?.clear()
@@ -6214,6 +6222,7 @@ export class SessionManager implements ISessionManager {
   private clearArchivedSessionWork(managed: ManagedSession): void {
     this.recoverPendingSteers(managed)
     managed.messageQueue = []
+    managed.queuePaused = false
     managed.acceptedSteers?.clear()
     // Keep accepted user messages in history, but never replay their cancelled queue entries.
     for (const message of managed.messages) if (message.isQueued) message.isQueued = false
@@ -7455,6 +7464,7 @@ export class SessionManager implements ISessionManager {
     const managed = this.sessions.get(sessionId)
     if (!managed) throw new Error(`Session ${sessionId} not found`)
     this.assertSessionRunnable(managed)
+    if (options?.deliveryMode !== undefined && !['queue', 'steer'].includes(options.deliveryMode)) throw new Error('Invalid delivery mode')
     const stopEpoch = managed.stopEpoch ?? 0
     if (managed.isRestoringCheckpoint) throw new Error('Wait for checkpoint restoration before sending a message')
     managed.checkpointPendingSends = (managed.checkpointPendingSends ?? 0) + 1
@@ -7564,17 +7574,18 @@ export class SessionManager implements ISessionManager {
     // - 'queue': hold the message untouched; the current turn keeps running
     //   to natural completion; replay as a new turn afterwards. NO call to
     //   `agent.redirect()`, NO forceAbort, NO interruption.
-    if (managed.isProcessing) {
+    const ownReplay = !!existingMessageId && managed.queueReplayMessageId === existingMessageId
+    if (!ownReplay && (managed.isProcessing || managed.queueReplayScheduled || managed.messageQueue.length > 0)) {
       const connection = resolveSessionConnection(managed.llmConnection, undefined)
       // Fallback to 'steer' when no connection is resolvable — preserves
       // today's exact behavior (call redirect, take whatever it returns).
-      const configured = connection ? resolveMidStreamBehavior(connection) : 'steer'
+      const configured = options?.deliveryMode ?? (connection ? resolveMidStreamBehavior(connection) : 'steer')
       // Mid-turn messages (decision model, toggle `midTurnMessages`): a text message is recorded as
       // queued right away, like any queued message, and the model decides in the background whether
       // it corrects the running work and should be steered in (steerQueuedIfDecided). Recording
       // first keeps send order and leaves the queue the single source of truth.
-      const decideDelivery = canSteerTextPayload(attachments, storedAttachments, options) && this.decisionFeatureActive('midTurnMessages')
-      const behavior = decideDelivery ? 'queue' : configured
+      const decideDelivery = !managed.queuePaused && !options?.deliveryMode && canSteerTextPayload(attachments, storedAttachments, options) && this.decisionFeatureActive('midTurnMessages')
+      const behavior = decideDelivery || !managed.isProcessing || managed.queuePaused ? 'queue' : configured
 
       // Create user message for UI
       const userMessage: Message = {
@@ -7627,7 +7638,7 @@ export class SessionManager implements ISessionManager {
         // queue-after-abort (backend already aborted) — the replay path in
         // processNextQueuedMessage is identical.
         managed.messageQueue.push(payload)
-        if (this.decisionFeatureActive('midTurnMessages')) payload.continuationCheck = this.markQueuedContinuation(managed, payload)
+        if (!options?.deliveryMode && this.decisionFeatureActive('midTurnMessages')) payload.continuationCheck = this.markQueuedContinuation(managed, payload)
         if (decideDelivery) void this.steerQueuedIfDecided(managed, payload, userMessage, configured)
         // Only claim interruption when a steer attempt actually aborted the
         // in-flight turn. In 'queue' mode the current turn runs to natural
@@ -7646,6 +7657,8 @@ export class SessionManager implements ISessionManager {
       onAck?.(userMessage.id)
       return
     }
+
+    if (ownReplay && !this.claimQueuedReplay(managed, message, options)) return
 
     // Add user message with stored attachments for persistence
     // Skip if existingMessageId is provided (message was already created when queued)
@@ -8224,6 +8237,7 @@ export class SessionManager implements ISessionManager {
 
     // Clear queue - user explicitly stopped, don't process queued messages
     managed.messageQueue = []
+    managed.queuePaused = false
 
     // Remove queued user messages from the persisted messages array
     if (queuedMessageIds.size > 0) {
@@ -8475,6 +8489,7 @@ export class SessionManager implements ISessionManager {
     const existing = payload.messageId ? managed.messages.find(m => m.id === payload.messageId) : undefined
     if (existing) {
       existing.isQueued = true
+      existing.timestamp = this.monotonic()
       this.sendEvent({ type: 'user_message', sessionId: managed.id, message: existing,
         status: 'queued', optimisticMessageId: payload.optimisticMessageId }, managed.workspace.id)
     }
@@ -8735,58 +8750,123 @@ export class SessionManager implements ISessionManager {
    * Process the next message in the queue.
    * Called by onProcessingStopped when queue has messages.
    */
-  private processNextQueuedMessage(sessionId: string): void {
+  async queueMessage(sessionId: string, action: 'pause' | 'resume' | 'edit' | 'remove' | 'send', messageId?: string, text?: string): Promise<void> {
     const managed = this.sessions.get(sessionId)
-    if (!managed || managed.isArchived || managed.isDeleting || managed.recovery?.status === 'failed' || managed.messageQueue.length === 0) return
-
-    const first = managed.messageQueue.shift()!
-    // Mid-turn messages: entries judged to continue this one are replayed with it as one turn.
-    const merged: typeof managed.messageQueue = []
-    let last: object = first
-    while (managed.messageQueue[0]?.mergeWith === last) {
-      last = managed.messageQueue.shift()!
-      merged.push(last as typeof first)
-    }
-    const next = merged.length > 0
-      ? { ...first, message: [first, ...merged].map(entry => entry.message).join('\n\n') }
-      : first
-    if (merged.length > 0 && first.messageId) {
-      const ids = [first, ...merged].map(entry => entry.messageId).filter((id): id is string => !!id)
-      ;(managed.replayMergedIds ??= new Map()).set(first.messageId, ids)
-    }
-    sessionLog.info('replay queued', {
-      sessionId,
-      messageId: next.messageId,
-      mergedMessageIds: merged.length > 0 ? merged.map(entry => entry.messageId) : undefined,
-      queueLengthAfterShift: managed.messageQueue.length,
-    })
-
-    // Update UI: queued → processing (merged continuations are delivered in the same turn)
-    for (const entry of [first, ...merged]) {
-      if (!entry.messageId) continue
-      const existingMessage = managed.messages.find(m => m.id === entry.messageId)
-      if (existingMessage) {
-        // Clear isQueued flag and persist - prevents re-queueing if crash during processing
-        existingMessage.isQueued = false
-        // Re-stamp so this replayed message sorts AFTER the previous turn's
-        // finalized assistant reply. It was created mid-stream (an earlier
-        // timestamp) while queued; groupMessagesByTurn sorts by timestamp, so
-        // without this the prior turn's completed response would render BELOW it.
-        existingMessage.timestamp = this.monotonic()
-        this.persistSession(managed)
-
-        this.sendEvent({
-          type: 'user_message',
-          sessionId,
-          message: existingMessage,
-          status: 'processing',
-          optimisticMessageId: entry.optimisticMessageId
-        }, managed.workspace.id)
+    if (!managed) throw new Error('Session not found')
+    this.assertSessionRunnable(managed)
+    await this.ensureMessagesLoaded(managed)
+    this.assertSessionRunnable(managed)
+    if (!['pause', 'resume', 'edit', 'remove', 'send'].includes(action)) throw new Error('Invalid queue action')
+    if (action === 'pause' || action === 'resume') {
+      if (action === 'pause' && messageId && !managed.messageQueue.some(entry => entry.messageId === messageId || entry.optimisticMessageId === messageId)) throw new Error('This message has already left the queue')
+      managed.queuePaused = action === 'pause'
+    } else {
+      const index = managed.messageQueue.findIndex(entry => entry.messageId === messageId || entry.optimisticMessageId === messageId)
+      if (!messageId || index < 0) throw new Error('This message has already left the queue')
+      const payload = managed.messageQueue[index]!
+      const message = managed.messages.find(entry => entry.id === payload.messageId)
+      if (!message) throw new Error('Queued message not found')
+      if (action === 'edit') {
+        if (typeof text !== 'string' || (!text.trim() && !payload.storedAttachments?.length) || text.length > 1_000_000) throw new Error('Invalid queued message')
+        payload.message = text
+        // Text changes invalidate mention offsets; attachment payloads remain intact.
+        payload.options = { ...payload.options, badges: undefined }
+        payload.mergeWith = undefined
+        for (const entry of managed.messageQueue) if (entry.mergeWith === payload) entry.mergeWith = undefined
+        message.content = text
+        message.badges = undefined
+        this.sendEvent({ type: 'user_message', sessionId, message, status: 'queued', optimisticMessageId: payload.optimisticMessageId }, managed.workspace.id)
+      } else if (action === 'remove') {
+        managed.messageQueue.splice(index, 1)
+        managed.messages = managed.messages.filter(entry => entry !== message)
+        this.sendEvent({ type: 'queued_message_removed', sessionId, messageId: message.id, optimisticMessageId: payload.optimisticMessageId }, managed.workspace.id)
+      } else {
+        // A send-now action is a deliberate steer, never an automatic classifier decision.
+        if (managed.isProcessing) {
+          const agent = managed.agent
+          if (!canSteerTextPayload(payload.attachments, payload.storedAttachments, payload.options) || !agent?.canSteerNow?.()) {
+            throw new Error('This message cannot steer the current turn; keep it queued until the turn ends')
+          }
+          if (!agent.redirect(payload.message, { messageId: message.id })) throw new Error('The running turn no longer accepts steering')
+          managed.messageQueue.splice(index, 1)
+          if (agent.takePendingSteers) (managed.acceptedSteers ??= new Map()).set(message.id, payload)
+          ;(managed.turnSteers ??= []).push(payload.message)
+          message.isQueued = false
+          this.sendEvent({ type: 'user_message', sessionId, message, status: 'accepted', optimisticMessageId: payload.optimisticMessageId }, managed.workspace.id)
+        } else {
+          managed.messageQueue.splice(index, 1)
+          managed.messageQueue.unshift(payload)
+          managed.queuePaused = false
+        }
       }
     }
+    if (!managed.messageQueue.length) managed.queuePaused = false
+    this.persistSession(managed)
+    await this.flushSession(sessionId)
+    this.sendEvent({ type: 'session_metadata_changed', sessionId, changes: { queuePaused: managed.queuePaused ?? false } }, managed.workspace.id)
+    if (!managed.isProcessing) this.processNextQueuedMessage(sessionId)
+  }
 
-    // Process message (use setImmediate to allow current stack to clear)
+  private claimQueuedReplay(managed: ManagedSession, message: string, options?: SendMessageOptions): boolean {
+    const entries = managed.queueReplayEntries ?? []
+    const unchanged = entries.length > 0 && entries.every((entry, index) => managed.messageQueue[index] === entry)
+      && entries.map(entry => entry.message).join('\n\n') === message && entries[0]?.options === options
+    managed.queueReplayScheduled = false
+    managed.queueReplayMessageId = undefined
+    managed.queueReplayEntries = undefined
+    if (!unchanged || managed.queuePaused) {
+      if (entries[0]?.messageId) managed.replayMergedIds?.delete(entries[0].messageId)
+      this.processNextQueuedMessage(managed.id)
+      return false
+    }
+    managed.messageQueue.splice(0, entries.length)
+    for (const entry of entries) {
+      const queued = managed.messages.find(item => item.id === entry.messageId)
+      if (!queued) continue
+      queued.isQueued = false
+      queued.timestamp = this.monotonic()
+      this.sendEvent({ type: 'user_message', sessionId: managed.id, message: queued, status: 'processing', optimisticMessageId: entry.optimisticMessageId }, managed.workspace.id)
+    }
+    this.persistSession(managed)
+    return true
+  }
+
+  private processNextQueuedMessage(sessionId: string): void {
+    const managed = this.sessions.get(sessionId)
+    if (!managed || managed.isArchived || managed.isDeleting || managed.isProcessing || managed.queuePaused || managed.queueReplayScheduled || managed.recovery?.status === 'failed' || managed.messageQueue.length === 0) return
+    managed.queueReplayScheduled = true
     setImmediate(() => {
+      if (this.sessions.get(sessionId) !== managed || managed.isArchived || managed.isDeleting || managed.isProcessing || managed.queuePaused || !managed.messageQueue.length) {
+        managed.queueReplayScheduled = false
+        return
+      }
+      const first = managed.messageQueue[0]!
+      managed.queueReplayMessageId = first.messageId
+      // Mid-turn messages: entries judged to continue this one are replayed with it as one turn.
+      const merged: typeof managed.messageQueue = []
+      let last: object = first
+      while (managed.messageQueue[merged.length + 1]?.mergeWith === last) {
+        last = managed.messageQueue[merged.length + 1]!
+        merged.push(last as typeof first)
+      }
+      const next = merged.length > 0
+        ? { ...first, message: [first, ...merged].map(entry => entry.message).join('\n\n') }
+        : first
+      if (merged.length > 0 && first.messageId) {
+        const ids = [first, ...merged].map(entry => entry.messageId).filter((id): id is string => !!id)
+        ;(managed.replayMergedIds ??= new Map()).set(first.messageId, ids)
+      }
+      sessionLog.info('replay queued', {
+        sessionId,
+        messageId: next.messageId,
+        mergedMessageIds: merged.length > 0 ? merged.map(entry => entry.messageId) : undefined,
+        queueLengthAfterShift: managed.messageQueue.length,
+      })
+
+      managed.queueReplayEntries = [first, ...merged]
+      const replayStopEpoch = managed.stopEpoch ?? 0
+
+      // The reservation stays held across sendMessage's asynchronous preflight.
       this.sendMessage(
         sessionId,
         next.message,
@@ -8816,8 +8896,19 @@ export class SessionManager implements ISessionManager {
             originalError: err instanceof Error ? err.message : String(err),
           },
         }, managed.workspace.id)
-        // Call onProcessingStopped to handle cleanup and check for more queued messages
-        this.onProcessingStopped(sessionId, 'error')
+        // The queued payload stayed in place throughout preflight. If it was
+        // already claimed, normal turn-recovery owns the failure instead.
+        if (managed.queueReplayMessageId === first.messageId) {
+          managed.queueReplayScheduled = false
+          managed.queueReplayMessageId = undefined
+          managed.queueReplayEntries = undefined
+          if (!managed.isArchived && !managed.isDeleting && (managed.stopEpoch ?? 0) === replayStopEpoch
+            && managed.messageQueue.includes(first)) {
+            managed.queuePaused = true
+            this.persistSession(managed)
+            this.sendEvent({ type: 'session_metadata_changed', sessionId, changes: { queuePaused: true } }, managed.workspace.id)
+          }
+        }
       })
     })
   }

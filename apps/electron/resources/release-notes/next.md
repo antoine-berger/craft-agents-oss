@@ -51,3 +51,5 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 - **Compact chat controls** — Remove the shortcut hint row and its reserved space, keep a static input prompt, and move Projects above Labels. Chats use Execute without a mode selector, slash-mode commands or keyboard cycling. (#4)
 
 - **Native Claude artifacts** — Opt in to the native Artifact tool for Claude chats; account eligibility and organization policy still apply. CLIProxyAPI inference routing is preserved, so API-key proxy chats still require a supported claude.ai authentication path before they can publish. No Claude Docs integration is enabled.
+
+- **Reliable follow-ups** — Choose Queue or Steer for follow-up messages, use the opposite action with Cmd/Ctrl+Enter, and manage pending messages above the composer. Editing pauses delivery and preserves the main draft and attachments. Pending messages retain their identities and remain durable until their turn actually starts; repeated text and concurrent preparation cannot silently reorder or drop them.

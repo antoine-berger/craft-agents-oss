@@ -31,6 +31,7 @@ import type { SessionBundle, DispatchMode } from '@craft-agent/shared/sessions'
 import type { EventSink } from '../transport'
 
 export interface ISessionManager {
+  queueMessage(sessionId: string, action: 'pause' | 'resume' | 'edit' | 'remove' | 'send', messageId?: string, text?: string): Promise<void>
   // ---------------------------------------------------------------------------
   // Lifecycle
   // ---------------------------------------------------------------------------

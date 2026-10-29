@@ -132,6 +132,7 @@ export interface Session {
   /** When true, session is hidden from session list (e.g., mini edit sessions) */
   hidden?: boolean
   isArchived?: boolean
+  queuePaused?: boolean
   archivedAt?: number
   supportsBranching?: boolean
   /** Workspace-scoped project id this session is bound to (undefined = unbound) */
@@ -454,6 +455,7 @@ export interface PermissionModeState {
 
 // turnId: Correlation ID from the API's message.id, groups all events in an assistant turn
 export type SessionEvent =
+  | { type: 'queued_message_removed'; sessionId: string; messageId: string; optimisticMessageId?: string }
   | { type: 'session_restored'; sessionId: string; session: Session }
   | { type: 'text_discard'; sessionId: string; turnId: string }
   | { type: 'retry'; sessionId: string; phase: 'backoff'; message: string }
@@ -496,7 +498,7 @@ export type SessionEvent =
   | { type: 'name_changed'; sessionId: string; name?: string }
   | { type: 'session_model_changed'; sessionId: string; model: string | null }
   | { type: 'session_status_changed'; sessionId: string; sessionStatus: SessionStatus }
-  | { type: 'session_metadata_changed'; sessionId: string; changes: Partial<Pick<Session, 'taskNodeCount' | 'kanbanColumn' | 'taskDraft' | 'taskSlug' | 'projectId' | 'backgroundAgentCount' | 'recovery'>> }
+  | { type: 'session_metadata_changed'; sessionId: string; changes: Partial<Pick<Session, 'taskNodeCount' | 'kanbanColumn' | 'taskDraft' | 'taskSlug' | 'projectId' | 'backgroundAgentCount' | 'recovery' | 'queuePaused'>> }
   | { type: 'session_deleted'; sessionId: string }
   | { type: 'session_created'; sessionId: string }
   | { type: 'session_shared'; sessionId: string; sharedUrl: string }
@@ -509,6 +511,7 @@ export type SessionEvent =
   | { type: 'working_directory_error'; sessionId: string; error: string }
 
 export interface SendMessageOptions {
+  deliveryMode?: 'queue' | 'steer'
   /** Captured with the first message; selecting it in the composer never touches Git. */
   repository?: RepositorySelection
   skillSlugs?: string[]
@@ -534,6 +537,7 @@ export interface SendMessageOptions {
 // ---------------------------------------------------------------------------
 
 export type SessionCommand =
+  | { type: 'queueMessage'; action: 'pause' | 'resume' | 'edit' | 'remove' | 'send'; messageId?: string; text?: string }
   | { type: 'resumeFailed' }
   | { type: 'flag' }
   | { type: 'unflag' }

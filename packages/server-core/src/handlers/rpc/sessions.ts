@@ -313,6 +313,8 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
         return sessionManager.archiveSession(sessionId)
       case 'unarchive':
         return sessionManager.unarchiveSession(sessionId)
+      case 'queueMessage':
+        return sessionManager.queueMessage(sessionId, command.action, command.messageId, command.text)
       case 'rename':
         return sessionManager.renameSession(sessionId, command.name)
       case 'setSessionStatus':

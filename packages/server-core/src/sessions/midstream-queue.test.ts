@@ -130,6 +130,7 @@ describe('mid-stream queue runtime invariants', () => {
     // Also prove the existing supported replay path receives the same objects.
     const replay = mock(async (..._args: unknown[]) => {})
     ;(sm as any).sendMessage = replay
+    managed.isProcessing = false
     ;(sm as any).processNextQueuedMessage(managed.id)
     await new Promise<void>(resolve => setImmediate(resolve))
     expect(replay.mock.calls[0]).toEqual([managed.id, 'inspect image', attachments, storedAttachments, options, managed.messages[0]!.id])
@@ -359,7 +360,7 @@ describe('mid-stream queue runtime invariants', () => {
     sm.setEventSink((_channel, _target, event) => events.push(event))
     ;(sm as unknown as { lastTimestamp: number }).lastTimestamp = priorFinalTimestamp
     ;(sm as unknown as { persistSession: () => void }).persistSession = () => {}
-    const sendMessage = mock(async () => {})
+    const sendMessage = mock(async (_id: string, text: string, _a: unknown, _s: unknown, options: any) => { (sm as any).claimQueuedReplay(managed, text, options) })
     ;(sm as unknown as { sendMessage: typeof sendMessage }).sendMessage = sendMessage
 
     ;(sm as unknown as { processNextQueuedMessage: (id: string) => void })

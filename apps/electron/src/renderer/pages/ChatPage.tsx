@@ -549,9 +549,9 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
           ref={chatDisplayRef}
           session={session}
           onRestoreBeforeMessage={hasOwnedCheckpointCheckout && !checkpointsDisabled ? requestCheckpointRestore : undefined}
-          onSendMessage={(message, attachments, skillSlugs) => {
+          onSendMessage={(message, attachments, skillSlugs, deliveryMode) => {
             if (session) {
-              onSendMessage(session.id, message, attachments, skillSlugs)
+              onSendMessage(session.id, message, attachments, skillSlugs, undefined, deliveryMode)
             }
           }}
           onOpenFile={handleOpenFile}
