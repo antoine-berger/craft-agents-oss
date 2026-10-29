@@ -1,3 +1,5 @@
+import type { UserQuestionResponse } from '@craft-agent/core/types'
+import type { UserQuestionInput } from './UserQuestionRequest'
 import type { PermissionRequest, CredentialRequest, CredentialResponse } from '../../../../../shared/types'
 import type { AdminApprovalRequestData } from './AdminApprovalRequest'
 
@@ -9,12 +11,13 @@ export type InputMode = 'freeform' | 'structured'
 /**
  * Types of structured input UIs
  */
-export type StructuredInputType = 'permission' | 'credential' | 'admin_approval'
+export type StructuredInputType = 'permission' | 'credential' | 'admin_approval' | 'question'
 
 /**
  * Union type for structured input data
  */
 export type StructuredInputData =
+  | { type: 'question'; data: UserQuestionInput }
   | { type: 'permission'; data: PermissionRequest }
   | { type: 'credential'; data: CredentialRequest }
   | { type: 'admin_approval'; data: AdminApprovalRequestData }
@@ -24,7 +27,7 @@ export type StructuredInputData =
  */
 export interface StructuredInputState {
   type: StructuredInputType
-  data: PermissionRequest | CredentialRequest | AdminApprovalRequestData
+  data: PermissionRequest | CredentialRequest | AdminApprovalRequestData | UserQuestionInput
 }
 
 /**
@@ -48,7 +51,7 @@ export interface AdminApprovalResponse {
 /**
  * Union type for all structured responses
  */
-export type StructuredResponse = PermissionResponse | CredentialResponse | AdminApprovalResponse
+export type StructuredResponse = PermissionResponse | CredentialResponse | AdminApprovalResponse | { type: 'question'; response: UserQuestionResponse }
 
 // Re-export CredentialResponse for convenience
 export type { CredentialResponse }

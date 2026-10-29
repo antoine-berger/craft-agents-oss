@@ -10,6 +10,7 @@
  */
 
 import type { AgentEvent as CraftAgentEvent, ContextUsageSnapshot } from '@craft-agent/core/types';
+import { ResponseUsageCollector } from '../response-data.ts';
 import { contextAfterCompaction, contextFromPi } from '../../context-usage.ts';
 import type { PiContextUsagePayload } from './protocol.ts';
 import type {
@@ -122,6 +123,8 @@ export class PiEventAdapter extends BaseEventAdapter {
   private lastUsage: { input: number; output: number; cacheRead: number; cacheWrite: number; totalTokens: number; cost: { total: number } } | undefined;
   // Output and cost of every assistant message in the turn (lastUsage holds only the final call)
   private turnOutputTokens = 0;
+  private responseData = new ResponseUsageCollector();
+  private thinkingMessageIds = new Map<string, string>();
   private turnCostUsd = 0;
 
   // ============================================================
@@ -361,6 +364,8 @@ export class PiEventAdapter extends BaseEventAdapter {
     this.subTurnCounter = 0;
     this.messageSubTurnId = null;
     this.turnOutputTokens = 0;
+    this.responseData.clear();
+    this.thinkingMessageIds.clear();
     this.turnCostUsd = 0;
     // A new Craft turn can only start once the previous queue completed (or
     // was force-aborted), so any recovery state left here is stale.
@@ -509,6 +514,17 @@ export class PiEventAdapter extends BaseEventAdapter {
       case 'message_update': {
         // Pi SDK emits message_update only for assistant messages (streaming deltas)
         const amEvent: AssistantMessageEvent = event.assistantMessageEvent;
+        if (amEvent.type === 'thinking_delta' || amEvent.type === 'thinking_end') {
+          if (!this.messageSubTurnId) this.messageSubTurnId = this.nextSubTurnId('m');
+          const blockId = `thinking:${this.messageSubTurnId}:${amEvent.contentIndex}`;
+          if (amEvent.type === 'thinking_delta') {
+            yield { type: 'text_delta', text: amEvent.delta, turnId: this.messageSubTurnId,
+              contentKind: 'thinking', blockId };
+          } else {
+            yield { type: 'text_complete', text: amEvent.content, turnId: this.messageSubTurnId,
+              contentKind: 'thinking', blockId, isIntermediate: true };
+          }
+        }
         if (amEvent.type === 'text_delta' && amEvent.delta) {
           this.hasStreamedDeltas = true;
           if (!this.messageSubTurnId) {
@@ -576,6 +592,28 @@ export class PiEventAdapter extends BaseEventAdapter {
           break;
         }
 
+        const actual = event.message as AssistantMessage;
+        // Full non-streamed and tool-only messages still need their own usage identity.
+        const messageTurnId = this.messageSubTurnId ?? this.nextSubTurnId('m');
+        const messageIdentity = sdkMessageId ?? messageTurnId;
+        if (msg.usage) this.responseData.record(messageIdentity, {
+          model: actual.model,
+          inputTokens: msg.usage.input,
+          outputTokens: msg.usage.output,
+          cacheReadTokens: msg.usage.cacheRead,
+          cacheCreationTokens: msg.usage.cacheWrite,
+        });
+        const blocks = Array.isArray(actual.content) ? actual.content : [];
+        const knownThinkingId = sdkMessageId ? this.thinkingMessageIds.get(sdkMessageId) : undefined;
+        const thinkingTurnId = knownThinkingId ?? messageTurnId;
+        if (sdkMessageId && thinkingTurnId) this.thinkingMessageIds.set(sdkMessageId, thinkingTurnId);
+        for (const [index, block] of blocks.entries()) {
+          if (block.type === 'thinking' && block.thinking) yield {
+            type: 'text_complete', text: block.thinking, turnId: thinkingTurnId ?? undefined,
+            contentKind: 'thinking', blockId: `thinking:${thinkingTurnId}:${index}`, isIntermediate: true,
+          };
+        }
+
         // Extract text content from the final assistant message
         const textContent = this.extractTextFromMessage(event.message);
         // Pi SDK stopReason: 'toolUse' means the model will call tools next (intermediate commentary),
@@ -584,7 +622,7 @@ export class PiEventAdapter extends BaseEventAdapter {
         if (textContent && (isIntermediate || !this.hasEmittedFinalText)) {
           if (!isIntermediate) this.hasEmittedFinalText = true;
 
-          const mTurnId = this.messageSubTurnId || this.nextSubTurnId('m');
+          const mTurnId = messageTurnId;
           this.messageSubTurnId = null;
 
           yield {
@@ -593,6 +631,7 @@ export class PiEventAdapter extends BaseEventAdapter {
             isIntermediate,
             turnId: mTurnId,
             sdkMessageId,
+            responseUsage: this.responseData.snapshot(),
           };
           this.hasStreamedDeltas = false;
         } else if (!textContent && !isIntermediate && !this.hasEmittedFinalText && msg.usage && (msg.usage as { output?: number }).output) {

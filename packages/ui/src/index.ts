@@ -296,3 +296,6 @@ export {
   Icon_Inbox,
   type IconProps,
 } from './components/icons'
+
+export { getAssistantSearchText } from './components/chat/turn/turn-presentation'
+export { InlineToolBlock } from './components/chat/turn/InlineToolBlock'

@@ -1,14 +1,13 @@
 /**
  * UserMessageBubble - Shared user message component
  *
- * Displays user messages with right-aligned styling (spec §7.4 "User bubble"):
- * - bubble fill (5.5% foreground), radius 16, copy 15/24, 9/14px padding
- * - Max width 82% (90% in compact layouts)
- * - Markdown rendering for links and code
+ * Displays right-aligned user messages. The interactive chat opts into literal
+ * prompt text and compact Conductor geometry; embedded viewers retain Markdown.
+ * - Bounded desktop width (90% in compact layouts)
  * - Optional file attachments with thumbnails
  * - Content badges for @mentions (sources, skills)
  * - Pending/queued states (Electron only)
- * - Copy button left of the bubble, revealed on hover/focus like the answer footer (not in compact mode)
+ * - Copy action revealed on hover/focus (not in compact mode)
  */
 
 import { useEffect, useRef, useState, type ReactNode } from 'react'
@@ -18,6 +17,7 @@ import { normalizePath } from '@craft-agent/core/utils'
 import { cn } from '../../lib/utils'
 import { useCopyToClipboard } from '../../lib/use-copy-to-clipboard'
 import { Markdown } from '../markdown'
+import { PlainMessageText } from './PlainMessageText'
 import { FileTypeIcon, getFileTypeLabel } from './attachment-helpers'
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '../tooltip'
 import { TurnIconButton } from './turn/TurnIconButton'
@@ -61,7 +61,7 @@ function EditRequestBadge({ badge }: { badge: ContentBadge }) {
 function InlineBadge({ badge }: { badge: ContentBadge }) {
   return (
     <span
-      className="inline-flex items-center gap-1 h-[22px] px-1.5 mx-0.5 rounded-sm bg-raised shadow-elev-1 text-label-sm align-middle"
+      className="user-message-badge inline-flex items-center gap-1 h-[22px] px-1.5 mx-0.5 rounded-sm bg-raised shadow-elev-1 text-label-sm align-middle"
       style={{ verticalAlign: 'middle', transform: 'translateY(-1px)' }}
     >
       {badge.iconDataUrl ? (
@@ -87,7 +87,7 @@ function InlineBadge({ badge }: { badge: ContentBadge }) {
 function CommandBadge({ badge }: { badge: ContentBadge }) {
   return (
     <span
-      className="inline-flex items-center gap-1 h-[22px] px-1.5 mx-0.5 rounded-sm bg-raised shadow-elev-1 text-label-sm align-middle"
+      className="user-message-badge inline-flex items-center gap-1 h-[22px] px-1.5 mx-0.5 rounded-sm bg-raised shadow-elev-1 text-label-sm align-middle"
       style={{ verticalAlign: 'middle', transform: 'translateY(-1px)' }}
     >
       <span className="size-3 rounded-xs bg-fill-hover flex items-center justify-center text-tertiary shrink-0 text-caption leading-none font-medium">
@@ -109,7 +109,7 @@ function ContextBadge({ badge }: { badge: ContentBadge }) {
 
   return (
     <span
-      className="inline-flex items-center gap-1 h-[22px] px-1.5 mr-1 rounded-sm bg-raised shadow-elev-1 text-label-sm align-middle"
+      className="user-message-badge inline-flex items-center gap-1 h-[22px] px-1.5 mr-1 rounded-sm bg-raised shadow-elev-1 text-label-sm align-middle"
       style={{ verticalAlign: 'middle', transform: 'translateY(-1px)' }}
       title={t('chat.contextBadge')}
     >
@@ -185,9 +185,16 @@ function InlineFileBadge({
   const badgeContent = (
     <span
       role={isClickable ? 'button' : undefined}
+      tabIndex={isClickable ? 0 : undefined}
+      onKeyDown={event => {
+        if (isClickable && (event.key === 'Enter' || event.key === ' ')) {
+          event.preventDefault()
+          onFileClick!(badge.filePath!)
+        }
+      }}
       onClick={() => isClickable && onFileClick!(badge.filePath!)}
       className={cn(
-        "inline-flex items-center gap-1 h-[22px] px-1.5 mx-0.5 rounded-sm bg-raised shadow-elev-1 text-label-sm align-middle",
+        "user-message-badge inline-flex items-center gap-1 h-[22px] px-1.5 mx-0.5 rounded-sm bg-raised shadow-elev-1 text-label-sm align-middle",
         isClickable && "state-overlay cursor-pointer"
       )}
       style={{ verticalAlign: 'middle', transform: 'translateY(-1px)' }}
@@ -214,7 +221,7 @@ function InlineFileBadge({
 
 /**
  * Render content with badges inserted at their positions.
- * Text segments between badges are rendered as Markdown.
+ * Chat text segments stay literal; embedded messages retain Markdown.
  *
  * Context badges (type='context') are special:
  * - They completely hide the marked content range
@@ -228,20 +235,16 @@ function renderContentWithBadges(
   content: string,
   badges: ContentBadge[],
   onUrlClick?: (url: string) => void,
-  onFileClick?: (path: string) => void
+  onFileClick?: (path: string) => void,
+  plainText = false,
 ): ReactNode {
-  if (badges.length === 0) {
-    return (
-      <Markdown
-        mode="minimal"
-        onUrlClick={onUrlClick}
-        onFileClick={onFileClick}
-        className={BUBBLE_MARKDOWN}
-      >
-        {content}
-      </Markdown>
-    )
-  }
+  const renderText = (text: string, key?: string) => plainText ? (
+    <PlainMessageText key={key} onUrlClick={onUrlClick} onFileClick={onFileClick}>{text}</PlainMessageText>
+  ) : (
+    <Markdown key={key} mode="minimal" onUrlClick={onUrlClick} onFileClick={onFileClick}
+      className={cn(BUBBLE_MARKDOWN, "inline [&_p]:inline")}>{text}</Markdown>
+  )
+  if (badges.length === 0) return renderText(content)
 
   // Sort badges by start position
   const sortedBadges = [...badges].sort((a, b) => a.start - b.start)
@@ -253,27 +256,17 @@ function renderContentWithBadges(
     // Add text before this badge
     if (badge.start > lastEnd) {
       const textBefore = content.slice(lastEnd, badge.start)
-      if (textBefore.trim()) {
-        elements.push(
-          <Markdown
-            key={`text-${i}`}
-            mode="minimal"
-            onUrlClick={onUrlClick}
-            onFileClick={onFileClick}
-            className={cn(BUBBLE_MARKDOWN, "inline [&_p]:inline")}
-          >
-            {textBefore}
-          </Markdown>
-        )
-      }
+      if (textBefore) elements.push(renderText(textBefore, `text-${i}`))
     }
 
     // Context badges hide content and show collapsed label
     // Command badges show SDK commands like /compact
     // File badges show clickable file references inline
     // Source/skill badges show inline with the original text
-    // Note: edit_request badges are filtered out and rendered above the bubble separately
-    if (badge.type === 'context') {
+    // Edit-request metadata is displayed above the bubble without shifting the other badge ranges.
+    if (isEditRequestBadge(badge)) {
+      // The metadata is displayed above the bubble, never in the prompt text.
+    } else if (badge.type === 'context') {
       elements.push(<ContextBadge key={`badge-${i}`} badge={badge} />)
     } else if (badge.type === 'command') {
       elements.push(<CommandBadge key={`badge-${i}`} badge={badge} />)
@@ -289,19 +282,7 @@ function renderContentWithBadges(
   // Add remaining text after last badge
   if (lastEnd < content.length) {
     const textAfter = content.slice(lastEnd)
-    if (textAfter.trim()) {
-      elements.push(
-        <Markdown
-          key="text-end"
-          mode="minimal"
-          onUrlClick={onUrlClick}
-          onFileClick={onFileClick}
-          className={cn(BUBBLE_MARKDOWN, "inline [&_p]:inline")}
-        >
-          {textAfter}
-        </Markdown>
-      )
-    }
+    if (textAfter) elements.push(renderText(textAfter, 'text-end'))
   }
 
   // Use <p> to match Markdown's block-level line-height behavior
@@ -309,8 +290,10 @@ function renderContentWithBadges(
 }
 
 export interface UserMessageBubbleProps {
-  /** Message content (markdown supported) */
+  /** Message content. Chat appearance preserves literal prompt text. */
   content: string
+  /** Use the chat transcript appearance without changing embedded/viewer messages. */
+  appearance?: 'chat'
   /** Additional className for the outer container */
   className?: string
   /** Callback when a URL is clicked */
@@ -337,6 +320,7 @@ const QUEUED_MIN_VISIBLE_MS = 2500
 
 export function UserMessageBubble({
   content,
+  appearance,
   className,
   onUrlClick,
   onFileClick,
@@ -348,6 +332,7 @@ export function UserMessageBubble({
   const { t } = useTranslation()
   const { copied, copy } = useCopyToClipboard()
   const hasAttachments = attachments && attachments.length > 0
+  const isChat = appearance === 'chat'
 
   // Show the queued chip while `isQueued` is true AND for at least
   // QUEUED_MIN_VISIBLE_MS after it first became true — even if the backend
@@ -418,10 +403,12 @@ export function UserMessageBubble({
     displayContent = displayContent.trim()
   }
 
+  const queued = isChat ? !!isQueued : showQueued
+
   return (
     <div className={cn("flex w-full flex-col items-end gap-2", className)}>
       {/* Attachment preview row - stored attachments with thumbnails */}
-      {hasAttachments && (
+      {hasAttachments && !isChat && (
         <div className={cn("flex flex-wrap justify-end gap-2", maxWidth)}>
           {attachments!.map((att, i) => {
             const isImage = att.type === 'image'
@@ -500,7 +487,9 @@ export function UserMessageBubble({
             data-touch-reveal="true"
             className={cn(
               HOVER_REVEAL,
-              "absolute right-full top-2.25 mr-1 group-hover/user-message:opacity-100 group-hover/user-message:duration-instant"
+              isChat
+                ? "absolute -top-2 right-2 z-10 rounded bg-background/80 group-hover/user-message:opacity-100 group-focus-within/user-message:opacity-100"
+                : "absolute right-full top-2.25 mr-1 group-hover/user-message:opacity-100 group-hover/user-message:duration-instant"
             )}
           >
             <TurnIconButton
@@ -512,8 +501,15 @@ export function UserMessageBubble({
             />
           </div>
         )}
-        <div className="min-w-0 select-text break-words rounded-md bg-user-message-bubble px-4 py-3 text-[14px] leading-6 in-data-compact:text-copy-lg text-foreground [&_p]:m-0">
-          {showQueued && (
+        <div
+          data-user-message-appearance={isChat ? 'chat' : undefined}
+          className={cn(
+            "min-w-0 select-text break-words px-4 py-3 text-[14px] text-foreground [&_p]:m-0",
+            isChat ? "rounded-[4px] leading-5" : "rounded-md leading-6 in-data-compact:text-copy-lg",
+            isChat && queued ? "bg-sunken text-secondary" : "bg-user-message-bubble",
+          )}
+        >
+          {queued && (
             <div
               className="mb-1 flex items-center gap-1.5 text-tertiary"
               role="status"
@@ -523,19 +519,40 @@ export function UserMessageBubble({
               <span className="text-caption font-normal italic">{t('chat.queuedBadge')}</span>
             </div>
           )}
-          {hasInlineBadges
-            ? renderContentWithBadges(displayContent, inlineBadges, onUrlClick, onFileClick)
-            : (
-              <Markdown
-                mode="minimal"
-                onUrlClick={onUrlClick}
-                onFileClick={onFileClick}
-                className={BUBBLE_MARKDOWN}
-              >
-                {displayContent}
-              </Markdown>
-            )
+          {isChat
+            ? renderContentWithBadges(content, badges ?? [], onUrlClick, onFileClick, true)
+            : hasInlineBadges
+              ? renderContentWithBadges(displayContent, inlineBadges, onUrlClick, onFileClick)
+              : <Markdown mode="minimal" onUrlClick={onUrlClick} onFileClick={onFileClick}
+                  className={BUBBLE_MARKDOWN}>{displayContent}</Markdown>
           }
+          {isChat && hasAttachments && (
+            <span className="mt-2 flex flex-wrap items-center gap-1.5">
+              {attachments!.map(attachment => (
+                <TooltipProvider key={attachment.id}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button type="button"
+                        className="inline-flex h-5 max-w-full items-center gap-1.5 rounded-sm border border-strong bg-raised px-1.5 text-xs text-foreground"
+                        onClick={() => attachment.storedPath && onFileClick?.(attachment.storedPath)}
+                        disabled={!attachment.storedPath || !onFileClick}
+                      >
+                        <FileTypeIcon type={attachment.type} mimeType={attachment.mimeType} className="size-3 shrink-0" />
+                        <span className="truncate">{attachment.name}</span>
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      {attachment.type === 'image' && attachment.thumbnailBase64 && (
+                        <img src={`data:image/png;base64,${attachment.thumbnailBase64}`}
+                          alt={attachment.name} className="max-h-48 max-w-64 rounded-sm object-contain" />
+                      )}
+                      <span>{attachment.name}</span>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              ))}
+            </span>
+          )}
         </div>
       </div>
     </div>

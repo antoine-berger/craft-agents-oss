@@ -300,6 +300,17 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
     command: import('@craft-agent/shared/protocol').SessionCommand
   ) => {
     switch (command.type) {
+      case 'getPendingQuestion':
+      case 'respondToQuestion': {
+        const workspaceId = _ctx.workspaceId ?? (_ctx.webContentsId != null
+          ? deps.windowManager?.getWorkspaceForWindow(_ctx.webContentsId) : undefined)
+        if (workspaceId && sessionManager.getSessionSnapshot(sessionId)?.workspaceId !== workspaceId) {
+          throw new Error('This chat belongs to another workspace')
+        }
+        return command.type === 'getPendingQuestion'
+          ? sessionManager.getPendingQuestion(sessionId)
+          : sessionManager.respondToQuestion(sessionId, command.requestId, command.response)
+      }
       case 'resumeFailed':
         if (_ctx.workspaceId && sessionManager.getSessionSnapshot(sessionId)?.workspaceId !== _ctx.workspaceId) {
           throw new Error('This chat belongs to another workspace')

@@ -20,6 +20,7 @@ import { debug } from '../utils/debug.ts';
  * Callbacks that can be registered per-session
  */
 export interface SessionScopedToolCallbacks {
+  askUserQuestionFn?: (questions: import('@craft-agent/core/types').UserQuestion[], signal?: AbortSignal) => Promise<import('@craft-agent/core/types').UserQuestionResponse>;
   markAttentionFn?: (request: { kind: 'question' | 'plan' | 'error'; title: string; detail?: string }) => void | Promise<void>;
   /**
    * Called when a plan is submitted via SubmitPlan tool.

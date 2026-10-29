@@ -228,11 +228,10 @@ function messageToActivity(message: Message, existingActivities: ActivityItem[] 
     intent: message.toolIntent,
     displayName: message.toolDisplayName,  // LLM-generated human-friendly name
     toolDisplayMeta: message.toolDisplayMeta,  // Embedded metadata with base64 icon for viewer
-    timestamp: message.timestamp,
+    timestamp: message.startedAt ?? message.timestamp,
+    sourceMessageId: message.turnId ?? message.id,
     error: message.isError ? stripErrorTags(message.toolResult || message.content) : undefined,
-    // parentId: The toolUseId of the parent tool (e.g., Task subagent).
-    // This is tracked by session manager's parentToolStack, NOT the SDK's
-    // parent_tool_use_id which is for result-matching, not hierarchy.
+    // Parent ownership supplied by the provider adapter and retained after reload.
     parentId: message.parentToolUseId,
     // Background task fields
     taskId: message.taskId,
@@ -365,7 +364,7 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
   const visibleMessages = messages.filter(m => !m.hidden)
   // Sort by timestamp for correct chronological order
   // This ensures correct turn grouping even if messages are added out of order during streaming
-  const sortedMessages = [...visibleMessages].sort((a, b) => a.timestamp - b.timestamp)
+  const sortedMessages = [...visibleMessages].sort((a, b) => (a.startedAt ?? a.timestamp) - (b.startedAt ?? b.timestamp))
 
   const turns: Turn[] = []
   let currentTurn: AssistantTurn | null = null
@@ -411,15 +410,17 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
         // Find the last intermediate text activity (reverse to get most recent)
         const lastTextActivity = [...currentTurn.activities]
           .reverse()
-          .find(a => a.type === 'intermediate' && a.content)
+          .find(a => a.type === 'intermediate' && !a.parentId && a.content)
 
         if (lastTextActivity?.content) {
           currentTurn.response = {
             text: lastTextActivity.content,
             isStreaming: false,
-            messageId: lastTextActivity.id,
-            timestamp: lastTextActivity.timestamp,
-            durationMs: Math.max(0, lastTextActivity.timestamp - (requestTimestamp ?? currentTurn.timestamp)),
+            messageId: lastTextActivity.messageId ?? lastTextActivity.id,
+            sourceMessageId: lastTextActivity.sourceMessageId,
+            annotations: lastTextActivity.annotations,
+            timestamp: lastTextActivity.completedAt ?? lastTextActivity.timestamp,
+            durationMs: Math.max(0, (lastTextActivity.completedAt ?? lastTextActivity.timestamp) - (requestTimestamp ?? currentTurn.timestamp)),
           }
         }
       }
@@ -438,7 +439,7 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
       turns.push({
         type: 'auth-request',
         message,
-        timestamp: message.timestamp,
+        timestamp: message.startedAt ?? message.timestamp,
       })
       continue
     }
@@ -452,7 +453,7 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
       turns.push({
         type: 'user',
         message,
-        timestamp: message.timestamp,
+        timestamp: message.startedAt ?? message.timestamp,
       })
       continue
     }
@@ -469,7 +470,7 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
           intent: undefined,
           isStreaming: true,
           isComplete: false,
-          timestamp: message.timestamp,
+          timestamp: message.startedAt ?? message.timestamp,
         }
       }
       const statusActivity: ActivityItem = {
@@ -477,7 +478,7 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
         type: 'status',
         status: 'running',
         content: message.content,
-        timestamp: message.timestamp,
+        timestamp: message.startedAt ?? message.timestamp,
         statusType: message.statusType,
         depth: 0,
       }
@@ -513,7 +514,7 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
       turns.push({
         type: 'system',
         message,
-        timestamp: message.timestamp,
+        timestamp: message.startedAt ?? message.timestamp,
       })
       continue
     }
@@ -531,7 +532,7 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
           intent: undefined,
           isStreaming: false,
           isComplete: false,
-          timestamp: message.timestamp,
+          timestamp: message.startedAt ?? message.timestamp,
         }
       }
       // Add plan as an activity so it gets time-sorted with other activities
@@ -542,12 +543,16 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
         content: message.content,
         messageId: message.id,
         annotations: message.annotations,
+        sourceMessageId: message.turnId ?? message.id,
+        parentId: message.parentToolUseId,
         displayName: 'Plan',
-        timestamp: message.timestamp,
+        timestamp: message.startedAt ?? message.timestamp,
       })
-      currentTurn.isStreaming = false
-      currentTurn.isComplete = true
-      flushCurrentTurn()
+      if (!message.parentToolUseId) {
+        currentTurn.isStreaming = false
+        currentTurn.isComplete = true
+        flushCurrentTurn()
+      }
       continue
     }
 
@@ -565,7 +570,7 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
           intent: message.toolIntent,
           isStreaming: !isToolComplete,
           isComplete: false,
-          timestamp: message.timestamp,
+          timestamp: message.startedAt ?? message.timestamp,
         }
       }
       // Always add to current turn (ignoring turnId differences)
@@ -580,7 +585,7 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
       // Intermediate messages OR pending messages (don't know yet) are activities, not responses
       // Pending: streaming text where we don't yet know if it's intermediate - treat as intermediate
       // until text_complete arrives with the definitive isIntermediate flag
-      if (message.isIntermediate || message.isPending) {
+      if (message.contentKind === 'thinking' || message.isIntermediate || message.isPending || message.parentToolUseId) {
         if (!currentTurn) {
           // Start a new turn for this intermediate message
           currentTurn = {
@@ -591,7 +596,7 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
             intent: undefined,
             isStreaming: !!message.isPending,
             isComplete: false,
-            timestamp: message.timestamp,
+            timestamp: message.startedAt ?? message.timestamp,
           }
         }
         // Always add to current turn as activity (ignoring turnId differences)
@@ -599,10 +604,14 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
         // Include parentId for intermediate messages to support nesting within subagents
         const intermediateActivity: ActivityItem = {
           id: message.id,
-          type: 'intermediate',
-          status: message.isPending ? 'running' : 'completed',
+          completedAt: message.timestamp,
+          type: message.contentKind === 'thinking' ? 'thinking' : 'intermediate',
+          status: message.isPending || message.isStreaming ? 'running' : 'completed',
           content: message.content,
-          timestamp: message.timestamp,
+          messageId: message.id,
+          annotations: message.annotations,
+          sourceMessageId: message.turnId ?? message.id,
+          timestamp: message.startedAt ?? message.timestamp,
           parentId: message.parentToolUseId,
         }
         // Calculate depth for intermediate messages too
@@ -633,12 +642,13 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
           intent: undefined,
           isStreaming: !!message.isStreaming,
           isComplete: !message.isStreaming,
-          timestamp: message.timestamp,
+          timestamp: message.startedAt ?? message.timestamp,
         }
       }
 
       // Set as response on current turn (ignoring turnId differences)
       currentTurn.response = {
+        sourceMessageId: message.turnId ?? message.id,
         text: message.content,
         timestamp: message.timestamp,
         durationMs: message.isStreaming ? undefined : Math.max(0, message.timestamp - (requestTimestamp ?? currentTurn.timestamp)),
@@ -646,6 +656,7 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
         streamStartTime: message.isStreaming ? message.timestamp : undefined,
         messageId: message.id,
         annotations: message.annotations,
+        responseUsage: message.responseUsage,
       }
       currentTurn.isStreaming = !!message.isStreaming
       currentTurn.isComplete = !message.isStreaming

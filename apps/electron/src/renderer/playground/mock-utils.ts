@@ -293,10 +293,13 @@ export const mockElectronAPI = {
 
   // Transport reconnects: SessionFilesSection re-reads the folder on reconnect (returns an unsubscribe)
   onReconnected: (_callback: () => void) => () => {},
+  onSessionEvent: (_callback: (event: unknown) => void) => () => {},
+  listLabels: async () => [],
 
   // Session actions from the chat header (share, regenerate title, show in Finder, …). No `openUrl`
   // mock: the Browser UI demo copies to the clipboard when it is absent.
   sessionCommand: async (sessionId: string, command: { type: string }) => {
+    if (command.type === 'getPendingQuestion') return null
     console.log('[Playground] sessionCommand called:', sessionId, command.type)
     return { success: false, error: 'Not available in the playground' }
   },

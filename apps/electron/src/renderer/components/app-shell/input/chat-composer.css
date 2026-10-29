@@ -1,0 +1,37 @@
+/* The transcript opts in; embedded Craft editors retain their existing sizing. */
+[data-composer-layout="chat"] {
+  padding: 16px 16px 52px 18px;
+}
+[data-composer-layout="chat"][data-composer-compact] {
+  padding-bottom: 60px;
+}
+[data-composer-layout="chat"] [data-composer-actions] {
+  position: absolute;
+  left: 7px;
+  right: 12px;
+  bottom: 12px;
+}
+[data-composer-layout="chat"] [data-composer-model] {
+  max-width: min(320px, 65%);
+}
+[data-composer-layout="chat"] [data-composer-actions] .input-toolbar-btn {
+  font-size: 14px;
+  line-height: 20px;
+}
+[data-composer-layout="chat"]:not([data-composer-compact]) :is(.input-toolbar-btn, .send-btn) {
+  height: 28px;
+  min-width: 28px;
+}
+[data-composer-layout="chat"]:not([data-composer-compact]) .send-btn {
+  width: 28px;
+}
+@container panel (max-width: 400px) {
+  [data-composer-layout="chat"] [data-composer-model] {
+    max-width: 48%;
+  }
+}
+@container panel (max-width: 320px) {
+  [data-composer-layout="chat"] [data-composer-model] button > span {
+    display: none;
+  }
+}

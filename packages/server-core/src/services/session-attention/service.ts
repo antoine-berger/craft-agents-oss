@@ -141,6 +141,13 @@ export class SessionAttentionService {
       store = new SessionAttentionStore(workspaceId, root)
       this.stores.set(workspaceId, store)
       this.unlisten.add(store.subscribe(this.deps.push))
+      // Awaited tool requests die with their server process; persistent handoffs do not.
+      for (const [sessionId, state] of Object.entries(store.snapshot().sessions)) {
+        if (state.reasons.some(reason => reason.source === 'agent' && reason.id === 'interactive-question')
+          && !this.deps.manager.getPendingQuestion?.(sessionId)) {
+          store.setReasons(sessionId, 'agent', state.reasons.filter(reason => reason.source === 'agent' && reason.id !== 'interactive-question'))
+        }
+      }
     }
     return store
   }

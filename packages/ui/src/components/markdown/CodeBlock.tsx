@@ -7,6 +7,7 @@ import { TurnIconButton } from '../chat/turn/TurnIconButton'
 import { useShikiTheme } from '../../context/ShikiThemeContext'
 import { useRunCommand } from './RunCommandContext'
 import { shellCommandFromBlock } from './shell-command'
+import './chat-markdown.css'
 
 export interface CodeBlockProps {
   code: string
@@ -19,6 +20,8 @@ export interface CodeBlockProps {
    * - 'full': Rich styling with background, copy button, etc.
    */
   mode?: 'terminal' | 'minimal' | 'full'
+  /** Compact transcript chrome, leaving document code blocks unchanged. */
+  appearance?: 'chat'
   /**
    * Force a specific theme. If not provided, detects from document.documentElement.classList
    */
@@ -66,9 +69,14 @@ function isValidLanguage(lang: string): lang is BundledLanguage {
  * Uses VS Code's syntax highlighting engine for accurate highlighting.
  * Lazy-loads highlighting and caches results for performance.
  */
-export function CodeBlock({ code, language = 'text', className, mode = 'full', forcedTheme }: CodeBlockProps) {
+export function CodeBlock({ code, language = 'text', className, mode = 'full', forcedTheme, appearance }: CodeBlockProps) {
   const { t } = useTranslation()
-  const [highlighted, setHighlighted] = React.useState<string | null>(null)
+  const [highlight, setHighlight] = React.useState<{
+    code: string; language: string; appearance: CodeBlockProps['appearance']; html: string | null
+  } | null>(null)
+  // Never display a previous streamed fragment or the other renderer's HTML while loading.
+  const highlighted = highlight?.code === code && highlight.language === language && highlight.appearance === appearance
+    ? highlight.html : null
   const [isLoading, setIsLoading] = React.useState(true)
   const [copied, setCopied] = React.useState(false)
   const [started, setStarted] = React.useState(false)
@@ -88,6 +96,18 @@ export function CodeBlock({ code, language = 'text', className, mode = 'full', f
     let cancelled = false
 
     async function highlight() {
+      if (appearance === 'chat') {
+        try {
+          const { highlightChatCode } = await import('./chat-code-highlight')
+          const html = highlightChatCode(code, resolvedLang)
+          if (!cancelled) setHighlight({ code, language, appearance, html: html ?? null })
+        } catch {
+          if (!cancelled) setHighlight({ code, language, appearance, html: null })
+        } finally {
+          if (!cancelled) setIsLoading(false)
+        }
+        return
+      }
       // Theme priority:
       // 1. Context theme (from ShikiThemeProvider) - handles supportedModes correctly
       // 2. forcedTheme prop - explicit override for specific use cases
@@ -106,7 +126,7 @@ export function CodeBlock({ code, language = 'text', className, mode = 'full', f
       const cached = highlightCache.get(cacheKey)
       if (cached) {
         if (!cancelled) {
-          setHighlighted(cached)
+          setHighlight({ code, language, appearance, html: cached })
           setIsLoading(false)
         }
         return
@@ -129,14 +149,14 @@ export function CodeBlock({ code, language = 'text', className, mode = 'full', f
         highlightCache.set(cacheKey, html)
 
         if (!cancelled) {
-          setHighlighted(html)
+          setHighlight({ code, language, appearance, html })
           setIsLoading(false)
         }
       } catch (error) {
         // Fallback to plain text on error
         console.warn(`Shiki highlighting failed for language "${resolvedLang}":`, error)
         if (!cancelled) {
-          setHighlighted(null)
+          setHighlight({ code, language, appearance, html: null })
           setIsLoading(false)
         }
       }
@@ -147,7 +167,7 @@ export function CodeBlock({ code, language = 'text', className, mode = 'full', f
     return () => {
       cancelled = true
     }
-  }, [code, resolvedLang, forcedTheme, contextShikiTheme])
+  }, [code, language, resolvedLang, forcedTheme, contextShikiTheme, appearance])
 
   const handleCopy = React.useCallback(async () => {
     try {
@@ -193,15 +213,22 @@ export function CodeBlock({ code, language = 'text', className, mode = 'full', f
     )
   }
 
+  const isChat = appearance === 'chat'
+
   // Full mode: sunken well with a 32px header (language · Copy); long lines scroll inside the
   // well so a code block never widens the page (spec §7.4 code blocks)
   return (
-    <div className={cn('relative overflow-hidden rounded-md border border-subtle bg-sunken', className)}>
-      <div className="flex h-8 items-center gap-2 border-b border-subtle pl-3 pr-1 text-label-sm text-tertiary">
-        <span className="min-w-0 truncate font-mono text-secondary">
+    <div data-code-appearance={isChat ? 'chat' : undefined}
+      data-code-mode={isChat ? forcedTheme : undefined}
+      style={isChat ? { fontVariantLigatures: 'none' } : undefined}
+      className={cn('group/code relative min-w-0 overflow-hidden bg-sunken', isChat ? 'rounded-[6px]' : 'rounded-md border border-subtle', className)}>
+      <div className={cn(isChat
+        ? 'absolute right-2.5 top-2.5 z-10 flex items-center gap-1 rounded bg-sunken opacity-0 transition-opacity group-hover/code:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100'
+        : 'flex h-8 items-center gap-2 border-b border-subtle pl-3 pr-1 text-label-sm text-tertiary')}>
+        {!isChat && <><span className="min-w-0 truncate font-mono text-secondary">
           {resolvedLang !== 'text' ? resolvedLang : 'plain text'}
         </span>
-        <span className="flex-1" />
+        <span className="flex-1" /></>}
         {command && (
           <TurnIconButton
             aria-label={started ? t('chat.runCommandStarted') : t('chat.runCommandInBackground')}
@@ -215,15 +242,20 @@ export function CodeBlock({ code, language = 'text', className, mode = 'full', f
           aria-label={copied ? t('common.copied') : t('common.copyCode')}
           icon={copied ? <Check className="size-3.5 text-success" /> : <Copy />}
           onClick={handleCopy}
+          className={isChat ? 'size-5 p-0' : undefined}
         />
       </div>
 
       {/* Code content */}
-      <div className="overflow-x-auto px-3 py-2 font-mono text-mono-ui leading-5 text-diff">
+      <div className={cn('px-3 font-mono leading-5 text-diff',
+        isChat ? 'max-h-[500px] overflow-auto py-2.5 text-[14px]' : 'overflow-x-auto py-2 text-mono-ui')}>
         {isLoading || !highlighted ? (
           <pre className="m-0 w-max min-w-full font-mono">
             <code>{code}</code>
           </pre>
+        ) : isChat ? (
+          <pre className="m-0 w-max min-w-full font-mono"><code className="hljs"
+            dangerouslySetInnerHTML={{ __html: highlighted }} /></pre>
         ) : (
           <div
             className="w-max min-w-full [&_pre]:!m-0 [&_pre]:!bg-transparent [&_pre]:!p-0 [&_pre]:font-mono [&_code]:!bg-transparent"

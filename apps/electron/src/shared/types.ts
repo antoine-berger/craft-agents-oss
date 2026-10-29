@@ -279,9 +279,11 @@ export interface ElectronAPI extends ShipWorkflowAPI, WorktreeFilesAPI, SessionT
   respondToCredential(sessionId: string, requestId: string, response: CredentialResponse): Promise<boolean>
 
   // Consolidated session command handler
+  sessionCommand(sessionId: string, command: Extract<SessionCommand, { type: 'getPendingQuestion' }>): Promise<import('@craft-agent/core/types').PendingUserQuestion | null>
+  sessionCommand(sessionId: string, command: Extract<SessionCommand, { type: 'respondToQuestion' }>): Promise<boolean>
   sessionCommand(sessionId: string, command: Extract<SessionCommand, { type: 'markPendingPlanExecutionDispatched' }>): Promise<boolean>
   sessionCommand(sessionId: string, command: Extract<SessionCommand, { type: 'continueInNewSession' }>): Promise<{ sessionId: string }>
-  sessionCommand(sessionId: string, command: Exclude<SessionCommand, { type: 'markPendingPlanExecutionDispatched' | 'continueInNewSession' }>): Promise<void | ShareResult | RefreshTitleResult | { count: number }>
+  sessionCommand(sessionId: string, command: Exclude<SessionCommand, { type: 'markPendingPlanExecutionDispatched' | 'continueInNewSession' | 'getPendingQuestion' | 'respondToQuestion' }>): Promise<void | ShareResult | RefreshTitleResult | { count: number }>
 
   // Server info (REMOTE_ELIGIBLE — returns data from whichever server owns the workspace)
   getServerHomeDir(): Promise<string>

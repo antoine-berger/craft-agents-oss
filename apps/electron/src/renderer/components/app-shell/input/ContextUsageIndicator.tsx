@@ -5,6 +5,7 @@ import { cn } from '@/lib/utils'
 import { contextIndicatorValues, type ContextIndicatorSettings } from './context-usage-indicator-model'
 
 export interface ContextUsageIndicatorProps {
+  appearance?: 'default' | 'chat'
   snapshot?: ContextUsageSnapshot
   modelName?: string
   modelContextWindow?: number | null
@@ -22,7 +23,7 @@ export interface ContextUsageIndicatorProps {
 const tokenLabel = (value: number) => new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 }).format(value)
 const count = (value: unknown): number | null => typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null
 
-export function ContextUsageIndicator({ snapshot, modelName, modelContextWindow, reportedContextWindow, useClaudeSettings, updatedAt, currentCacheTokens, isProcessing, onCompact, className }: ContextUsageIndicatorProps) {
+export function ContextUsageIndicator({ appearance = 'default', snapshot, modelName, modelContextWindow, reportedContextWindow, useClaudeSettings, updatedAt, currentCacheTokens, isProcessing, onCompact, className }: ContextUsageIndicatorProps) {
   const [open, setOpen] = useState(false)
   const [settings, setSettings] = useState<ContextIndicatorSettings>()
   useEffect(() => {
@@ -41,14 +42,24 @@ export function ContextUsageIndicator({ snapshot, modelName, modelContextWindow,
   const value = contextIndicatorValues(snapshot, modelContextWindow, reportedContextWindow, useClaudeSettings ? settings : undefined)
   const cache = count(currentCacheTokens)
   const known = value.percent !== null && !value.stale
-  const circle = 2 * Math.PI * 5.5
+  const isChat = appearance === 'chat'
+  const size = isChat ? 14 : 16
+  const radius = isChat ? 6 : 5.5
+  const strokeWidth = isChat ? 2 : 1.8
+  const circle = 2 * Math.PI * radius
+  const progressStroke = isChat
+    ? value.percent !== null && value.percent > 90 ? '#ef4444' : '#a1a1aa'
+    : 'currentColor'
   return <Popover open={open} onOpenChange={setOpen}>
     <PopoverTrigger asChild>
       <button type="button" className={cn('input-toolbar-btn inline-flex h-control w-control shrink-0 items-center justify-center rounded-full p-0 text-tertiary hover:bg-foreground/5 hover:text-foreground', known && value.percent! >= 90 && 'text-info', className)} aria-label={`Context usage ${known ? `${value.percent}%` : 'unknown'}`}>
-        <svg viewBox="0 0 16 16" className="size-4 -rotate-90" aria-hidden="true"><circle cx="8" cy="8" r="5.5" fill="none" stroke="currentColor" strokeWidth="1.8" opacity="0.2" strokeDasharray={known ? undefined : '2 3'} />{known && <circle cx="8" cy="8" r="5.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeDasharray={`${circle * Math.min(100, value.percent!) / 100} ${circle}`} />}</svg>
+        <svg viewBox={`0 0 ${size} ${size}`} className={cn(isChat ? 'size-3.5' : 'size-4', '-rotate-90')} aria-hidden="true">
+          <circle cx={size / 2} cy={size / 2} r={radius} fill="none" stroke={isChat ? 'var(--border)' : 'currentColor'} strokeWidth={strokeWidth} opacity={isChat ? 1 : 0.2} strokeDasharray={known ? undefined : '2 3'} />
+          {known && <circle cx={size / 2} cy={size / 2} r={radius} fill="none" stroke={progressStroke} strokeWidth={strokeWidth} strokeLinecap={isChat ? 'butt' : 'round'} strokeDasharray={`${circle * Math.min(100, value.percent!) / 100} ${circle}`} />}
+        </svg>
       </button>
     </PopoverTrigger>
-    <PopoverContent side="top" align="end" sideOffset={8} className="w-[280px] p-3.5 text-xs">
+    <PopoverContent side="top" align="end" sideOffset={8} className={cn('text-xs', isChat ? 'w-[320px] rounded-[8px] p-3' : 'w-[280px] p-3.5')}>
       <div className="font-medium text-sm text-foreground">Context</div>
       {modelName && <div className="mt-0.5 text-tertiary">{modelName}</div>}
       <div className="mt-3 space-y-2">

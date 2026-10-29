@@ -572,8 +572,9 @@ export class ClaudeAgent extends BaseAgent {
         if (event.type === 'complete') complete = true;
         yield event.type === 'complete' && continuing ? { ...event, continuing: true } : event;
       }
-      const flushed = this.eventAdapter.flushPending();
-      if (flushed) yield flushed;
+      for (let flushed = this.eventAdapter.flushPending(); flushed; flushed = this.eventAdapter.flushPending()) {
+        yield flushed;
+      }
       if (!complete) throw new Error('Claude continuation ended before its result');
       return false;
     } finally {
@@ -2225,8 +2226,7 @@ This is a branched conversation. All prior messages in this conversation are par
         // Defensive: flush any pending text that wasn't emitted
         // This can happen if the SDK sends an assistant message with text but skips the
         // message_delta event that normally triggers text_complete (rare edge scenarios)
-        const flushedEvent = this.eventAdapter.flushPending();
-        if (flushedEvent) {
+        for (let flushedEvent = this.eventAdapter.flushPending(); flushedEvent; flushedEvent = this.eventAdapter.flushPending()) {
           yield flushedEvent;
         }
 
@@ -2245,8 +2245,9 @@ This is a branched conversation. All prior messages in this conversation are par
 
           // Keep a finished text block that was waiting for its message_delta: without the flush it
           // would be missing after a reload.
-          const flushedOnAbort = this.eventAdapter.flushPending();
-          if (flushedOnAbort) yield flushedOnAbort;
+          for (let flushedOnAbort = this.eventAdapter.flushPending(); flushedOnAbort; flushedOnAbort = this.eventAdapter.flushPending()) {
+            yield flushedOnAbort;
+          }
 
           // If interrupted before receiving any assistant content AND this was the first message,
           // clear session ID to prevent broken resume state where SDK session file is empty/invalid.

@@ -82,7 +82,7 @@ const TYPE_LABEL_KEY: Record<BackgroundTask['type'], string> = {
   workflow: 'chat.backgroundTask.typeWorkflow',
 }
 
-function useStatusText(task: BackgroundTask): string {
+export function useBackgroundTaskStatus(task: BackgroundTask): string {
   const { t } = useTranslation()
   if (task.stopping && isLive(task)) return t('chat.backgroundTask.stopping')
   switch (task.status) {
@@ -240,10 +240,10 @@ interface CardProps {
   onClose: () => void
 }
 
-function BackgroundTaskCard({ task, sessionId, onStop, onDismiss, onOpenOutput, onClose }: CardProps) {
+export function BackgroundTaskCard({ task, sessionId, onStop, onDismiss, onOpenOutput, onClose }: CardProps) {
   const { t } = useTranslation()
   const elapsed = useElapsed(task)
-  const statusText = useStatusText(task)
+  const statusText = useBackgroundTaskStatus(task)
   const { output, status, reload } = useTaskOutput(sessionId, task)
   const live = isLive(task)
   const TypeIcon = TYPE_ICON[task.type]
@@ -373,7 +373,7 @@ export interface BackgroundTaskChipProps {
 export function BackgroundTaskChip({ task, sessionId, open, onOpenChange, onStop, onDismiss, onOpenOutput }: BackgroundTaskChipProps) {
   const { t } = useTranslation()
   const elapsed = useElapsed(task)
-  const statusText = useStatusText(task)
+  const statusText = useBackgroundTaskStatus(task)
   const label = task.intent?.trim() || task.id
   const running = task.status === 'running' && !task.stopping
   const tone = task.status === 'failed'

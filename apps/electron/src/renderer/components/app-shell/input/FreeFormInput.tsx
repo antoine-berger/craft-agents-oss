@@ -78,6 +78,7 @@ import { ComposerModelMenu } from './ComposerModelMenu'
 import { ContextUsageIndicator } from './ContextUsageIndicator'
 import { FollowUpChips } from './FollowUpChips'
 import { SendButton } from './SendButton'
+import './chat-composer.css'
 
 
 export interface FollowUpInputItem {
@@ -91,6 +92,8 @@ export interface FollowUpInputItem {
 }
 
 export interface FreeFormInputProps {
+  /** Compact Conductor chat geometry; embedded editors retain the default layout. */
+  appearance?: 'default' | 'chat'
   /** A console snippet was pasted (`$ cmd` lines or a fenced shell block): offer to run it in the background */
   onConsoleSnippetPaste?: (snippet: { command: string; text: string }) => void
   /** Placeholder text(s) for the textarea - can be array for rotation */
@@ -235,6 +238,7 @@ export interface FreeFormInputProps {
  * - Active option badges
  */
 export function FreeFormInput({
+  appearance = 'default',
   onConsoleSnippetPaste,
   placeholder,
   disabled = false,
@@ -290,6 +294,7 @@ export function FreeFormInput({
   isCollapsedInCompact = false,
   onRequestExpand,
 }: FreeFormInputProps) {
+  const isChat = appearance === 'chat'
   const { t } = useTranslation()
   const [selectedRepository, setSelectedRepository] = React.useState(() => initialRepository(sessionId, workspaceId))
   React.useEffect(() => {
@@ -564,7 +569,9 @@ export function FreeFormInput({
   const containerRef = React.useRef<HTMLDivElement>(null)
   const contentScrollRef = React.useRef<HTMLDivElement>(null)
   const availableHeight = useInputAvailableHeight(containerRef, maxHeight === undefined)
-  const composerMaxHeight = maxHeight ?? getComposerMaxHeight(availableHeight, 'freeform')
+  const composerMaxHeight = maxHeight ?? getComposerMaxHeight(availableHeight, 'freeform', appearance)
+  const frameInset = isChat && unstyled ? 2 : 0
+  const contentMaxHeight = Math.max(0, composerMaxHeight - frameInset)
   const fileInputRef = React.useRef<HTMLInputElement>(null)
 
   // Merge refs for RichTextInput
@@ -913,13 +920,14 @@ export function FreeFormInput({
 
     const observer = new ResizeObserver((entries) => {
       for (const entry of entries) {
-        onHeightChange(entry.contentRect.height)
+        // Chat padding belongs to its measured height; the wrapper adds a one-pixel border.
+        onHeightChange(isChat ? entry.target.getBoundingClientRect().height + frameInset : entry.contentRect.height)
       }
     })
 
     observer.observe(containerRef.current)
     return () => observer.disconnect()
-  }, [onHeightChange])
+  }, [onHeightChange, isChat, frameInset])
 
   // In compact mode, immediately report collapsed height when the input is
   // collapsed during processing. This ensures smooth animation timing.
@@ -1443,16 +1451,18 @@ export function FreeFormInput({
       <div
         ref={containerRef}
         data-craft-composer={!unstyled || undefined}
+        data-composer-layout={isChat ? 'chat' : undefined}
+        data-composer-compact={isChat && compactMode || undefined}
         className={cn(
           // Own the panel query boundary: standalone/playground composers must collapse chips
           // at the input's width too, not depend on an AppShell ancestor being present.
-          '@container/panel flex flex-col min-h-0 overflow-hidden transition-colors',
+          '@container/panel relative flex flex-col min-h-0 overflow-hidden transition-colors',
           // Container styling - only when not wrapped by InputContainer
-          !unstyled && 'rounded-xl border border-subtle bg-raised',
+          !unstyled && (isChat ? 'rounded-[12px] border border-default bg-sunken' : 'rounded-xl border border-subtle bg-raised'),
           // Drop target: inset focus ring + accent tint (never clipped by the card)
           isDraggingOver && 'ring-2 ring-inset ring-focus bg-accent-tint'
         )}
-        style={{ maxHeight: composerMaxHeight }}
+        style={{ maxHeight: contentMaxHeight, ...(isChat ? { minHeight: Math.min((compactMode ? 160 : 152) - frameInset, contentMaxHeight) } : {}) }}
         onDragEnter={handleDragEnter}
         onDragLeave={handleDragLeave}
         onDragOver={handleDragOver}
@@ -1575,13 +1585,12 @@ export function FreeFormInput({
           skills={skills}
           sources={sources}
           workspaceId={workspaceSlug}
-          // Copy type (14/24; 16/26 in compact so iOS never zooms), placeholder in tertiary.
-          // Narrow panels reserve two lines so a wrapped rotating tip is never clipped.
+          // Compact preserves 16px input text to avoid iOS zoom; desktop chat matches 14/20.
           className={cn(
-            'px-3.5 pt-3.5 pb-3.5',
-            compactMode ? 'text-copy-lg min-h-[80px]' : 'text-[14px] @max-panel-medium/panel:min-h-[76px]',
+            isChat ? 'min-h-[80px] p-0 font-[350]' : 'px-3.5 pt-3.5 pb-3.5',
+            compactMode ? 'text-copy-lg min-h-[80px]' : isChat ? 'text-[14px]' : 'text-[14px] @max-panel-medium/panel:min-h-[76px]',
           )}
-          style={{ lineHeight: compactMode ? 'var(--lh-copy-lg)' : 'var(--lh-copy)' }}
+          style={{ lineHeight: compactMode ? 'var(--lh-copy-lg)' : isChat ? '20px' : 'var(--lh-copy)' }}
           data-tutorial="chat-input"
           spellCheck={spellCheck}
         />
@@ -1600,7 +1609,7 @@ export function FreeFormInput({
           {/* Toolbar (mockup `.cx-bar`): attach · sources · folder · spacer · mode · model · context · send */}
           {/* The first icon's glyph lines up with the draft text (card-pad, 14px): 28px desktop
               buttons pad 6px, 36px compact ones 10px, so the row insets 8px / 4px. */}
-          <div className={cn("flex items-center gap-1 pb-1.5", compactMode ? "px-1" : "px-2", isCollapsedInCompact && "pt-1.5")}>
+          <div className={cn("flex items-center", isChat ? "gap-1.5" : "gap-1 pb-1.5", !isChat && (compactMode ? "px-1" : "px-2"), isCollapsedInCompact && "pt-1.5")}>
           {/* Hidden file input for attach button (shared by compact and desktop) */}
           <input
             ref={fileInputRef}
@@ -1616,7 +1625,9 @@ export function FreeFormInput({
               out. overflow-hidden is safe — popovers/drawers portal. */}
           <div className={cn(
             "flex items-center gap-1",
-            compactMode
+            isChat
+              ? "min-w-0 shrink overflow-hidden @max-[32rem]/panel:[&_[data-badge-label]]:hidden"
+              : compactMode
               ? "shrink-0 [&_[data-badge-label]]:hidden"
               : "min-w-[clamp(0px,calc(100%-11rem),6rem)] shrink overflow-hidden @max-[32rem]/panel:[&_[data-badge-label]]:hidden"
           )}>
@@ -1677,8 +1688,9 @@ export function FreeFormInput({
           )}
 
           {/* Model selection truncates as needed, keeping Context and Send visible. */}
-          <div className="-m-1 flex min-w-0 shrink items-center gap-1 overflow-hidden p-1">
+          <div data-composer-model className="-m-1 flex min-w-0 shrink items-center gap-1 overflow-hidden p-1">
           <ContextUsageIndicator
+            appearance={appearance}
             snapshot={contextStatus?.contextUsage}
             reportedContextWindow={contextStatus?.contextWindow}
             useClaudeSettings={!!effectiveConnectionDetails && isAnthropicProvider(effectiveConnectionDetails.providerType)}
@@ -1730,8 +1742,9 @@ export function FreeFormInput({
           </div>
 
 
-          {/* Send/Stop Button - Always show stop when processing */}
+          {/* Stop stays available when a running chat also has a sendable draft. */}
           <SendButton
+            appearance={appearance}
             isProcessing={isProcessing}
             disabled={!hasContent || disabled || disableSend || needsRepository}
             onStop={() => handleStop(false)}

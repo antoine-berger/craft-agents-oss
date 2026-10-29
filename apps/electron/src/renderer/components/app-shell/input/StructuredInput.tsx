@@ -1,3 +1,4 @@
+import { UserQuestionRequest, type UserQuestionInput } from './structured/UserQuestionRequest'
 import type { PermissionRequest as PermissionRequestType, CredentialRequest as CredentialRequestType } from '../../../../shared/types'
 import { PermissionRequest } from './structured/PermissionRequest'
 import { CredentialRequest } from './structured/CredentialRequest'
@@ -9,20 +10,28 @@ interface StructuredInputProps {
   onResponse: (response: StructuredResponse) => void
   /** When true, removes container styling (shadow, bg, rounded) - used when wrapped by InputContainer */
   unstyled?: boolean
+  appearance?: 'default' | 'chat'
+  interactive?: boolean
 }
 
 /**
  * StructuredInput - Router component for structured input UIs
  *
  * Routes to the appropriate component based on the input type:
+ * - question: owner answers, separate from permission approval
  * - permission: PermissionRequest (bash command approval)
  * - credential: CredentialRequest (secure auth input)
  */
-export function StructuredInput({ state, onResponse, unstyled = false }: StructuredInputProps) {
+export function StructuredInput({ state, onResponse, unstyled = false, appearance = 'default', interactive = true }: StructuredInputProps) {
   switch (state.type) {
+    case 'question': {
+      const input = state.data as UserQuestionInput
+      return <UserQuestionRequest key={input.request.requestId} {...input} onResponse={onResponse} interactive={interactive} unstyled={unstyled} />
+    }
     case 'permission':
       return (
         <PermissionRequest
+          appearance={appearance}
           request={state.data as PermissionRequestType}
           onResponse={onResponse}
           unstyled={unstyled}

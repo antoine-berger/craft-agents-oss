@@ -1,10 +1,12 @@
+import type { ResponseUsage } from '@craft-agent/core/types'
+import { collectResponseFiles } from './turn/response-files'
 import * as React from 'react'
 import { useMemo, useEffect, useRef, useCallback, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { ToolDisplayMeta, AnnotationV1 } from '@craft-agent/core'
 import { isParentTaskTool } from '@craft-agent/shared/utils/toolNames'
 import { motion, AnimatePresence } from 'motion/react'
-import { ListTodo } from 'lucide-react'
+import { ListTodo, Globe } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import { useCopyToClipboard } from '../../lib/use-copy-to-clipboard'
 import { TWEEN } from '../../motion/presets'
@@ -65,7 +67,10 @@ import { CompactAcceptPlanDrawer } from './CompactAcceptPlanDrawer'
 import { ResponseFooter } from './turn/ResponseFooter'
 import { ThinkingRow } from './turn/ThinkingRow'
 import { WorkLog } from './turn/WorkLog'
-import { ANSWER_BLOCK_IN, ANSWER_PROSE, SIZE_CONFIG } from './turn/turn-classes'
+import { InlineDisclosure, InlineToolBlock } from './turn/InlineToolBlock'
+import { InlineSubagentBlock } from './turn/InlineSubagentBlock'
+import { buildTurnPresentation, groupMcpMessages, isNarrativeActivity, type TranscriptItem, type TranscriptMessage, type TranscriptCounts, type TranscriptSection } from './turn/turn-presentation'
+import { ANSWER_BLOCK_IN, ANSWER_PROSE, CHAT_ANSWER_PROSE, SIZE_CONFIG } from './turn/turn-classes'
 import { countFailedActivities, getWorkLogPreview } from './turn/work-log-summary'
 
 // Presentational pieces live in ./turn/ (work log, tool rows, footer); re-exported here so the
@@ -97,6 +102,7 @@ export interface TodoItem {
 }
 
 export interface ActivityItem {
+  completedAt?: number
   id: string
   type: ActivityType
   status: ActivityStatus
@@ -112,6 +118,8 @@ export interface ActivityItem {
   displayName?: string  // LLM-generated human-friendly tool name (for MCP tools)
   toolDisplayMeta?: ToolDisplayMeta  // Embedded metadata with base64 icon (for viewer compatibility)
   timestamp: number
+  /** SDK message identity: several content blocks can belong to one message. */
+  sourceMessageId?: string
   error?: string
   // Parent-child nesting for Task subagents
   parentId?: string  // Parent activity's toolUseId
@@ -126,6 +134,8 @@ export interface ActivityItem {
 }
 
 export interface ResponseContent {
+  responseUsage?: ResponseUsage
+  sourceMessageId?: string
   text: string
   isStreaming: boolean
   streamStartTime?: number
@@ -153,6 +163,10 @@ export type OpenAnnotationRequest = {
 }
 
 export interface TurnCardProps {
+  /** Chat-only appearance; other Markdown hosts keep the existing renderer. */
+  appearance?: 'default' | 'chat'
+  /** Opens matching disclosures while searching within the transcript. */
+  searchQuery?: string
   /** Session ID for state persistence (optional in shared context) */
   sessionId?: string
   /** Turn ID for state persistence */
@@ -388,6 +402,11 @@ function isResponseBuffering(response: ResponseContent | undefined): boolean {
 // ============================================================================
 
 export interface ResponseCardProps {
+  responseUsage?: ResponseUsage
+  changedFiles?: string[]
+  appearance?: 'default' | 'chat'
+  /** Intermediate commentary keeps annotations without repeating the turn footer. */
+  showFooter?: boolean
   /** The content to display (markdown) */
   text: string
   /** Whether the content is still streaming */
@@ -616,6 +635,10 @@ function applyTextHighlightRange(
  * stream ends; blocks inserted while streaming fade in once (CSS @starting-style).
  */
 export function ResponseCard({
+  appearance = 'default',
+  showFooter = true,
+  responseUsage,
+  changedFiles,
   text,
   isStreaming,
   streamStartTime,
@@ -1358,6 +1381,7 @@ export function ResponseCard({
   // Throttle content updates during streaming for performance
   // Updates immediately when streaming ends to show final content
   useEffect(() => {
+    if (appearance === 'chat') return
     if (!isStreaming) {
       // Streaming ended - show final content immediately
       setDisplayedText(text)
@@ -1379,16 +1403,16 @@ export function ResponseCard({
       }, BUFFER_CONFIG.CONTENT_THROTTLE_MS - elapsed)
       return () => clearTimeout(timeout)
     }
-  }, [text, isStreaming])
+  }, [text, isStreaming, appearance])
 
   // Calculate buffering decision based on current text (not displayed text)
   const bufferDecision = useMemo(() => {
-    return shouldShowContent(text, isStreaming, streamStartTime)
-  }, [text, isStreaming, streamStartTime])
+    return appearance === 'chat' ? { shouldShow: true } : shouldShowContent(text, isStreaming, streamStartTime)
+  }, [text, isStreaming, streamStartTime, appearance])
 
   const isCompleted = !isStreaming
   const runCommand = useRunCommand()
-  const isBuffering = isStreaming && !bufferDecision.shouldShow
+  const isBuffering = appearance !== 'chat' && isStreaming && !bufferDecision.shouldShow
 
   // While buffering, return null - TurnCard will show a subtle indicator instead
   if (isBuffering) {
@@ -1411,16 +1435,16 @@ export function ResponseCard({
       data-search-root="response"
       onMouseDown={handleSelectionPointerDown}
       onMouseUp={handleTextSelection}
-      className={cn(ANSWER_PROSE, isPlan && 'px-4 py-3', !isSettled && hasMountedRef.current && ANSWER_BLOCK_IN)}
+      className={cn(appearance === 'chat' ? CHAT_ANSWER_PROSE : ANSWER_PROSE, isPlan && appearance !== 'chat' && 'px-4 py-3', appearance !== 'chat' && !isSettled && hasMountedRef.current && ANSWER_BLOCK_IN)}
     >
       <div ref={contentLayerRef} className="relative">
         <Markdown
-          mode="minimal"
+          mode={appearance === 'chat' ? 'chat' : 'minimal'}
           onUrlClick={onOpenUrl}
           onFileClick={onOpenFile}
           hideFirstMermaidExpand={false}
         >
-          {isSettled ? text : displayedText}
+          {appearance === 'chat' || isSettled ? text : displayedText}
         </Markdown>
         {annotationOverlayLayer}
       </div>
@@ -1429,9 +1453,13 @@ export function ResponseCard({
 
   // Desktop footer (Copy / Markdown / Fullscreen / Branch, + Accept Plan on plans).
   // Compact mode keeps message chrome minimal: only the Accept-Plan drawer below.
-  const footer = isSettled && !compactMode ? (
+  const footer = isSettled && showFooter && !compactMode ? (
     <ResponseFooter
       variant={isPlan ? 'plan' : 'answer'}
+      appearance={appearance}
+      usage={responseUsage}
+      changedFiles={changedFiles}
+      onOpenFile={onOpenFile}
       timestamp={timestamp}
       durationMs={durationMs}
       copied={copied}
@@ -1462,7 +1490,7 @@ export function ResponseCard({
   // Uses a bottom-sheet drawer to match the CompactPermissionModeSelector
   // / CompactModelSelector pattern. Guarded by isLastResponse so older
   // plans don't render an empty strip with a hidden-but-focusable button.
-  const compactFooter = isSettled && compactMode && canAcceptPlan && isLastResponse ? (
+  const compactFooter = isSettled && showFooter && compactMode && canAcceptPlan && isLastResponse ? (
     <div className="flex items-center justify-end border-t border-subtle px-2 py-1.5">
       <CompactAcceptPlanDrawer
         onAccept={onAccept!}
@@ -1476,7 +1504,22 @@ export function ResponseCard({
   return (
     // A streaming answer's code blocks offer no "Run in background": half a command must never run
     <RunCommandProvider value={isStreaming ? null : runCommand}>
-      {isPlan ? (
+      {isPlan && appearance === 'chat' ? (
+        <div className={cn('conductor-chat group/answer min-w-0', !compactMode && 'w-full max-w-xl lg:max-w-3xl')}>
+          <InlineDisclosure
+            id={`plan:${messageId ?? 'proposal'}`}
+            sessionId={sessionId}
+            icon={<ListTodo className="size-4" />}
+            title={t('turnCard.proposePlan', { defaultValue: 'Propose plan' })}
+            defaultExpanded
+            bodyClassName="mt-2 min-w-0"
+          >
+            {body}
+            {footer}
+            {compactFooter}
+          </InlineDisclosure>
+        </div>
+      ) : isPlan ? (
         // Plan: raised card with a header; the footer holds the primary Accept action
         <div className="group/answer overflow-hidden rounded-lg bg-raised shadow-elev-1">
           <div className="flex h-9 select-none items-center gap-2 border-b border-subtle px-4 text-label">
@@ -1488,7 +1531,7 @@ export function ResponseCard({
           {compactFooter}
         </div>
       ) : (
-        <div className="group/answer flex min-w-0 flex-col gap-2">
+        <div className={cn("group/answer flex min-w-0 flex-col gap-2", appearance === 'chat' && 'conductor-chat w-full', appearance === 'chat' && !compactMode && 'max-w-xl lg:max-w-3xl')}>
           {body}
           {footer}
         </div>
@@ -1533,6 +1576,8 @@ export function ResponseCard({
  * Only complete, non-streaming turns are memoized - active turns always re-render.
  */
 export const TurnCard = React.memo(function TurnCard({
+  appearance = 'default',
+  searchQuery,
   sessionId,
   turnId,
   activities,
@@ -1574,6 +1619,10 @@ export const TurnCard = React.memo(function TurnCard({
   annotationInteractionMode = 'interactive',
 }: TurnCardProps) {
   const { t } = useTranslation()
+  const presentation = useMemo(
+    () => appearance === 'chat' ? buildTurnPresentation(activities, response, isComplete) : [],
+    [appearance, activities, response, isComplete],
+  )
   // Derive the turn phase from props using the state machine.
   // This provides a single source of truth for lifecycle state,
   // replacing the old ad-hoc boolean combinations.
@@ -1644,8 +1693,8 @@ export const TurnCard = React.memo(function TurnCard({
   // Check if response is in buffering state
   // No polling needed - parent updates trigger re-evaluation naturally
   const isBuffering = useMemo(
-    () => isResponseBuffering(response),
-    [response]
+    () => appearance !== 'chat' && isResponseBuffering(response),
+    [response, appearance]
   )
 
 
@@ -1719,7 +1768,7 @@ export const TurnCard = React.memo(function TurnCard({
       return true
     })
     && !response
-  if (hasNoMeaningfulWork) {
+  if (hasNoMeaningfulWork && appearance !== 'chat') {
     return null
   }
 
@@ -1734,8 +1783,12 @@ export const TurnCard = React.memo(function TurnCard({
     ? (isBuffering ? t('turnCard.preparingResponse') : t('chat.processing.thinking'))
     : undefined
 
-  const renderResponse = (resp: ResponseContent) => (
+  const renderResponse = (resp: ResponseContent, showFooter = true) => (
     <ResponseCard
+      appearance={appearance}
+      responseUsage={resp.responseUsage}
+      changedFiles={showFooter ? collectResponseFiles(activities) : undefined}
+      showFooter={showFooter}
       text={resp.text}
       isStreaming={resp.isStreaming}
       streamStartTime={resp.streamStartTime}
@@ -1752,9 +1805,9 @@ export const TurnCard = React.memo(function TurnCard({
       onRemoveAnnotation={onRemoveAnnotation}
       onUpdateAnnotation={onUpdateAnnotation}
       onSaveAndSendFollowUp={onSaveAndSendFollowUp}
-      onAccept={onAcceptPlan}
-      onAcceptWithCompact={onAcceptPlanWithCompact}
-      isLastResponse={isLastResponse}
+      onAccept={showFooter ? onAcceptPlan : undefined}
+      onAcceptWithCompact={showFooter ? onAcceptPlanWithCompact : undefined}
+      isLastResponse={showFooter && isLastResponse}
       compactMode={compactMode}
       onBranch={onBranch && resp.messageId ? (options?: { newPanel?: boolean }) => onBranch(resp.messageId!, options) : undefined}
       onRestore={onRestore && restoreUserMessageId ? () => onRestore(restoreUserMessageId) : undefined}
@@ -1764,6 +1817,100 @@ export const TurnCard = React.memo(function TurnCard({
       annotationInteractionMode={annotationInteractionMode}
     />
   )
+
+  if (appearance === 'chat') {
+    const renderActivityMessage = (activity: ActivityItem) => renderResponse({
+      text: activity.content ?? '',
+      isStreaming: activity.status === 'running' || activity.status === 'pending',
+      isPlan: activity.type === 'plan',
+      messageId: activity.messageId ?? activity.id,
+      annotations: activity.annotations,
+      timestamp: activity.timestamp,
+    }, activity.type === 'plan' && !activity.parentId)
+
+    const renderItem = (item: TranscriptItem): React.ReactNode => {
+      if (item.kind === 'response') return renderResponse(item.response)
+      if (item.kind === 'subagent') {
+        return <InlineSubagentBlock
+          group={item.group}
+          sessionId={sessionId}
+          sessionFolderPath={sessionFolderPath}
+          onOpenFile={onOpenFile}
+          onOpenUrl={onOpenUrl}
+          onOpenDetails={onOpenActivityDetails}
+          searchQuery={searchQuery}
+          openMessageId={openAnnotationRequest?.messageId}
+          renderMessage={renderActivityMessage}
+        />
+      }
+      const activity = item.activity
+      if (activity.type === 'intermediate' || activity.type === 'plan') {
+        return renderActivityMessage(activity)
+      }
+      return <InlineToolBlock
+        activity={activity}
+        sessionId={sessionId}
+        sessionFolderPath={sessionFolderPath}
+        onOpenFile={onOpenFile}
+        onOpenUrl={onOpenUrl}
+        onOpenDetails={onOpenActivityDetails}
+        searchQuery={searchQuery}
+        openMessageId={openAnnotationRequest?.messageId}
+      />
+    }
+
+    const renderMessages = (messages: TranscriptMessage[]) => messages.map(message => (
+      <div key={message.id} data-transcript-message={message.id} className="flex min-w-0 flex-col gap-1">
+        {message.items.map((item, index) => {
+          const id = item.kind === 'response' ? item.response.messageId
+            : item.kind === 'subagent' ? item.group.parent.id : item.activity.id
+          return <React.Fragment key={id ?? index}>{renderItem(item)}</React.Fragment>
+        })}
+      </div>
+    ))
+
+    const summaryText = (counts: TranscriptCounts) => [
+      counts.tools > 0 && t('turnCard.toolCallsCount', { count: counts.tools, defaultValue: `${counts.tools} tool ${counts.tools === 1 ? 'call' : 'calls'}` }),
+      counts.messages > 0 && t('turnCard.messagesCount', { count: counts.messages, defaultValue: `${counts.messages} ${counts.messages === 1 ? 'message' : 'messages'}` }),
+      counts.subagents > 0 && t('turnCard.subagentsCount', { count: counts.subagents, defaultValue: `${counts.subagents} ${counts.subagents === 1 ? 'subagent' : 'subagents'}` }),
+    ].filter(Boolean).join(', ')
+
+    const containsRequestedMessage = (messages: TranscriptMessage[]) => messages.some(message => message.items.some(item => {
+      const activity = item.kind === 'activity' ? item.activity : undefined
+      const children = item.kind === 'subagent' ? item.group.children : []
+      const candidates = activity ? [activity] : children
+      if (openAnnotationRequest && candidates.some(candidate => (candidate.messageId ?? candidate.id) === openAnnotationRequest.messageId)) return true
+      return !!searchQuery?.trim() && candidates.some(candidate => isNarrativeActivity(candidate) && candidate.content?.toLocaleLowerCase().includes(searchQuery.trim().toLocaleLowerCase()))
+    }))
+
+    const renderSection = (section: TranscriptSection): React.ReactNode => section.kind === 'message'
+      ? <React.Fragment key={`message:${section.message.id}`}>{renderMessages([section.message])}</React.Fragment>
+      : <InlineDisclosure
+              key={section.id}
+              id={section.id}
+              sessionId={sessionId}
+              icon={section.kind === 'mcp' ? <Globe className="size-4" /> : <ListTodo className="size-4" />}
+              title={section.kind === 'mcp'
+                ? section.messages[0]?.items.map(backing => backing.kind === 'activity' && backing.activity.toolDisplayMeta?.category === 'source' ? backing.activity.toolDisplayMeta.displayName : undefined).find(Boolean) ?? section.server
+                : summaryText(section.counts)}
+              preview={section.kind === 'mcp' ? summaryText(section.counts) : undefined}
+              defaultExpanded={section.kind === 'summary' && (section.defaultExpanded || defaultExpanded)}
+              forceExpanded={containsRequestedMessage(section.messages)}
+              error={section.counts.failed > 0}
+              bodyClassName="ml-[5px] mt-0 flex min-w-0 flex-col gap-1 border-l border-subtle pl-3.5"
+            >
+              {section.kind === 'summary'
+                ? groupMcpMessages(section.messages).map(renderSection)
+                : renderMessages(section.messages)}
+            </InlineDisclosure>
+
+    return (
+      <div className="conductor-chat flex min-w-0 flex-col gap-1" data-chat-appearance="chat">
+        {presentation.map(renderSection)}
+        {thinkingLabel && <ThinkingRow label={thinkingLabel} />}
+      </div>
+    )
+  }
 
   // A turn is a quiet work log + the answer, 10px apart (spec §7.4, mockup `.turn`)
   return (
@@ -1862,6 +2009,8 @@ export const TurnCard = React.memo(function TurnCard({
 
   // Always re-render incomplete turns
   if (!prev.isComplete || !next.isComplete) return false
+
+  if (prev.appearance !== next.appearance || prev.searchQuery !== next.searchQuery) return false
 
   // Re-render if expansion state changed
   if (prev.isExpanded !== next.isExpanded) return false

@@ -58,3 +58,5 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 - **Project empty-state creation** — The New Session button inside an empty project list uses the same project-aware creation action as the global button. New drafts appear immediately in that project. (#4)
 
 - **Compact chat controls** — Remove the shortcut hint row and its reserved space, keep a static input prompt, and move Projects above Labels. Chats use Execute without a mode selector, slash-mode commands or keyboard cycling. (#4)
+
+- **Conductor-style chat** — Ordered commentary, selective work summaries and inline tool/subagent results, with scoped message styles and a compact composer that preserves the existing model, context and Execute preferences.

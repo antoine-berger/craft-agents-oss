@@ -1,3 +1,4 @@
+import type { PendingUserQuestion, UserQuestionResponse } from '@craft-agent/core/types'
 /**
  * Server DTO types — data shapes used by RPC handlers and SessionManager.
  *
@@ -8,6 +9,7 @@
 
 import type {
   Message,
+  ResponseUsage,
   TypedError,
   ContentBadge,
   ToolDisplayMeta,
@@ -454,12 +456,13 @@ export interface PermissionModeState {
 
 // turnId: Correlation ID from the API's message.id, groups all events in an assistant turn
 export type SessionEvent =
+  | { type: 'question_changed'; sessionId: string; request: PendingUserQuestion | null }
   | { type: 'session_restored'; sessionId: string; session: Session }
   | { type: 'text_discard'; sessionId: string; turnId: string }
   | { type: 'retry'; sessionId: string; phase: 'backoff'; message: string }
   | { type: 'retry'; sessionId: string; phase: 'active' | 'end' }
-  | { type: 'text_delta'; sessionId: string; delta: string; turnId?: string }
-  | { type: 'text_complete'; sessionId: string; text: string; isIntermediate?: boolean; turnId?: string; parentToolUseId?: string; timestamp?: number; messageId?: string }
+  | { type: 'text_delta'; sessionId: string; delta: string; turnId?: string; parentToolUseId?: string; contentKind?: 'thinking'; blockId?: string; timestamp?: number }
+  | { type: 'text_complete'; sessionId: string; text: string; isIntermediate?: boolean; turnId?: string; parentToolUseId?: string; timestamp?: number; messageId?: string; contentKind?: 'thinking'; blockId?: string; startedAt?: number; responseUsage?: ResponseUsage }
   | { type: 'tool_start'; sessionId: string; toolName: string; toolUseId: string; toolInput: Record<string, unknown>; toolIntent?: string; toolDisplayName?: string; toolDisplayMeta?: ToolDisplayMeta; turnId?: string; parentToolUseId?: string; timestamp?: number }
   // toolInput: replaces the input sent with tool_start (a browser_tool password fill is redacted once its result is known)
   | { type: 'tool_result'; sessionId: string; toolUseId: string; toolName: string; result: string; turnId?: string; parentToolUseId?: string; isError?: boolean; timestamp?: number; toolInput?: Record<string, unknown> }
@@ -534,6 +537,8 @@ export interface SendMessageOptions {
 // ---------------------------------------------------------------------------
 
 export type SessionCommand =
+  | { type: 'getPendingQuestion' }
+  | { type: 'respondToQuestion'; requestId: string; response: UserQuestionResponse }
   | { type: 'resumeFailed' }
   | { type: 'flag' }
   | { type: 'unflag' }

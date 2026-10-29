@@ -1,3 +1,4 @@
+import { AskUserQuestionSchema, handleAskUserQuestion, ASK_USER_QUESTION_DESCRIPTION } from './handlers/ask-user-question'
 import { RequestUserInputSchema, MarkAttentionSchema, handleRequestUserInput, handleMarkAttention, REQUEST_USER_INPUT_DESCRIPTION, MARK_ATTENTION_DESCRIPTION } from './handlers/attention'
 /**
  * Session Tool Definitions — Single Source of Truth
@@ -834,6 +835,7 @@ export type SessionToolDef = RegistrySessionToolDef | BackendSessionToolDef;
 // ============================================================
 
 export const SESSION_TOOL_DEFS: SessionToolDef[] = [
+  { name: 'AskUserQuestion', description: ASK_USER_QUESTION_DESCRIPTION, inputSchema: AskUserQuestionSchema, executionMode: 'registry', safeMode: 'allow', handler: handleAskUserQuestion },
   { name: 'SubmitPlan', description: TOOL_DESCRIPTIONS.SubmitPlan, inputSchema: SubmitPlanSchema, executionMode: 'registry', safeMode: 'allow', handler: handleSubmitPlan },
   { name: 'config_validate', description: TOOL_DESCRIPTIONS.config_validate, inputSchema: ConfigValidateSchema, executionMode: 'registry', safeMode: 'allow', readOnly: true, handler: handleConfigValidate },
   { name: 'skill_validate', description: TOOL_DESCRIPTIONS.skill_validate, inputSchema: SkillValidateSchema, executionMode: 'registry', safeMode: 'allow', readOnly: true, handler: handleSkillValidate },

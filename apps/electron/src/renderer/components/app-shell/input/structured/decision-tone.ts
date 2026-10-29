@@ -18,7 +18,7 @@ export function knownPermissionRisks(request: Pick<PermissionRequest, 'risks'>):
  * the prompt, its buttons and its outcome are unchanged.
  */
 export function getDecisionTone(state: StructuredInputState | undefined): DecisionTone | null {
-  if (!state) return null
+  if (!state || state.type === 'question') return null
   if (state.type === 'permission') {
     return knownPermissionRisks(state.data as PermissionRequest).length > 0 ? 'danger' : 'info'
   }

@@ -1,0 +1,3 @@
+.chat-turn-navigation { --chat-outline-plan: var(--accent-text); --chat-outline-plan-text: var(--text); }
+html[data-theme="conductor"] .chat-turn-navigation { --chat-outline-plan: #cca694; --chat-outline-plan-text: #2c2826; }
+html.dark[data-theme="conductor"] .chat-turn-navigation { --chat-outline-plan: #836967; --chat-outline-plan-text: #f3f2f1; }

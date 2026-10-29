@@ -1,55 +1,54 @@
 import { useTranslation } from 'react-i18next'
 import { ArrowUp, Square } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
 
-/**
- * Round send control, the same 28px as the toolbar chips beside it (36px ≤ 768px via the
- * `send-btn` hook, like the chips' `input-toolbar-btn`). Neutral while empty (the primary's
- * disabled fill), solid accent when ready, and the same solid accent as Stop while processing —
- * the control morphs instead of going grey, so a running turn reads as live and stoppable.
- * Press scales to .94 (spec §6.3).
- */
 const SEND_BASE = 'send-btn shrink-0 rounded-full enabled:active:[transform:scale(calc(1_-_0.06*var(--motion-scale)))]'
 
 interface SendButtonProps {
-  /** Processing: renders Stop instead of Send */
   isProcessing: boolean
-  /** Send is not possible (no content, disabled input or tutorial gate) */
+  /** Send is not possible (no content, disabled input or tutorial gate). */
   disabled: boolean
   onStop: () => void
+  /** A running chat can still send its draft through the existing submission handler. */
+  appearance?: 'default' | 'chat'
 }
 
-export function SendButton({ isProcessing, disabled, onStop }: SendButtonProps) {
+export function SendButton({ isProcessing, disabled, onStop, appearance = 'default' }: SendButtonProps) {
   const { t } = useTranslation()
-
-  if (isProcessing) {
-    return (
-      <Button
-        type="button"
-        variant="primary"
-        size="icon"
-        aria-label={t('chat.stopResponse')}
-        data-state="stop"
-        className={SEND_BASE}
-        onClick={onStop}
-      >
-        <Square className="size-2.5 fill-current" />
-      </Button>
-    )
-  }
+  const isChat = appearance === 'chat'
+  const showSend = !isProcessing || (isChat && !disabled)
+  const primaryClass = isChat ? 'bg-foreground text-[var(--surface-paper)] hover:bg-foreground/80 disabled:bg-foreground/50 disabled:text-[var(--surface-paper)]' : undefined
 
   return (
-    <Button
-      type="submit"
-      variant="primary"
-      size="icon"
-      aria-label={t('shortcuts.sendMessage')}
-      data-state={disabled ? 'idle' : 'ready'}
-      className={SEND_BASE}
-      disabled={disabled}
-      data-tutorial="send-button"
-    >
-      <ArrowUp className="size-4" />
-    </Button>
+    <>
+      {isProcessing && (
+        <Button
+          type="button"
+          variant={showSend || isChat ? 'ghost' : 'primary'}
+          size="icon"
+          aria-label={t('chat.stopResponse')}
+          data-state="stop"
+          className={cn(SEND_BASE, showSend ? 'border border-strong bg-paper' : primaryClass)}
+          onClick={onStop}
+        >
+          <Square className="size-2.5 fill-current" />
+        </Button>
+      )}
+      {showSend && (
+        <Button
+          type="submit"
+          variant={isChat ? 'ghost' : 'primary'}
+          size="icon"
+          aria-label={t('shortcuts.sendMessage')}
+          data-state={disabled ? 'idle' : 'ready'}
+          className={cn(SEND_BASE, primaryClass)}
+          disabled={disabled}
+          data-tutorial="send-button"
+        >
+          <ArrowUp className="size-4" strokeWidth={isChat ? 1.5 : 2} />
+        </Button>
+      )}
+    </>
   )
 }

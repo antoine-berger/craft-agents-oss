@@ -84,6 +84,10 @@ export const ANSWER_PROSE = [
   'in-data-compact:[&_.inline-code]:text-label-lg',
 ].join(' ')
 
+/** Used only by the interactive transcript's opt-in chat appearance. */
+export const CHAT_ANSWER_PROSE =
+  'text-[14px] leading-6 text-foreground [&_.markdown-content>:first-child]:mt-0 [&_.markdown-content>:last-child]:mb-0'
+
 /**
  * New answer blocks fade in once while streaming (150ms, ≤ 4px rise, spec §6.4). Only applied
  * while the response streams: a block that already exists never re-animates, and text inside a

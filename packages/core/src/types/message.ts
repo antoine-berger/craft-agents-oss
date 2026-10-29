@@ -247,6 +247,18 @@ export interface StoredAttachment {
   resizedBase64?: string;        // Base64 of resized image (only when wasResized=true, for Claude API)
 }
 
+/** Provider-reported usage for the assistant messages in this response, never session totals. */
+export interface ResponseUsage {
+  model?: string;
+  models?: string[];
+  inputTokens?: number;
+  outputTokens?: number;
+  cacheReadTokens?: number;
+  cacheCreationTokens?: number;
+  /** Present only when the provider explicitly reports fast/standard speed. */
+  fast?: boolean;
+}
+
 /**
  * Runtime message type (includes transient fields like isStreaming)
  */
@@ -254,6 +266,11 @@ export interface Message {
   id: string;
   role: MessageRole;
   content: string;
+  /** Only reasoning actually exposed by the provider is tagged as thinking. */
+  contentKind?: 'thinking';
+  /** First provider delta, for transcript order; timestamp remains the completion time. */
+  startedAt?: number;
+  responseUsage?: ResponseUsage;
   timestamp: number;
   // Tool-specific fields
   toolName?: string;
@@ -347,6 +364,10 @@ export interface StoredMessage {
   id: string;
   type: MessageRole;
   content: string;
+  contentKind?: 'thinking';
+  /** First provider delta, for transcript order; timestamp remains the completion time. */
+  startedAt?: number;
+  responseUsage?: ResponseUsage;
   timestamp?: number;
   // Tool-specific fields
   toolName?: string;
@@ -577,8 +598,8 @@ export type AgentEvent =
   | { type: 'retry'; phase: 'active' | 'end' }
   | { type: 'status'; message: string }
   | { type: 'info'; message: string; compactionTrigger?: 'manual' | 'auto' }
-  | { type: 'text_delta'; text: string; turnId?: string; parentToolUseId?: string }
-  | { type: 'text_complete'; text: string; isIntermediate?: boolean; turnId?: string; parentToolUseId?: string; sdkMessageId?: string }
+  | { type: 'text_delta'; text: string; turnId?: string; parentToolUseId?: string; contentKind?: 'thinking'; blockId?: string }
+  | { type: 'text_complete'; text: string; isIntermediate?: boolean; turnId?: string; parentToolUseId?: string; sdkMessageId?: string; contentKind?: 'thinking'; blockId?: string; responseUsage?: ResponseUsage }
   | { type: 'pi_turn_anchor'; sdkMessageId: string; sdkTurnAnchor: string }
   | { type: 'tool_start'; toolName: string; toolUseId: string; input: Record<string, unknown>; intent?: string; displayName?: string; turnId?: string; parentToolUseId?: string; toolDisplayMeta?: ToolDisplayMeta }
   | { type: 'tool_result'; toolUseId: string; toolName?: string; result: string; isError: boolean; input?: Record<string, unknown>; turnId?: string; parentToolUseId?: string }
