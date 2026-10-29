@@ -125,3 +125,24 @@ test('a late reply from a previous server cannot overwrite the newly selected se
   expect(readQuotaDisplay('old-server').snapshot).toBeUndefined()
   expect(readQuotaDisplay('new-server').snapshot?.accounts[0]?.windows[0]?.usedPercent).toBe(75)
 })
+
+test('manual refresh recovers the account inventory immediately after a failed initial read', async () => {
+  offline = true; await mount(); expect(calls).toHaveLength(1)
+  offline = false
+  await act(async () => { await result.refresh(true) })
+  expect(calls.slice(1)).toEqual([{ refresh: false }, { refresh: true, accountId: 'a' }])
+  expect(result.snapshot?.accounts[0]?.windows[0]?.usedPercent).toBe(25)
+})
+
+test('changing selection during a pending request retains that selection and refreshes the new account next', async () => {
+  let finish!: (value: ProviderQuotasSnapshot) => void
+  const pending = new Promise<ProviderQuotasSnapshot>(resolve => { finish = resolve })
+  const reader = async (request: ProviderQuotasRequest = {}) => request.refresh && request.accountId === 'a' ? pending : getQuotas(request)
+  await act(async () => { root = create(<Probe reader={reader} />) })
+  await act(async () => { result.setSelectedId('b') })
+  server = [account('a', 25), account('b')]
+  await act(async () => { finish(snapshot(server)); await Promise.resolve() })
+  expect(result.selectedId).toBe('b')
+  expect(calls.at(-1)).toEqual({ refresh: true, accountId: 'b' })
+  expect(result.snapshot?.accounts.map(value => value.windows[0]?.usedPercent)).toEqual([25, 75])
+})

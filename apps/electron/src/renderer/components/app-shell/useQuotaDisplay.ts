@@ -27,11 +27,12 @@ export function useQuotaDisplay(getQuotas: GetQuotas, scope: string) {
     const current = state.current
     const account = current.snapshot?.accounts.find(value => !value.disabled && value.accountId === current.selectedId)
       ?? current.snapshot?.accounts.find(value => !value.disabled)
-    if (!cachedOnly && (!account || (!manual && (!quotaRefreshDue(account, Date.now()) || (lastFailureAt.current.accountId === account.accountId && Date.now() - lastFailureAt.current.at < QUOTA_REFRESH_MS))))) return
+    const readCacheOnly = cachedOnly || (manual && !account)
+    if (!readCacheOnly && (!account || (!manual && (!quotaRefreshDue(account, Date.now()) || (lastFailureAt.current.accountId === account.accountId && Date.now() - lastFailureAt.current.at < QUOTA_REFRESH_MS))))) return
     pending.current = true
     setBusy(true)
     try {
-      const incoming = await request.current({ refresh: !cachedOnly, ...(!cachedOnly ? { accountId: account!.accountId } : {}) })
+      const incoming = await request.current({ refresh: !readCacheOnly, ...(!readCacheOnly ? { accountId: account!.accountId } : {}) })
       if (!mounted.current) return
       const value = mergeQuotaSnapshot(state.current.snapshot, incoming)
       state.current = { ...state.current, snapshot: value }
