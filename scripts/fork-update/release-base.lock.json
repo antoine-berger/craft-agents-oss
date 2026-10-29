@@ -54,7 +54,7 @@
     "apps/electron/src/renderer/event-processor/handlers/text.ts": "e46a290e9ebb28b647d31799da3cc207e1e4d510a5cc1ddf6ce75f2567b104ca",
     "apps/electron/src/renderer/components/app-shell/chat-header/pr-watch/ChatHeaderPrChip.tsx": "02d745ca79922378a66d013a9672c840fba08ef9a78a61059138cd2cde8943b4",
     "apps/electron/src/renderer/components/app-shell/chat-header/pr-watch/pr-quick-actions.ts": "bd307e4f89f0e8292172e88b74c603c077e590e77e798b86edc694e18dcc22e3",
-    "apps/electron/src/renderer/components/app-shell/chat-header/pr-watch/PrQuickActions.tsx": "5dc45f3e05b97fd5b7c698a3e01907705e551bc40ef7c66d164949e65fde8141",
+    "apps/electron/src/renderer/components/app-shell/chat-header/pr-watch/PrQuickActions.tsx": "fb0c27211e92965cdcc02fe616a93365af6768cf64017608d7a0a67c61215563",
     "apps/electron/src/renderer/components/app-shell/SessionStatusIcon.tsx": "2a220ac58c1a4faa0fc31f608aa0e8e597d0677ca158143bfe89f3e668fd8b4c",
     "apps/electron/src/renderer/components/app-shell/chat-header/pr-watch/pr-watch-state.ts": "0a8ecf1553517ba3cba5060336badba687b319a2c3689dabac13acda9e86c2b3",
     "apps/electron/src/renderer/components/app-shell/chat-header/pr-watch/pr-watch-visuals.tsx": "010de4e37229b0aae043d649b8d09c0552b56039a6abcc0fa4086596f623d414"
