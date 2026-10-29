@@ -917,19 +917,13 @@ export default function App() {
             break
           }
           case 'restore_input': {
-            // Queued messages were removed from chat on abort — restore their text to the input field.
-            // Append to existing draft (user may have started typing) rather than overwrite.
-            const existingDraft = sessionDraftsRef.current.get(sessionId)
-            const existingText = coerceInputText(existingDraft?.text)
-            const restoredText = coerceInputText(effect.text)
-            const restored = existingText
-              ? `${existingText}\n\n${restoredText}`
-              : restoredText
-            handleInputChange(sessionId, restored)
-            // handleInputChange updates the ref but ChatPage has local state.
-            // Dispatch a custom event so ChatPage re-reads the draft.
+            // Restore the canceled payload alongside anything already drafted.
+            const restored = recoverSubmissionDraft(sessionDraftsRef.current.get(sessionId), coerceInputText(effect.text), effect.attachments)
+            handleInputChange(sessionId, restored.text)
+            sessionDraftsRef.current.set(sessionId, restored)
+            void window.electronAPI.setDraft(sessionId, restored).catch(cause => console.error('Could not persist restored queue:', cause))
             window.dispatchEvent(new CustomEvent('craft:restore-input', {
-              detail: { sessionId, text: restored },
+              detail: { sessionId, text: restored.text, attachments: effect.attachments },
             }))
             break
           }
@@ -965,7 +959,7 @@ export default function App() {
       if (!('sessionId' in event)) return
 
       const sessionId = event.sessionId
-      if (event.type === 'session_archived') sessionSubmissions.cancel(sessionId)
+      if (event.type === 'session_archived' || event.type === 'session_restored') sessionSubmissions.cancel(sessionId)
       const workspaceId = windowWorkspaceId ?? ''
 
       // Session lifecycle events are handled explicitly (not by the agent event processor).
@@ -1461,10 +1455,14 @@ export default function App() {
       })
     } catch (error) {
       if (!(error instanceof SubmissionCancelled)) sessionSubmissions.cancel(sessionId)
-      const recovered = recoverSubmissionDraft(sessionDraftsRef.current.get(sessionId), message, attachments)
-      sessionDraftsRef.current.set(sessionId, recovered)
-      void window.electronAPI.setDraft(sessionId, recovered).catch(cause => console.error('Could not persist recovered submission:', cause))
-      window.dispatchEvent(new CustomEvent('craft:restore-input', { detail: { sessionId, text: recovered.text, attachments } }))
+      const confirmed = optimisticMessageId !== undefined && store.get(sessionAtomFamily(sessionId))?.messages
+        .some(item => item.id === optimisticMessageId && !item.isPending)
+      if (!confirmed) {
+        const recovered = recoverSubmissionDraft(sessionDraftsRef.current.get(sessionId), message, attachments)
+        sessionDraftsRef.current.set(sessionId, recovered)
+        void window.electronAPI.setDraft(sessionId, recovered).catch(cause => console.error('Could not persist recovered submission:', cause))
+        window.dispatchEvent(new CustomEvent('craft:restore-input', { detail: { sessionId, text: recovered.text, attachments } }))
+      }
       if (error instanceof SubmissionCancelled) return
       console.error('Failed to send message:', error)
       updateSessionById(sessionId, (s) => ({

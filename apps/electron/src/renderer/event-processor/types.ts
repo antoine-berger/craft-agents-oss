@@ -5,6 +5,7 @@
  * All agent events flow through a single pure function for consistent state transitions.
  */
 
+import type { FileAttachment } from '@craft-agent/shared/protocol'
 import type { Session, SessionEvent, Message, PermissionRequest, CredentialRequest, TypedError, PermissionMode, SessionStatus, AuthRequest, ToolDisplayMeta } from '../../shared/types'
 
 /** Explicit SDK retry boundaries; keep their transport shape authoritative. */
@@ -270,6 +271,7 @@ export interface InterruptedEvent {
   message?: Message
   /** Messages that were queued but not processed — should be restored to input field */
   queuedMessages?: string[]
+  queuedAttachments?: FileAttachment[]
 }
 
 /**
@@ -592,7 +594,7 @@ export type Effect =
   | { type: 'credential_request'; request: CredentialRequest }
   | { type: 'generate_title'; sessionId: string; userMessage: string }
   | { type: 'permission_mode_changed'; sessionId: string; permissionMode: PermissionMode; previousPermissionMode?: PermissionMode; transitionDisplay?: string; modeVersion?: number; changedAt?: string; changedBy?: 'user' | 'system' | 'restore' | 'automation' | 'unknown' }
-  | { type: 'restore_input'; text: string }
+  | { type: 'restore_input'; text: string; attachments?: FileAttachment[] }
   | { type: 'toast_error'; message: string }
 
 /**

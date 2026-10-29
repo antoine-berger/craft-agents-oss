@@ -7653,6 +7653,12 @@ export class SessionManager implements ISessionManager {
       // before we tell the renderer "accepted" — `persistSession` only
       // enqueues with a 500ms debounce. (#616 reliability fix.)
       await this.flushSession(managed.id)
+      if ((managed.stopEpoch ?? 0) !== turnStopEpoch && !managed.isArchived && !managed.isDeleting) {
+        // Stop already restored this queued payload. A successful persistence
+        // ACK must not trigger a second client-side recovery of the same send.
+        onAck?.(userMessage.id)
+        return
+      }
       this.assertSessionRunnable(managed, turnStopEpoch)
       onAck?.(userMessage.id)
       return
@@ -7695,6 +7701,13 @@ export class SessionManager implements ISessionManager {
       // `persistSession` is debounced (500ms). #616.
       this.persistSession(managed)
       await this.flushSession(managed.id)
+      if ((managed.stopEpoch ?? 0) !== turnStopEpoch) {
+        // This fresh message was stopped before acceptance. The client restores
+        // its draft; do not also feed the canceled copy into the next turn.
+        managed.messages = managed.messages.filter(item => item !== userMessage)
+        this.persistSession(managed)
+        await this.flushSession(managed.id)
+      }
       this.assertSessionRunnable(managed, turnStopEpoch)
       onAck?.(userMessage.id)
 
@@ -8215,9 +8228,10 @@ export class SessionManager implements ISessionManager {
 
   async cancelProcessing(sessionId: string, silent = false): Promise<void> {
     const managed = this.sessions.get(sessionId)
-    if (!managed?.isProcessing) {
-      return // Not processing, nothing to cancel
+    if (!managed || (!managed.isProcessing && !managed.checkpointPendingSends && !managed.queueReplayScheduled)) {
+      return
     }
+    const wasProcessing = managed.isProcessing
 
     sessionLog.info('Cancelling processing for session:', sessionId, silent ? '(silent)' : '')
 
@@ -8228,6 +8242,7 @@ export class SessionManager implements ISessionManager {
 
     // Collect queued message text for input restoration before clearing
     const queuedTexts = managed.messageQueue.map(q => q.message)
+    const queuedAttachments = managed.messageQueue.flatMap(q => q.attachments ?? [])
 
     // Collect queued message IDs so we can remove them from the messages array
     // (they were added when sendMessage was called during processing)
@@ -8246,18 +8261,18 @@ export class SessionManager implements ISessionManager {
 
     // Signal intent to stop - let the event loop drain remaining events before clearing isProcessing
     // This prevents losing in-flight messages after soft interrupt
-    managed.stopRequested = true
+    managed.stopRequested = wasProcessing
     // Prompts of the stopped turn can no longer be answered, and a turn still being prepared must
     // not start (see the risk-badge path and sendMessage).
     managed.stopEpoch = (managed.stopEpoch ?? 0) + 1
 
     // Track interruption so the next user message gets a context note
     // telling the LLM the previous response was cut short
-    managed.wasInterrupted = true
+    managed.wasInterrupted = wasProcessing || managed.wasInterrupted
 
     // Stop the turn, keeping background agents alive where the backend can (Claude keep-alive);
     // otherwise hard-abort.
-    if (managed.agent && !managed.agent.stopTurn?.()) {
+    if (wasProcessing && managed.agent && !managed.agent.stopTurn?.()) {
       managed.agent.forceAbort(AbortReason.UserStop)
     }
 
@@ -8277,6 +8292,7 @@ export class SessionManager implements ISessionManager {
         message: interruptedMessage,
         // Include queued texts so the UI can restore them to the input field
         ...(queuedTexts.length > 0 ? { queuedMessages: queuedTexts } : {}),
+        ...(queuedAttachments.length > 0 ? { queuedAttachments } : {}),
       }, managed.workspace.id)
     } else {
       // Still send interrupted event but without the message (for UI state update)
@@ -8285,7 +8301,20 @@ export class SessionManager implements ISessionManager {
         sessionId,
         // Include queued texts so the UI can restore them to the input field
         ...(queuedTexts.length > 0 ? { queuedMessages: queuedTexts } : {}),
+        ...(queuedAttachments.length > 0 ? { queuedAttachments } : {}),
       }, managed.workspace.id)
+    }
+
+    // A send can be awaiting its persistence ACK before a model turn exists.
+    // The epoch invalidates that send without interrupting an idle backend's
+    // background work or running the active-turn completion machinery.
+    if (!wasProcessing) {
+      managed.queueReplayScheduled = false
+      managed.queueReplayMessageId = undefined
+      managed.queueReplayEntries = undefined
+      this.persistSession(managed)
+      await this.flushSession(managed.id)
+      return
     }
 
     // Preparation may still be waiting on I/O, with no backend iterator to drain.

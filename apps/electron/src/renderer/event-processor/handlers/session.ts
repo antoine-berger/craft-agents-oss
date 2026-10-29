@@ -364,6 +364,7 @@ export function handleInterrupted(
     effects.push({
       type: 'restore_input',
       text: event.queuedMessages.join('\n\n'),
+      ...(event.queuedAttachments?.length ? { attachments: event.queuedAttachments } : {}),
     })
   }
 
