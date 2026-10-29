@@ -440,6 +440,7 @@ export interface TaskCompletedEvent {
   type: 'task_completed'
   sessionId: string
   taskId: string
+  toolUseId?: string
   status: 'completed' | 'failed' | 'stopped'
   outputFile?: string
   summary?: string

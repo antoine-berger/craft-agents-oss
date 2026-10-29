@@ -9,7 +9,7 @@
 import { basename, join } from 'node:path';
 import type { SessionToolContext } from '../context.ts';
 import type { ToolResult, SourceConfig, ConnectionStatus } from '../types.ts';
-import { errorResponse } from '../response.ts';
+import { errorResponse, successResponse } from '../response.ts';
 import {
   validateJsonFileHasFields,
   validateSourceConfigBasic,
@@ -76,6 +76,19 @@ export async function handleSourceTest(
   let hasWarnings = false;
   let connectionStatus: ConnectionStatus = 'unknown';
   let connectionError: string | undefined;
+
+  // Automatic claude.ai connectors have no config.json or Craft-owned OAuth.
+  if (/^claudeai-[a-f0-9]{20}$/.test(sourceSlug) && ctx.testAutomaticSource) {
+    try {
+      const result = await ctx.testAutomaticSource(sourceSlug);
+      if (!result) return errorResponse('Automatic connector is not available for the currently selected Claude account.');
+      if (result.status === 'needs_auth') return errorResponse(`${result.name} needs authentication. Reconnect it in claude.ai Settings → Connectors, then run source_test again. This does not change your model routing.`);
+      if (result.status !== 'connected') return errorResponse(`${result.name} could not be reached. Retry source_test after the connection recovers.`);
+      return successResponse(`${result.name} connected: ${result.toolCount} tools discovered. Recovered tools are available on the next message; the current turn is not interrupted.`);
+    } catch {
+      return errorResponse('Automatic connector discovery failed. Retry source_test; no credentials or configuration were changed.');
+    }
+  }
 
   // 1. Check source exists
   if (!sourceExists(ctx.workspacePath, sourceSlug)) {

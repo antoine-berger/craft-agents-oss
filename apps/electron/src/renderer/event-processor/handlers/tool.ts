@@ -1,3 +1,4 @@
+import { settleToolStatuses, mergeTerminalToolOutput } from '@craft-agent/shared/sessions/tool-status'
 /**
  * Tool Event Handlers
  *
@@ -94,7 +95,15 @@ export function handleToolResult(
     // If the tool is already backgrounded, preserve that status — task_completed will set the final status.
     // tool_result arrives with the agentId but the task is still running in the background.
     const existingMessage = session.messages[toolIndex]
-    const isBackgrounded = existingMessage?.toolStatus === 'backgrounded' || existingMessage?.isBackground
+    if (existingMessage?.isBackground && (existingMessage.taskId || existingMessage.shellId)
+      && (existingMessage.toolStatus === 'completed' || existingMessage.toolStatus === 'error')) {
+      return { session: updateMessageAt(session, toolIndex, {
+        toolResult: mergeTerminalToolOutput(existingMessage.toolResult, event.result),
+        ...(event.toolInput ? { toolInput: event.toolInput } : {}),
+      }), streaming }
+    }
+    const isBackgrounded = existingMessage?.toolStatus === 'backgrounded'
+      || (existingMessage?.isBackground && existingMessage.toolStatus !== 'completed' && existingMessage.toolStatus !== 'error')
     const newToolStatus = isBackgrounded ? 'backgrounded' : (effectiveIsError ? 'error' : 'completed')
 
     // Update existing tool message
@@ -106,28 +115,11 @@ export function handleToolResult(
       ...(event.toolInput ? { toolInput: event.toolInput } : {}),
     })
 
-    // Safety net: when a parent Task completes, auto-complete any still-pending child tools.
-    // This handles the case where child tool_result events never arrive.
     const completedTool = updatedSession.messages[toolIndex]
     if (completedTool && (isParentTaskTool(completedTool.toolName || '') || completedTool.toolName === 'TaskOutput')) {
-      const hasOrphanedChildren = updatedSession.messages.some(
-        m => m.parentToolUseId === event.toolUseId
-          && m.toolStatus !== 'completed'
-          && m.toolStatus !== 'error'
-      )
-      if (hasOrphanedChildren) {
-        const updatedMessages = updatedSession.messages.map(m => {
-          if (
-            m.parentToolUseId === event.toolUseId
-            && m.toolStatus !== 'completed'
-            && m.toolStatus !== 'error'
-          ) {
-            return { ...m, toolStatus: 'completed' as const, toolResult: m.toolResult || '' }
-          }
-          return m
-        })
-        updatedSession = { ...updatedSession, messages: updatedMessages }
-      }
+      updatedSession = { ...updatedSession, messages: settleToolStatuses(updatedSession.messages, {
+        rootToolUseId: event.toolUseId, reason: effectiveIsError ? 'error' : 'complete',
+      }) }
     }
 
     return { session: updatedSession, streaming }
@@ -184,6 +176,8 @@ export function handleTaskBackgrounded(
   const toolIndex = findToolMessage(session.messages, event.toolUseId)
 
   if (toolIndex !== -1) {
+    const existing = session.messages[toolIndex]!
+    if (existing.isBackground && existing.taskId === event.taskId && (existing.toolStatus === 'completed' || existing.toolStatus === 'error')) return state
     // Update tool status to backgrounded and add task ID
     const updatedSession = updateMessageAt(session, toolIndex, {
       toolStatus: 'backgrounded',
@@ -213,6 +207,9 @@ export function handleShellBackgrounded(
   const toolIndex = findToolMessage(session.messages, event.toolUseId)
 
   if (toolIndex !== -1) {
+    const existing = session.messages[toolIndex]!
+    if (existing.isBackground && (existing.shellId === event.shellId || existing.taskId === event.shellId)
+      && (existing.toolStatus === 'completed' || existing.toolStatus === 'error')) return state
     // Update tool status to backgrounded and add shell ID
     const updatedSession = updateMessageAt(session, toolIndex, {
       toolStatus: 'backgrounded',
@@ -267,12 +264,13 @@ export function handleTaskCompleted(
   const { session, streaming } = state
 
   // Find the tool message by taskId (set when task_backgrounded was processed)
-  const toolIndex = session.messages.findIndex(m => m.taskId === event.taskId)
+  const toolIndex = session.messages.findIndex(m => m.taskId === event.taskId || m.shellId === event.taskId || (!!event.toolUseId && m.toolUseId === event.toolUseId))
 
   if (toolIndex !== -1) {
     const updatedSession = updateMessageAt(session, toolIndex, {
+      isBackground: true, taskId: event.taskId, isError: event.status === 'failed',
       toolStatus: event.status === 'failed' ? 'error' : 'completed',
-      toolResult: event.summary || `Background task ${event.status}`,
+      toolResult: mergeTerminalToolOutput(event.summary || `Background task ${event.status}`, session.messages[toolIndex]?.toolResult ?? ''),
     })
     return { session: updatedSession, streaming }
   }

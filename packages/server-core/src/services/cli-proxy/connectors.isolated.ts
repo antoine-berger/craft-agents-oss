@@ -1,6 +1,6 @@
 // Run alone: module mocks must not replace the real manager in other suites.
 import { afterAll, beforeEach, describe, expect, it, mock, spyOn } from 'bun:test'
-let now = 1_000_000;let failing = new Set<string>();let selected = 'account-a';let catalogFails = false
+let now = 1_000_000;let failing = new Set<string>();let selected = 'account-a';let catalogFails = false;let authFailure = false
 const connects: Record<string, number> = {}
 const catalog = [
   { id: 'mcpsrv_linear', display_name: 'Linear', url: 'https://linear.invalid' },
@@ -14,7 +14,7 @@ mock.module('./manager', () => ({ getCliProxyManager: () => ({
 mock.module('@craft-agent/shared/mcp/client', () => ({ CraftMcpClient: class {
   id: string
   constructor(options: any) { this.id = options.url.split('/').at(-1) }
-  async connect() { connects[this.id] = (connects[this.id] ?? 0) + 1;if (failing.has(this.id)) throw Error('HTTP 503 Bearer do-not-log-secret') }
+  async connect() { connects[this.id] = (connects[this.id] ?? 0) + 1;if (failing.has(this.id)) throw Error(authFailure ? 'HTTP 401 mcp_invalid_oauth_token Bearer do-not-log-secret' : 'HTTP 503 auth_unavailable Bearer do-not-log-secret') }
   async listTools() { return [{ name: 'lookup' }] }
   async close() {}
 } }))
@@ -22,7 +22,7 @@ const { clearProxyConnectorCache, loadProxyConnectorSources } = await import('./
 const clock = spyOn(Date, 'now').mockImplementation(() => now)
 const warnings = spyOn(console, 'warn').mockImplementation(() => {})
 afterAll(() => { clock.mockRestore();warnings.mockRestore() })
-beforeEach(() => { clearProxyConnectorCache();now = 1_000_000;failing = new Set();selected = 'account-a';catalogFails = false;for (const k of Object.keys(connects)) delete connects[k];relay.mockClear();warnings.mockClear() })
+beforeEach(() => { clearProxyConnectorCache();now = 1_000_000;failing = new Set();selected = 'account-a';catalogFails = false;authFailure = false;for (const k of Object.keys(connects)) delete connects[k];relay.mockClear();warnings.mockClear() })
 const workspace = { id: 'test', rootPath: '/test' }
 
 describe('connector discovery caching', () => {
@@ -63,3 +63,19 @@ describe('connector discovery caching', () => {
     expect(connects.mcpsrv_linear).toBe(2)
   })
 })
+
+ it('backs off real OAuth failures while permitting an explicit immediate rediscovery', async () => {
+   authFailure = true;failing.add('mcpsrv_slack')
+   expect((await loadProxyConnectorSources(workspace))[1]!.config.connectionStatus).toBe('needs_auth')
+   now += 61_000;await loadProxyConnectorSources(workspace)
+   expect(connects.mcpsrv_slack).toBe(1)
+   failing.clear()
+   expect((await loadProxyConnectorSources(workspace, { refresh: true }))[1]!.config.isAuthenticated).toBe(true)
+   expect(connects.mcpsrv_slack).toBe(2)
+ })
+ it('automatically retries a needs-auth connector after its bounded backoff', async () => {
+   authFailure = true;failing.add('mcpsrv_slack');await loadProxyConnectorSources(workspace)
+   failing.clear();now += 300_001
+   expect((await loadProxyConnectorSources(workspace))[1]!.config.isAuthenticated).toBe(true)
+   expect(connects.mcpsrv_slack).toBe(2)
+ })

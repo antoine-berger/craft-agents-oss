@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 import { query, createSdkMcpServer, tool, AbortError, type Query, type SDKMessage, type SDKUserMessage, type SDKAssistantMessageError, type Options } from '@anthropic-ai/claude-agent-sdk';
-import { getDefaultOptions, getTextCompletionOptions, resetClaudeConfigCheck } from './options.ts';
+import { getDefaultOptions, getTextCompletionOptions, getAuxiliaryModelEnv, resetClaudeConfigCheck } from './options.ts';
 // Local type for SDK user message content blocks (text, image, document)
 // Replaces import from @anthropic-ai/sdk/resources — keeps SDK as agent-only dependency
 type ContentBlockParam =
@@ -1153,13 +1153,9 @@ export class ClaudeAgent extends BaseAgent {
       ...result.envVars,
     };
 
-    // Pass mini model to SDK subprocess so built-in tools like WebFetch
-    // use the correct summarization model (instead of hardcoded Haiku).
-    // This is critical for custom providers where the default Haiku model ID
-    // doesn't exist on the provider's endpoint.
-    if (this.config.miniModel) {
-      process.env.ANTHROPIC_DEFAULT_HAIKU_MODEL = this.config.miniModel;
-    }
+    // Per-session overrides survive concurrent account/session setup and apply
+    // to the main query as well as title/summary queries. Never mutate global model env.
+    Object.assign(this.config.envOverrides, getAuxiliaryModelEnv(this.config.miniModel));
 
     return { authInjected: true };
   }
@@ -1640,6 +1636,7 @@ export class ClaudeAgent extends BaseAgent {
         ...getDefaultOptions({
           ...this.config.envOverrides,
           ...(this.config.connectionSlug?.startsWith('cli-proxy-') ? SHIP_CLAUDE_MODEL_ENV : {}),
+          ...getAuxiliaryModelEnv(this.config.miniModel),
           // SessionManager sets process.env.CRAFT_SESSION_DIR for every session it starts, so a
           // subprocess spawned after another session started would inherit that session's dir.
           ...(this.config.session?.id
@@ -3525,7 +3522,7 @@ This is a branched conversation. All prior messages in this conversation are par
     const model = this.config.miniModel;
 
     const options = {
-      ...getTextCompletionOptions(this.config.envOverrides),
+      ...getTextCompletionOptions({ ...this.config.envOverrides, ...getAuxiliaryModelEnv(this.config.miniModel) }),
       model,
       maxTurns: 1,
       systemPrompt: 'Reply with ONLY the requested text. No explanation.', // Minimal - no Claude Code preset
@@ -3658,7 +3655,7 @@ This is a branched conversation. All prior messages in this conversation are par
     const model = request.model ?? this.config.miniModel ?? getDefaultSummarizationModel();
 
     const options = {
-      ...getTextCompletionOptions(this.config.envOverrides),
+      ...getTextCompletionOptions({ ...this.config.envOverrides, ...getAuxiliaryModelEnv(this.config.miniModel) }),
       model,
       // Reasoning-model outputs (Opus extended thinking) can span multiple SDK-counted
       // turns even with no tools exposed. Tool surface here is empty (only the SDK's own

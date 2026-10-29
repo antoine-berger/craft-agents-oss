@@ -1,3 +1,4 @@
+import { settleToolStatuses, mergeTerminalToolOutput } from '@craft-agent/shared/sessions/tool-status'
 import { sendMessageUntilAck } from './message-ack'
 import { getSessionAttentionService, disposeSessionAttention } from '../handlers/rpc/session-attention'
 import { canResumeFailedSession, recoverAfterServerRestart, type SessionRecovery } from '@craft-agent/shared/sessions'
@@ -3352,6 +3353,10 @@ export class SessionManager implements ISessionManager {
       }
     }
     managed.messagesLoaded = true
+    if (!managed.isProcessing && !managed.isArchived && !managed.isDeleting) {
+      const lastFinal = [...managed.messages].reverse().find(message => message.role === 'assistant' && !message.isIntermediate && !message.parentToolUseId)
+      if (lastFinal) this.settleSessionTools(managed, { before: lastFinal.timestamp, emit: false, persist: false })
+    }
   }
 
   /**
@@ -6054,6 +6059,17 @@ export class SessionManager implements ISessionManager {
           return { resolved: null, available }
         },
         sendAgentMessageFn: (sessionId, message, attachments) => this.deliverAgentMessage(managed, sessionId, message, attachments),
+        testAutomaticSourceFn: async sourceSlug => {
+          this.assertSessionRunnable(managed)
+          const stopEpoch = managed.stopEpoch ?? 0
+          if (!/^claudeai-[a-f0-9]{20}$/.test(sourceSlug)) return undefined
+          const sources = await loadProxyConnectorSources(managed.workspace, { refresh: true })
+          this.assertSessionRunnable(managed, stopEpoch)
+          const source = sources.find(item => item.config.slug === sourceSlug)
+          if (!source) return undefined
+          managed.agent?.setAllSources(await this.loadSessionSources(managed))
+          return { name: source.config.name, status: source.config.connectionStatus as 'connected' | 'needs_auth' | 'failed', toolCount: source.claudeAccount?.tools.length ?? 0 }
+        },
         activateSourceInSessionFn: async (sourceSlug: string) => {
           const cb = managed.agent?.onSourceActivationRequest
           if (!cb) {
@@ -8630,6 +8646,28 @@ export class SessionManager implements ISessionManager {
     })().catch(error => sessionLog.error(`Claude continuation cleanup failed for ${managed.id}:`, error))
   }
 
+  private settleSessionTools(managed: ManagedSession, options: { reason?: 'complete' | 'interrupted' | 'error' | 'timeout'; before?: number; rootToolUseId?: string; emit?: boolean; persist?: boolean } = {}): void {
+    const activeToolUseIds = new Set(managed.messages.filter(message => message.isBackground
+      && (message.taskId || message.shellId) && message.toolStatus !== 'completed' && message.toolStatus !== 'error')
+      .map(message => message.toolUseId).filter((id): id is string => !!id))
+    for (const task of managed.backgroundTaskRegistry.values()) {
+      if (!task.toolUseId) continue
+      if (task.status === 'running') activeToolUseIds.add(task.toolUseId)
+      else activeToolUseIds.delete(task.toolUseId)
+    }
+    const previous = managed.messages
+    const next = settleToolStatuses(previous, { ...options, activeToolUseIds })
+    if (next === previous) return
+    managed.messages = next
+    if (options.emit !== false) next.forEach((message, index) => {
+      if (message === previous[index] || !message.toolUseId) return
+      this.sendEvent({ type: 'tool_result', sessionId: managed.id, toolUseId: message.toolUseId,
+        toolName: message.toolName ?? 'unknown', result: message.toolResult ?? '', isError: message.isError,
+        turnId: message.turnId, parentToolUseId: message.parentToolUseId, timestamp: message.timestamp }, managed.workspace.id)
+    })
+    if (options.persist !== false) this.persistSession(managed)
+  }
+
   private async onProcessingStopped(
     sessionId: string,
     reason: 'complete' | 'interrupted' | 'error' | 'timeout'
@@ -8671,6 +8709,7 @@ export class SessionManager implements ISessionManager {
     // later "status?" query never reports a dead task as running. Suppressed
     // when WS2 keep-alive keeps the query alive across turns.
     this.markOrphanedBackgroundTasks(sessionId)
+    if (!managed.agent?.hasPendingBackgroundTurn?.()) this.settleSessionTools(managed, { reason })
 
     const turnStartFinalMessageId = managed.turnStartFinalMessageId
     managed.turnStartFinalMessageId = undefined
@@ -10205,7 +10244,13 @@ export class SessionManager implements ISessionManager {
         // Update existing tool message (created on tool_start) instead of creating new one
         const existingToolMsg = managed.messages.find(m => m.toolUseId === event.toolUseId)
         // Track if already completed to avoid sending duplicate events
+        // A task completion is authoritative; a delayed launch acknowledgement
+        // must not replace its final status or summary.
+        const terminalBackground = existingToolMsg?.isBackground && (existingToolMsg.taskId || existingToolMsg.shellId)
+          && (existingToolMsg.toolStatus === 'completed' || existingToolMsg.toolStatus === 'error')
         const wasAlreadyComplete = existingToolMsg?.toolStatus === 'completed'
+        const previousResult = existingToolMsg?.toolResult
+        const previousIsError = existingToolMsg?.isError
 
         // The host confirms an attention tool before intentionally stopping the SDK. Claude then
         // emits this cancellation for that same tool (also on resume). The persisted host result is
@@ -10240,9 +10285,11 @@ export class SessionManager implements ISessionManager {
 
         if (existingToolMsg) {
           // Keep lightweight status text in `content` and store full payload in `toolResult` only.
-          existingToolMsg.toolResult = formattedResult
-          existingToolMsg.toolStatus = inferredError ? 'error' : 'completed'
-          existingToolMsg.isError = inferredError
+          existingToolMsg.toolResult = terminalBackground ? mergeTerminalToolOutput(existingToolMsg.toolResult, formattedResult) : formattedResult
+          if (!terminalBackground) {
+            existingToolMsg.toolStatus = inferredError ? 'error' : existingToolMsg.isBackground ? 'backgrounded' : 'completed'
+            existingToolMsg.isError = inferredError
+          }
           if (redactedToolInput) existingToolMsg.toolInput = redactedToolInput
           // If message doesn't have parent set, use event's parentToolUseId
           if (!existingToolMsg.parentToolUseId && event.parentToolUseId) {
@@ -10277,7 +10324,7 @@ export class SessionManager implements ISessionManager {
         // Send event to renderer if: (a) first completion, (b) result content changed
         // (e.g., safety net auto-completed with empty result, then real result arrived later),
         // or (c) the input was redacted, so the renderer replaces its copy from tool_start
-        const resultChanged = wasAlreadyComplete && formattedResult && existingToolMsg?.toolResult !== formattedResult
+        const resultChanged = wasAlreadyComplete && (previousResult !== existingToolMsg?.toolResult || previousIsError !== existingToolMsg?.isError)
         if (!wasAlreadyComplete || resultChanged || redactedToolInput) {
           // Use existing tool message timestamp, or fallback message timestamp for ordering
           const toolResultTimestamp = existingToolMsg?.timestamp ?? (managed.messages.find(m => m.toolUseId === event.toolUseId)?.timestamp)
@@ -10286,38 +10333,17 @@ export class SessionManager implements ISessionManager {
             sessionId,
             toolUseId: event.toolUseId,
             toolName: toolName,
-            result: formattedResult,
+            result: existingToolMsg?.toolResult ?? formattedResult,
             turnId: event.turnId,
             parentToolUseId,
-            isError: inferredError,
+            isError: terminalBackground ? existingToolMsg?.isError : inferredError,
             timestamp: toolResultTimestamp,
             ...(redactedToolInput ? { toolInput: redactedToolInput } : {}),
           }, workspaceId)
         }
 
-        // Safety net: when a parent Task completes, mark all its still-pending child tools as completed.
-        // This handles the case where child tool_result events never arrive (e.g., subagent internal tools
-        // whose results aren't surfaced through the parent stream).
         if (isParentTaskTool(toolName) || toolName === 'TaskOutput') {
-          const pendingChildren = managed.messages.filter(
-            m => m.parentToolUseId === event.toolUseId
-              && m.toolStatus !== 'completed'
-              && m.toolStatus !== 'error'
-          )
-          for (const child of pendingChildren) {
-            child.toolStatus = 'completed'
-            child.toolResult = child.toolResult || ''
-            sessionLog.info(`CHILD AUTO-COMPLETED: toolUseId=${child.toolUseId}, toolName=${child.toolName} (parent ${toolName} completed)`)
-            this.sendEvent({
-              type: 'tool_result',
-              sessionId,
-              toolUseId: child.toolUseId!,
-              toolName: child.toolName || 'unknown',
-              result: child.toolResult || '',
-              turnId: child.turnId,
-              parentToolUseId: event.toolUseId,
-            }, workspaceId)
-          }
+          this.settleSessionTools(managed, { rootToolUseId: event.toolUseId, reason: inferredError ? 'error' : 'complete' })
         }
 
         // Persist session after tool completes to prevent data loss on quit
@@ -10480,7 +10506,14 @@ export class SessionManager implements ISessionManager {
         // query can enumerate live tasks (WS3). The renderer still shows the
         // chip via its own atom; this is the main-process source of truth.
         if (managed) {
-          managed.backgroundTaskRegistry.set(event.taskId, {
+          const known = managed.backgroundTaskRegistry.get(event.taskId)
+          if (known && ['completed', 'failed', 'stopped'].includes(known.status)) {
+            known.toolUseId ??= event.toolUseId
+            await this.processEvent(managed, { type: 'task_completed', taskId: event.taskId, toolUseId: known.toolUseId,
+              status: known.status as 'completed' | 'failed' | 'stopped', summary: managed.backgroundTaskOutputs.get(event.taskId)?.summary })
+            break
+          }
+          if (!known || known.status === 'running') managed.backgroundTaskRegistry.set(event.taskId, {
             taskId: event.taskId,
             toolUseId: event.toolUseId,
             intent: event.intent,
@@ -10499,7 +10532,11 @@ export class SessionManager implements ISessionManager {
             turnId: event.turnId,
           })
         }
-        if (managed) this.publishBackgroundActivity(managed)
+        if (managed) {
+          const launch = managed.messages.find(message => message.toolUseId === event.toolUseId)
+          if (launch && managed.backgroundTaskRegistry.get(event.taskId)?.status === 'running') { launch.isBackground = true; launch.taskId = event.taskId; launch.toolStatus = 'backgrounded'; this.persistSession(managed) }
+          this.publishBackgroundActivity(managed)
+        }
         // Forward background task event directly to renderer
         this.sendEvent({
           ...event,
@@ -10577,6 +10614,8 @@ export class SessionManager implements ISessionManager {
           ? (managed.backgroundTaskRegistry.get(event.taskId)
             ?? [...managed.backgroundTaskRegistry.values()].find(t => t.workflowId === event.taskId))
           : undefined
+        const status = priorEntry && ['completed', 'failed', 'stopped'].includes(priorEntry.status)
+          ? priorEntry.status as 'completed' | 'failed' | 'stopped' : event.status
         // Only the session's own tasks may wake it below: one registered at launch and still
         // running, or (launch unseen) one whose starting tool call was the agent's own. A
         // completion for anything else (a subagent's task) is recorded, never surfaced.
@@ -10587,9 +10626,9 @@ export class SessionManager implements ISessionManager {
         // Store the output file for the chip's card (getBackgroundTaskOutput) and the wake-up nudge
         if (managed) {
           managed.backgroundTaskOutputs.set(event.taskId, {
-            outputFile: event.outputFile || '',
-            summary: event.summary || '',
-            status: event.status,
+            outputFile: event.outputFile || managed.backgroundTaskOutputs.get(event.taskId)?.outputFile || '',
+            summary: event.summary || managed.backgroundTaskOutputs.get(event.taskId)?.summary || '',
+            status: status,
             completedAt: Date.now(),
           })
 
@@ -10600,7 +10639,7 @@ export class SessionManager implements ISessionManager {
           const running = managed.backgroundTaskRegistry.get(event.taskId)
             ?? [...managed.backgroundTaskRegistry.values()].find(t => t.workflowId === event.taskId)
           if (running) {
-            running.status = event.status
+            running.status = status
             running.completedAt = Date.now()
           } else {
             // Terminal notification for a task whose launch this session never registered: a
@@ -10611,7 +10650,7 @@ export class SessionManager implements ISessionManager {
               taskId: event.taskId,
               ...(event.toolUseId ? { toolUseId: event.toolUseId } : {}),
               startTime: now,
-              status: event.status,
+              status: status,
               completedAt: now,
               ...(event.launchedHere ? { startUnknown: true } : { untracked: true }),
             })
@@ -10619,15 +10658,28 @@ export class SessionManager implements ISessionManager {
           sessionLog.info(`[bg-lifecycle] task completed`, {
             sessionId,
             taskId: event.taskId,
-            status: event.status,
+            status: status,
           })
 
+          const launchId = event.toolUseId ?? priorEntry?.toolUseId
+          const launch = launchId ? managed.messages.find(message => message.toolUseId === launchId) : undefined
+          if (launch) {
+            launch.isBackground = true
+            launch.taskId ??= event.taskId
+            launch.toolStatus = status === 'failed' ? 'error' : 'completed'
+            launch.isError = status === 'failed'
+            launch.toolResult = mergeTerminalToolOutput(event.summary || `Background task ${status}`, launch.toolResult ?? '')
+            this.sendEvent({ type: 'tool_result', sessionId, toolUseId: launch.toolUseId!, toolName: launch.toolName ?? 'unknown',
+              result: launch.toolResult, isError: launch.isError, turnId: launch.turnId, parentToolUseId: launch.parentToolUseId }, workspaceId)
+          }
+          if (launchId) this.settleSessionTools(managed, { rootToolUseId: launchId, reason: status === 'failed' ? 'error' : 'complete' })
+          this.persistSession(managed)
           this.evictStaleBackgroundTasks(managed)
         }
         // Forward to renderer for UI update
         if (managed) this.publishBackgroundActivity(managed)
         this.sendEvent({
-          ...event,
+          ...event, status, toolUseId: event.toolUseId ?? priorEntry?.toolUseId,
           sessionId,
         }, workspaceId)
 
@@ -10642,7 +10694,7 @@ export class SessionManager implements ISessionManager {
         // event between turns; guarded against duplicate notifications.
         // A stop the user asked for from the chip is not news to report back: it wakes nothing. A task
         // step still wakes, since its run waits for the turn that follows its background work.
-        const stoppedByUser = event.status === 'stopped' && !!priorEntry?.stopRequestedAt && !managed?.taskRunId
+        const stoppedByUser = status === 'stopped' && !!priorEntry?.stopRequestedAt && !managed?.taskRunId
         if (managed && this.keepBackgroundTasksAlive && !managed.agent?.resumeBackgroundTurn && !managed.isProcessing && launchedHereAndRunning && !stoppedByUser) {
           const taskIntent = priorEntry?.intent
           const outputFile = event.outputFile || managed.backgroundTaskOutputs.get(event.taskId)?.outputFile
@@ -10650,18 +10702,18 @@ export class SessionManager implements ISessionManager {
           const kind = priorEntry?.kind
           const what = kind === 'shell' ? 'background command' : kind === 'task' ? 'background task' : 'background agent'
           const nudge = kind === 'shell' || kind === 'task'
-            ? (event.status === 'completed'
+            ? (status === 'completed'
               ? [
                   `[background-task-completed] The ${what} you started (${label}) has finished.`,
                   outputFile ? `Its output is saved at: ${outputFile}` : '',
                   `Read that output and report the result to the user now. Do NOT start it again.`,
                 ].filter(Boolean).join('\n')
               : [
-                  `[background-task-${event.status}] The ${what} you started (${label}) ended with status "${event.status}".`,
+                  `[background-task-${status}] The ${what} you started (${label}) ended with status "${status}".`,
                   outputFile ? `Any partial output is at: ${outputFile}.` : '',
                   `Briefly let the user know it did not complete successfully.`,
                 ].filter(Boolean).join('\n'))
-            : event.status === 'completed'
+            : status === 'completed'
             // An agent's output file is its whole transcript (JSONL): reading it floods the context, and
             // the SDK's task notification already carries the result.
             ? [
@@ -10670,14 +10722,14 @@ export class SessionManager implements ISessionManager {
                 outputFile ? `Its output file (${outputFile}) is the agent's full transcript: do not read it whole; if the notification lacks something, read only its end.` : '',
               ].filter(Boolean).join('\n')
             : [
-                `[background-task-${event.status}] The background agent you launched (${label}) ended with status "${event.status}".`,
+                `[background-task-${status}] The background agent you launched (${label}) ended with status "${status}".`,
                 outputFile ? `Any partial output is at: ${outputFile}.` : '',
                 `Briefly let the user know it did not complete successfully. Do NOT spawn another background agent.`,
               ].filter(Boolean).join('\n')
           sessionLog.info(`[bg-lifecycle] surfacing completed background task to idle session`, {
             sessionId,
             taskId: event.taskId,
-            status: event.status,
+            status: status,
           })
           // Ride the normal turn machinery (resume + persistence). `hidden: true`
           // keeps the nudge out of the transcript — the agent's response (the
@@ -10698,6 +10750,12 @@ export class SessionManager implements ISessionManager {
         // and its completion can wake an idle session.
         if (managed) {
           const known = managed.backgroundTaskRegistry.get(event.shellId)
+          if (known && ['completed', 'failed', 'stopped'].includes(known.status)) {
+            known.toolUseId ??= event.toolUseId
+            await this.processEvent(managed, { type: 'task_completed', taskId: event.shellId, toolUseId: known.toolUseId,
+              status: known.status as 'completed' | 'failed' | 'stopped', summary: managed.backgroundTaskOutputs.get(event.shellId)?.summary })
+            break
+          }
           const intent = event.intent ?? event.command?.slice(0, 120)
           if (known) {
             // It already finished (fast command): keep the terminal status, fill in what we know.
@@ -10720,6 +10778,10 @@ export class SessionManager implements ISessionManager {
               kind: 'shell',
             })
           }
+        }
+        if (managed && managed.backgroundTaskRegistry.get(event.shellId)?.status === 'running') {
+          const launch = managed.messages.find(message => message.toolUseId === event.toolUseId)
+          if (launch) { launch.isBackground = true; launch.shellId = event.shellId; launch.toolStatus = 'backgrounded'; this.persistSession(managed) }
         }
         // Forward to renderer
         this.sendEvent({

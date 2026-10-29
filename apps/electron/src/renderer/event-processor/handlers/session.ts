@@ -1,3 +1,4 @@
+import { settleToolStatuses } from '@craft-agent/shared/sessions/tool-status'
 /**
  * Session Event Handlers
  *
@@ -59,31 +60,7 @@ export function handleComplete(
 ): ProcessResult {
   const session = clearRetryStatus(state.session)
 
-  // Fail-safe: mark any non-terminal tools as complete.
-  // Catches 'executing' (normal) and 'backgrounded' (spurious — e.g. foreground Agent
-  // whose result contained agentId:). Genuinely backgrounded tasks have isBackground=true
-  // AND a taskId, so they're excluded — task_completed will finalize them.
-  const TERMINAL_TOOL_STATUSES = new Set(['completed', 'error'])
-  let updatedMessages = session.messages
-  const hasRunningTools = session.messages.some(
-    m => m.role === 'tool'
-      && !TERMINAL_TOOL_STATUSES.has(m.toolStatus ?? '')
-      && !(m.isBackground && m.taskId)  // Don't force-complete genuine background tasks
-  )
-
-  if (hasRunningTools) {
-    updatedMessages = session.messages.map(m => {
-      if (
-        m.role === 'tool'
-        && !TERMINAL_TOOL_STATUSES.has(m.toolStatus ?? '')
-        && !(m.isBackground && m.taskId)
-      ) {
-        return { ...m, toolStatus: 'completed' as const, toolResult: m.toolResult ?? '' }
-      }
-      return m
-    })
-  }
-
+  const updatedMessages = settleToolStatuses(session.messages)
 
   return {
     state: {

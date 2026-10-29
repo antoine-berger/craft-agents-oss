@@ -8,6 +8,14 @@ import { getExtendedPromptCache, getGitBashPath } from "../config/storage.ts";
 
 declare const CRAFT_AGENT_CLI_VERSION: string | undefined;
 
+/** Pin both SDK auxiliary-model selectors to the user's configured mini model. */
+export function getAuxiliaryModelEnv(miniModel?: string): Record<string, string> {
+    return miniModel ? {
+        ANTHROPIC_DEFAULT_HAIKU_MODEL: miniModel,
+        ANTHROPIC_SMALL_FAST_MODEL: miniModel,
+    } : {};
+}
+
 let customPathToClaudeCodeExecutable: string | null = null;
 let claudeConfigChecked = false;
 

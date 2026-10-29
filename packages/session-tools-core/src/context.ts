@@ -442,6 +442,9 @@ export interface SessionToolContext {
    * machinery — the current turn is aborted and the renderer resends the user's
    * original message with a `[{slug} activated]` suffix.
    */
+  /** Diagnose a generated source without treating it as a missing on-disk config. */
+  testAutomaticSource?(sourceSlug: string): Promise<{ name: string; status: 'connected' | 'needs_auth' | 'failed'; toolCount: number } | undefined>;
+
   activateSourceInSession?(sourceSlug: string): Promise<{
     ok: boolean;
     reason?: string;

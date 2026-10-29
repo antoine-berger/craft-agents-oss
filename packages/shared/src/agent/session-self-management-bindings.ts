@@ -122,6 +122,12 @@ export function attachSessionSelfManagementBindings(
     enumerable: true,
   });
 
+  Object.defineProperty(context, 'testAutomaticSource', {
+    get() { return getSessionScopedToolCallbacks(sessionId)?.testAutomaticSourceFn; },
+    configurable: true,
+    enumerable: true,
+  });
+
   Object.defineProperty(context, 'activateSourceInSession', {
     get() {
       return getSessionScopedToolCallbacks(sessionId)?.activateSourceInSessionFn;

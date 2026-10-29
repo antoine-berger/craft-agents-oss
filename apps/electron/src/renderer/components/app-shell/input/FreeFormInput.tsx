@@ -1134,9 +1134,7 @@ export function FreeFormInput({
     }
   }
 
-  const [deliveryOverride, setDeliveryOverride] = React.useState<'queue' | 'steer' | undefined>()
-  React.useEffect(() => setDeliveryOverride(undefined), [sessionId, effectiveConnection])
-  const deliveryMode = deliveryOverride ?? (effectiveConnectionDetails ? resolveMidStreamBehavior(effectiveConnectionDetails) : 'queue')
+  const deliveryMode = effectiveConnectionDetails ? resolveMidStreamBehavior(effectiveConnectionDetails) : 'queue'
 
   // Submit message - backend handles queueing and interruption
   const submitMessage = React.useCallback((mode: 'queue' | 'steer' = deliveryMode) => {
@@ -1750,7 +1748,6 @@ export function FreeFormInput({
           </div>
 
 
-          {isProcessing && <button type="button" className="shrink-0 text-xs text-secondary hover:text-foreground" onClick={() => setDeliveryOverride(deliveryMode === 'queue' ? 'steer' : 'queue')} title="Choose how to send; Cmd/Ctrl+Enter uses the other action">{deliveryMode === 'queue' ? 'Queue' : 'Steer'}</button>}
           {/* Keep sending available while a turn is running. */}
           <SendButton
             isProcessing={isProcessing}

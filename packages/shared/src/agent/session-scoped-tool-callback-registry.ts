@@ -79,6 +79,7 @@ export interface SessionScopedToolCallbacks {
    * Wired by SessionManager to the per-session onSourceActivationRequest callback
    * plus a backend-aware readiness signal (Pi vs Claude).
    */
+  testAutomaticSourceFn?: NonNullable<import('@craft-agent/session-tools-core').SessionToolContext['testAutomaticSource']>;
   activateSourceInSessionFn?: (sourceSlug: string) => Promise<{
     ok: boolean;
     reason?: string;

@@ -951,3 +951,26 @@ describe('source_test header auth uses the runtime assembly (regression for #106
     expect(captured?.init.body).toBe('grant=x');
   });
 });
+
+describe('automatic claude.ai sources', () => {
+  const sourceSlug = 'claudeai-1234567890abcdef1234';
+  it('diagnoses virtual sources without a disk configuration or credential writes', async () => {
+    const ctx = { workspacePath: '/not-a-real-workspace', testAutomaticSource: async () => ({ name: 'SQL', status: 'connected', toolCount: 12 }) } as any;
+    const result = await handleSourceTest(ctx, { sourceSlug });
+    expect(result.isError).not.toBe(true);
+    expect(JSON.stringify(result)).toContain('12 tools');
+    expect(JSON.stringify(result)).toContain('next message');
+  });
+  it('reports the required connector reauthentication instead of inventing a token refresh', async () => {
+    const result = await handleSourceTest({ testAutomaticSource: async () => ({ name: 'SQL', status: 'needs_auth', toolCount: 0 }) } as any, { sourceSlug });
+    expect(result.isError).toBe(true); expect(JSON.stringify(result)).toContain('claude.ai Settings');
+  });
+  it('does not leak provider error bodies and distinguishes missing or temporarily failed sources', async () => {
+    const failed = await handleSourceTest({ testAutomaticSource: async () => ({ name: 'SQL', status: 'failed', toolCount: 0 }) } as any, { sourceSlug });
+    expect(JSON.stringify(failed)).toContain('could not be reached');
+    const unavailable = await handleSourceTest({ testAutomaticSource: async () => undefined } as any, { sourceSlug });
+    expect(JSON.stringify(unavailable)).toContain('selected Claude account');
+    const secret = await handleSourceTest({ testAutomaticSource: async () => { throw Error('Bearer private-credential'); } } as any, { sourceSlug });
+    expect(JSON.stringify(secret)).not.toContain('private-credential');
+  });
+});
