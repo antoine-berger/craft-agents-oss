@@ -53,3 +53,7 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 - **Native Claude artifacts** — Opt in to the native Artifact tool for Claude chats; account eligibility and organization policy still apply. CLIProxyAPI inference routing is preserved, so API-key proxy chats still require a supported claude.ai authentication path before they can publish. No Claude Docs integration is enabled.
 
 - **Reliable follow-ups** — Choose Queue or Steer for follow-up messages, use the opposite action with Cmd/Ctrl+Enter, and manage pending messages above the composer. Editing pauses delivery and preserves the main draft and attachments. Pending messages retain their identities and remain durable until their turn actually starts; repeated text and concurrent preparation cannot silently reorder or drop them.
+
+- **PR actions** — Use the numbered merge-queue glyph and shorter action messages, with current PR context and existing push boundaries. Refresh stale PR state without bypassing GitHub quota backoff.
+- **Project pilots** — Keep pilots outside global task groups and counters, including All Sessions grouped by status. Their dedicated project location, explicit search and archives stay available.
+- **Usage meter** — Refresh the displayed account while the app is visible and after reconnection, and preserve the last known values across temporary errors and remounts without mixing accounts.
