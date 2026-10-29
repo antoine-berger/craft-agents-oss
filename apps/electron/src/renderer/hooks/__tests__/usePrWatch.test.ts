@@ -140,7 +140,7 @@ test('reads GitHub again after subscribing, on return, and when the window regai
   await update('focus-refresh')
   await resolve(2, ready(entry(91)))
   expect(refreshes).toBe(4)
-  expect(automaticRefreshes).toEqual([false, false, false, false])
+  expect(automaticRefreshes).toEqual([true, true, true, true])
 })
 
 test('a stale push cannot reopen a merged PR but a different PR remains allowed', async () => {
@@ -173,11 +173,11 @@ test('sidebar subscriptions stay in the background and never force a refresh on 
   expect(refreshes).toBe(0)
 })
 
-test('opening the chat explicitly reconciles a paused snapshot instead of replaying its cached merge action', async () => {
+test('opening the chat reconciles automatically without bypassing quota or backoff', async () => {
   await mount('foreground-paused')
   await resolve(0, ready(entry(112)))
   expect(requests[0]!.foreground).toBe(true)
-  expect(automaticRefreshes).toEqual([false])
+  expect(automaticRefreshes).toEqual([true])
   const merged = entry(112)
   merged.summary.state = 'merged'
   await push('foreground-paused', ready(merged))
