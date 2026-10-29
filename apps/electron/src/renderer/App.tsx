@@ -1,3 +1,4 @@
+import { CANCEL_SESSION_SUBMISSIONS, SessionSubmissions, SubmissionCancelled, recoverSubmissionDraft, canChooseSubmissionRepository } from './lib/session-submissions'
 import { initialRepository, seedSelectedRepositories } from './components/app-shell/input/repository-history'
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -393,6 +394,15 @@ export default function App() {
   // during typing; attachments are stored as lightweight refs (path + name) and
   // hydrated via readFileAttachment() on session switch.
   const sessionDraftsRef = useRef<Map<string, SessionDraft>>(new Map())
+  const [sessionSubmissions] = useState(() => new SessionSubmissions())
+  useEffect(() => {
+    const cancel = (event: Event) => {
+      const sessionId = (event as CustomEvent<{ sessionId?: string }>).detail?.sessionId
+      if (sessionId) sessionSubmissions.cancel(sessionId)
+    }
+    window.addEventListener(CANCEL_SESSION_SUBMISSIONS, cancel)
+    return () => window.removeEventListener(CANCEL_SESSION_SUBMISSIONS, cancel)
+  }, [sessionSubmissions])
   // Unified session options for all session-scoped settings
   const [sessionOptions, setSessionOptions] = useState<Map<string, SessionOptions>>(new Map())
 
@@ -955,6 +965,7 @@ export default function App() {
       if (!('sessionId' in event)) return
 
       const sessionId = event.sessionId
+      if (event.type === 'session_archived') sessionSubmissions.cancel(sessionId)
       const workspaceId = windowWorkspaceId ?? ''
 
       // Session lifecycle events are handled explicitly (not by the agent event processor).
@@ -1107,6 +1118,7 @@ export default function App() {
     initializeSessions,
     addSession,
     removeSession,
+    sessionSubmissions,
     syncSessionOptionsFromSession,
     applyPermissionModeState,
     reconcilePermissionModeState,
@@ -1236,9 +1248,10 @@ export default function App() {
   }, [updateSessionById])
 
   const handleArchiveSession = useCallback((sessionId: string) => {
+    sessionSubmissions.cancel(sessionId)
     updateSessionById(sessionId, { isArchived: true, archivedAt: Date.now() })
     window.electronAPI.sessionCommand(sessionId, { type: 'archive' })
-  }, [updateSessionById])
+  }, [updateSessionById, sessionSubmissions])
 
   const handleUnarchiveSession = useCallback((sessionId: string) => {
     updateSessionById(sessionId, { isArchived: false, archivedAt: undefined })
@@ -1288,18 +1301,27 @@ export default function App() {
     window.electronAPI.sessionCommand(sessionId, { type: 'rename', name })
   }, [updateSessionById])
 
-  const handleSendMessage = useCallback(async (sessionId: string, message: string, attachments?: FileAttachment[], skillSlugs?: string[], externalBadges?: ContentBadge[]) => {
+  const handleSendMessage = useCallback(async (sessionId: string, message: string, attachments?: FileAttachment[], skillSlugs?: string[], externalBadges?: ContentBadge[], deliveryMode?: 'queue' | 'steer') => {
+    return sessionSubmissions.run(sessionId, async (checkEpoch) => {
+    const check = () => {
+      checkEpoch()
+      if (store.get(sessionAtomFamily(sessionId))?.isArchived || store.get(sessionMetaMapAtom).get(sessionId)?.isArchived) throw new SubmissionCancelled()
+    }
+    let optimisticAdded = false
+    let processingAtDispatch = false
     try {
+      check()
       // Capture pre-send processing state so we can flag mid-stream sends
       // for the queued badge (#616 follow-up — covers Pi steer path which
       // returns status 'accepted', not 'queued').
       const beforeSend = store.get(sessionAtomFamily(sessionId))
       const sendingMidStream = beforeSend?.isProcessing === true
-      const repository = !beforeSend?.worktree?.owned && (beforeSend?.worktree?.pendingRepository || beforeSend?.worktree?.needsRepository || !beforeSend?.messages.some(message => message.role === 'user'))
+      const repository = canChooseSubmissionRepository(beforeSend) && !beforeSend?.worktree?.owned && (beforeSend?.worktree?.pendingRepository || beforeSend?.worktree?.needsRepository || !beforeSend?.messages.some(message => message.role === 'user'))
         ? initialRepository(sessionId, beforeSend?.workspaceId ?? windowWorkspaceId ?? undefined) : undefined
 
       // Confirm the real backend mode before sending, including resumed older chats.
       await window.electronAPI.sessionCommand(sessionId, { type: 'setPermissionMode', mode: 'allow-all' })
+      check()
 
       // Step 1: Store attachments and get persistent metadata
       let storedAttachments: StoredAttachment[] | undefined
@@ -1324,24 +1346,10 @@ export default function App() {
           }
         })
 
-        // Notify user about failed attachments
-        const failedCount = storeResults.filter(r => r.status === 'rejected').length
-        if (failedCount > 0) {
-          console.warn(`${failedCount} attachment(s) failed to store`)
-          // Add warning message to session so user knows some attachments weren't included
-          const failedNames = attachments
-            .filter((_, i) => storeResults[i].status === 'rejected')
-            .map(a => a.name)
-            .join(', ')
-          updateSessionById(sessionId, (s) => ({
-            messages: [...s.messages, {
-              id: generateMessageId(),
-              role: 'warning' as const,
-              content: `⚠️ ${failedCount} attachment(s) could not be stored and will not be sent: ${failedNames}`,
-              timestamp: Date.now()
-            }]
-          }))
-        }
+        // A failed attachment blocks the submission: recover the complete payload, never send a partial prompt.
+        check()
+        const failedNames = attachments.filter((_, index) => storeResults[index].status === 'rejected').map(file => file.name)
+        if (failedNames.length) throw new Error(`Attachments could not be stored: ${failedNames.join(', ')}`)
 
         // Step 2: Create processed attachments for Claude
         // - Office files: Convert to text with markdown content
@@ -1372,6 +1380,7 @@ export default function App() {
         )
       }
 
+      check()
       // Step 3: Extract badges from mentions (sources/skills) with embedded icons
       // Badges are self-contained for display in UserMessageBubble and viewer
       // Merge with any externally provided badges (e.g., from EditPopover context badges)
@@ -1434,6 +1443,8 @@ export default function App() {
       }
 
       // Optimistic UI update - add user message and set processing state
+      processingAtDispatch = store.get(sessionAtomFamily(sessionId))?.isProcessing === true
+      optimisticAdded = true
       updateSessionById(sessionId, (s) => ({
         messages: [...s.messages, userMessage],
         isProcessing: true,
@@ -1445,12 +1456,19 @@ export default function App() {
         skillSlugs,
         badges: badges.length > 0 ? badges : undefined,
         optimisticMessageId: userMessage.id,
+        ...(deliveryMode ? { deliveryMode } : {}),
         repository,
       })
     } catch (error) {
+      if (!(error instanceof SubmissionCancelled)) sessionSubmissions.cancel(sessionId)
+      const recovered = recoverSubmissionDraft(sessionDraftsRef.current.get(sessionId), message, attachments)
+      sessionDraftsRef.current.set(sessionId, recovered)
+      void window.electronAPI.setDraft(sessionId, recovered).catch(cause => console.error('Could not persist recovered submission:', cause))
+      window.dispatchEvent(new CustomEvent('craft:restore-input', { detail: { sessionId, text: recovered.text, attachments } }))
+      if (error instanceof SubmissionCancelled) return
       console.error('Failed to send message:', error)
       updateSessionById(sessionId, (s) => ({
-        isProcessing: false,
+        ...(optimisticAdded ? { isProcessing: s.isProcessing && processingAtDispatch } : {}),
         messages: [
           ...s.messages,
           {
@@ -1462,7 +1480,8 @@ export default function App() {
         ]
       }))
     }
-  }, [sessionOptions, updateSessionById, skills, sources, windowWorkspaceId])
+    })
+  }, [sessionOptions, updateSessionById, skills, sources, windowWorkspaceId, sessionSubmissions, store])
 
   /**
    * Unified handler for all session option changes.
@@ -1587,7 +1606,9 @@ export default function App() {
       if (ref) {
         refs.push(ref)
       } else {
-        console.warn('[drafts] attachment exceeds per-draft size cap, not persisted:', a.name, a.size)
+        const recovered = existing?.attachments?.find(ref => ref.path === a.path && ref.name === a.name && ref.content?.base64 === a.base64 && ref.content?.text === a.text)
+        if (recovered) refs.push(recovered)
+        else console.warn('[drafts] attachment exceeds per-draft size cap, not persisted:', a.name, a.size)
       }
     }
     const nextDraft: SessionDraft = {

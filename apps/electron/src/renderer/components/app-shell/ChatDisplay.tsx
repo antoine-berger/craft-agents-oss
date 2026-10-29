@@ -1,3 +1,4 @@
+import { CANCEL_SESSION_SUBMISSIONS } from '@/lib/session-submissions'
 import * as React from "react"
 import { useTranslation } from "react-i18next"
 import { useEffect, useState, useMemo, useCallback } from "react"
@@ -1188,6 +1189,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   // Handle stop request from InputContainer
   // silent=true when redirecting (sending new message), silent=false when user clicks Stop button
   const handleStop = (silent = false) => {
+    if (!silent && session) window.dispatchEvent(new CustomEvent(CANCEL_SESSION_SUBMISSIONS, { detail: { sessionId: session.id } }))
     if (!session?.isProcessing) return
 
     // Explicit Stop (not a redirect/new-message send): put the in-flight prompt
