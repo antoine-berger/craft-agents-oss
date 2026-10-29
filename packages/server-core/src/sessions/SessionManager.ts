@@ -8841,7 +8841,6 @@ export class SessionManager implements ISessionManager {
         return
       }
       const first = managed.messageQueue[0]!
-      managed.queueReplayMessageId = first.messageId
       // Mid-turn messages: entries judged to continue this one are replayed with it as one turn.
       const merged: typeof managed.messageQueue = []
       let last: object = first
@@ -8852,6 +8851,19 @@ export class SessionManager implements ISessionManager {
       const next = merged.length > 0
         ? { ...first, message: [first, ...merged].map(entry => entry.message).join('\n\n') }
         : first
+      // Legacy backends may return undelivered text without a host message ID.
+      // Give it durable queue identity before entering the replay lifecycle.
+      for (const entry of [first, ...merged]) {
+        if (entry.messageId) continue
+        entry.messageId = generateMessageId()
+        const queued: Message = { id: entry.messageId, role: 'user', content: entry.message,
+          timestamp: this.monotonic(), isQueued: true, attachments: entry.storedAttachments,
+          badges: entry.options?.badges, ...(entry.options?.hidden ? { hidden: true } : {}) }
+        managed.messages.push(queued)
+        this.persistSession(managed)
+        this.sendEvent({ type: 'user_message', sessionId, message: queued, status: 'queued', optimisticMessageId: entry.optimisticMessageId }, managed.workspace.id)
+      }
+      managed.queueReplayMessageId = first.messageId
       if (merged.length > 0 && first.messageId) {
         const ids = [first, ...merged].map(entry => entry.messageId).filter((id): id is string => !!id)
         ;(managed.replayMergedIds ??= new Map()).set(first.messageId, ids)

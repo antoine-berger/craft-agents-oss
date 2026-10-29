@@ -80,6 +80,17 @@ describe('owner-controlled queue',()=>{
   expect((sm as any).claimQueuedReplay(managed,'a',undefined)).toBe(false)
   expect(managed.messageQueue[0].message).toBe('edited')
  })
+ it('gives legacy anonymous recovery payloads durable identity instead of requeueing the replay itself',async()=>{
+  const payload:any={message:'legacy recovery',options:{hidden:true}}
+  managed.messageQueue.push(payload)
+  const replay=mock(async(..._args:unknown[])=>{})
+  ;(sm as any).sendMessage=replay
+  ;(sm as any).processNextQueuedMessage('queue');await tick()
+  expect(typeof payload.messageId).toBe('string')
+  expect(managed.queueReplayMessageId).toBe(payload.messageId)
+  expect(managed.messages[0]).toMatchObject({id:payload.messageId,isQueued:true,hidden:true,content:'legacy recovery'})
+  expect(replay.mock.calls[0]?.[5]).toBe(payload.messageId)
+ })
  it('checks pause/archive at dispatch time before dequeuing or changing delivery state',async()=>{
   add('a');(sm as any).sendMessage=mock(async()=>{})
   ;(sm as any).processNextQueuedMessage('queue');managed.queuePaused=true
