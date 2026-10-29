@@ -47,6 +47,7 @@ const FALLBACK_HEIGHTS: Record<InputMode | string, number> = {
  * - All visible children use absolute positioning to stack during transition
  */
 export function InputContainer({
+  appearance = 'default',
   structuredInput,
   onStructuredResponse,
   textareaRef,
@@ -64,7 +65,7 @@ export function InputContainer({
   // Separate height states: freeform uses callback, structured uses measuring div
   // Use smaller fallback height for compact mode
   const [freeformHeight, setFreeformHeight] = React.useState<number>(
-    compactMode ? FALLBACK_HEIGHTS['freeform-compact'] : FALLBACK_HEIGHTS.freeform
+    appearance === 'chat' ? (compactMode ? 160 : 152) : compactMode ? FALLBACK_HEIGHTS['freeform-compact'] : FALLBACK_HEIGHTS.freeform
   )
   const [structuredHeight, setStructuredHeight] = React.useState<number | null>(null)
   const [isFocused, setIsFocused] = React.useState(false)
@@ -111,7 +112,7 @@ export function InputContainer({
     setExpandedDuringProcessing(true)
   }, [])
 
-  const isCollapsedInCompact = compactMode && isProcessing && !expandedDuringProcessing
+  const isCollapsedInCompact = appearance !== 'chat' && compactMode && isProcessing && !expandedDuringProcessing
 
   // Animate height when either isProcessing flips OR the user manually expands
   // / re-collapses the input during a thinking cycle.
@@ -176,7 +177,7 @@ export function InputContainer({
   const rawTargetHeight = mode === 'freeform'
     ? freeformHeight
     : (structuredHeight ?? FALLBACK_HEIGHTS[structuredInput?.type ?? 'freeform'] ?? FALLBACK_HEIGHTS.freeform)
-  const maxHeight = getComposerMaxHeight(availableHeight, mode)
+  const maxHeight = getComposerMaxHeight(availableHeight, mode, appearance)
   const targetHeight = Math.min(rawTargetHeight, maxHeight)
 
   // Motion value for frame-synchronized height animation
@@ -219,6 +220,7 @@ export function InputContainer({
       return (
         <FreeFormInput
           {...freeFormProps}
+          appearance={appearance}
           compactMode={compactMode}
           isProcessing={isProcessing}
           isCollapsedInCompact={isCollapsedInCompact}
@@ -233,6 +235,8 @@ export function InputContainer({
     }
     return (
       <StructuredInput
+        appearance={appearance}
+        interactive={!forMeasuring && isFocusedPanel}
         state={structuredInput!}
         onResponse={forMeasuring ? () => {} : handleStructuredResponse}
         unstyled
@@ -262,12 +266,14 @@ export function InputContainer({
       {/* One light frame; focus and decision prompts keep their existing status rings. */}
       <motion.div
         data-craft-composer
+        data-composer-appearance={appearance === 'chat' ? 'chat' : undefined}
         className={cn(
-          "input-container relative overflow-hidden rounded-xl border bg-raised",
+          "input-container relative overflow-hidden border",
+          structuredInput?.type === 'question' ? "rounded-2xl bg-background" : appearance === 'chat' ? "rounded-[12px] bg-sunken" : "rounded-xl bg-raised",
           isFocusedPanel ? "border-default" : "border-subtle",
           decisionTone
             ? decisionRingClass(decisionTone)
-            : "focus-within:ring-1 focus-within:ring-focus/55",
+            : appearance === 'chat' ? "focus-within:outline-none" : "focus-within:ring-1 focus-within:ring-focus/55",
         )}
         style={{
           height: heightMotionValue,

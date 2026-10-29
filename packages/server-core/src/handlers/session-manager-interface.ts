@@ -37,6 +37,8 @@ export interface SessionWorktreeResource {
 }
 
 export interface ISessionManager {
+  getPendingQuestion(sessionId: string): import('@craft-agent/core/types').PendingUserQuestion | null
+  respondToQuestion(sessionId: string, requestId: string, response: unknown): boolean
   // ---------------------------------------------------------------------------
   // Lifecycle
   // ---------------------------------------------------------------------------

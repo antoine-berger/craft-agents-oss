@@ -36,6 +36,7 @@ import type { ThinkingLevel } from "@craft-agent/shared/agent/thinking-levels"
 import {
   TurnCard,
   groupMessagesByTurn,
+  getAssistantSearchText,
   formatTurnAsMarkdown,
   formatActivityAsMarkdown,
   getAssistantTurnUiKey,
@@ -54,6 +55,7 @@ import { MemoizedAuthRequestCard } from "@/components/chat/AuthRequestCard"
 import { ChatInputZone, type StructuredInputState, type StructuredResponse, type PermissionResponse, type AdminApprovalResponse } from "./input"
 import type { RichTextInputHandle } from "@/components/ui/rich-text-input"
 import { useBackgroundTasks } from "@/hooks/useBackgroundTasks"
+import { useSessionQuestion } from "@/hooks/useSessionQuestion"
 import type { BackgroundTask } from "@/atoms/sessions"
 import type { BackgroundTaskOutput } from "@craft-agent/shared/protocol"
 import { agentDocument } from "./BackgroundTaskChip"
@@ -69,6 +71,9 @@ import { resolveBranchNewPanelOption } from "./branching"
 import { MemoizedMessageBubble } from "./chat-display/MessageBubble"
 import { ProcessingIndicator } from "./chat-display/ProcessingIndicator"
 import { ScrollOnMount } from "./chat-display/ScrollOnMount"
+import { useChatReadingPosition, useChatTurnWindow } from "@/hooks/useChatReadingPosition"
+import { CHAT_TURNS_PER_PAGE, readChatPosition, restoreChatPosition } from "./chat-display/chat-scroll-position"
+import { ChatTurnNavigation } from "./chat-display/ChatTurnNavigation"
 import { TurnFrame } from "./chat-display/TurnFrame"
 import { NewChatSuggestions } from "./chat-display/NewChatSuggestions"
 import { newChatSuggestionMentions, newChatSuggestionMessage, pickNewChatSuggestions, pickCustomSuggestions, type NewChatSuggestion } from "./chat-display/new-chat-suggestions"
@@ -350,15 +355,27 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   const isFocusedPanel = appShellContext?.isFocusedPanel ?? true
 
   // Streaming accepts follow-ups; archived chats stay read-only until restored.
+  const question = useSessionQuestion(session?.id)
   const isInputDisabled = disabled || !!session?.isArchived
   const messagesEndRef = React.useRef<HTMLDivElement>(null)
   const scrollViewportRef = React.useRef<HTMLDivElement>(null)
   const prevSessionIdRef = React.useRef<string | null>(null)
-  // Reverse pagination: show last N turns initially, load more on scroll up
-  const TURNS_PER_PAGE = 20
-  const [visibleTurnCount, setVisibleTurnCount] = React.useState(TURNS_PER_PAGE)
+  const isChatAppearance = emptyStateLabel === undefined
+  const chatAppearance = isChatAppearance ? 'chat' : 'default'
+  const readingPositionKey = session ? JSON.stringify([workspaceId ?? session.workspaceId, session.id]) : null
+  const activeReadingKeyRef = React.useRef(readingPositionKey)
+  activeReadingKeyRef.current = readingPositionKey
+  // Memoize turn grouping - avoids O(n) iteration on every render/keystroke
+  const allTurns = React.useMemo(() => {
+    if (!session) return []
+    return groupMessagesByTurn(session.messages, { isSessionProcessing: session.isProcessing })
+  }, [session?.messages, session?.isProcessing])
+
+  const turnKeys = React.useMemo(() => allTurns.map(getTurnKey), [allTurns])
   // Sticky-bottom: When true, auto-scroll on content changes. Toggled by user scroll behavior.
   const isStickToBottomRef = React.useRef(true)
+  // Keep the revealed window's first turn while reading above the latest output.
+  const { visibleTurnCount, setVisibleTurnCount } = useChatTurnWindow(readingPositionKey, isChatAppearance, turnKeys, isStickToBottomRef)
   // Mirror isFocusedPanel into a ref so the ResizeObserver closure reads the latest value
   const isFocusedPanelRef = React.useRef(isFocusedPanel)
   isFocusedPanelRef.current = isFocusedPanel
@@ -447,6 +464,23 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   const searchQuery = externalSearchQuery || ''
   // Require 2+ characters to activate in-chat search (aligned with session list isSearchMode)
   const isSearchActive = searchQuery.trim().length >= 2
+  const {
+    activeTurnKey,
+    showScrollToBottom,
+    scrollToEnd,
+    navigateToTurn: navigateToReadingTurn,
+    beginNavigation,
+    isRestoring: isRestoringReadingPosition,
+  } = useChatReadingPosition({
+    key: readingPositionKey,
+    enabled: isChatAppearance,
+    ready: !!session && !messagesLoading && !messagesLoadError,
+    searching: isSearchActive,
+    visibleTurnCount,
+    viewportRef: scrollViewportRef,
+    turnsRef: turnRefs,
+    stickToBottomRef: isStickToBottomRef,
+  })
 
   // Opening a chat makes its composer ready to type after navigation has settled.
   // Leave search, archived chats and background panels alone.
@@ -534,9 +568,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
             .join('\n')
         }
       } else if (turn.type === 'assistant') {
-        if (turn.response?.text) {
-          textContent = turn.response.text
-        }
+        textContent = getAssistantSearchText(turn)
       } else if (turn.type === 'system') {
         textContent = turn.message.content
       }
@@ -574,7 +606,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     if (requiredVisibleCount > visibleTurnCount) {
       setVisibleTurnCount(requiredVisibleCount)
     }
-  }, [isSearchActive, matchingOccurrences, session?.messages, session?.isProcessing, visibleTurnCount])
+  }, [isSearchActive, matchingOccurrences, session?.messages, session?.isProcessing, visibleTurnCount, setVisibleTurnCount])
 
   // Extract unique turn IDs that have matches (for highlighting)
   const matchingTurnIds = useMemo(() => {
@@ -618,12 +650,13 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
         const buffer = 128
         const isVisible = rect.top >= buffer && rect.bottom <= window.innerHeight - buffer
         if (!isVisible) {
-          turnEl.scrollIntoView({ behavior: 'instant', block: 'center' })
+          if (isChatAppearance) navigateToReadingTurn(turnId, 'instant', 'center')
+          else turnEl.scrollIntoView({ behavior: 'instant', block: 'center' })
         }
       }
       shouldScrollToMatchRef.current = false
     }
-  }, [validMatches, currentMatchIndex, session?.id, visibleTurnCount])
+  }, [validMatches, currentMatchIndex, session?.id, visibleTurnCount, isChatAppearance, navigateToReadingTurn, setVisibleTurnCount])
 
   // ---------------------------------------------------------------------------
   // CSS Custom Highlight API — non-destructive text highlighting
@@ -962,38 +995,24 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     }))
   }, [pendingFollowUpAnnotations])
 
-  // Track scroll position to toggle sticky-bottom behavior
-  // - User scrolls up → unstick (stop auto-scrolling)
-  // - User scrolls back to bottom → re-stick (resume auto-scrolling)
-  // Also handles loading more turns when scrolling near top
+  // Loading older turns keeps the same reading anchor, including tools that expand later.
   const handleScroll = React.useCallback(() => {
     const viewport = scrollViewportRef.current
     if (!viewport) return
     const { scrollTop, scrollHeight, clientHeight } = viewport
-    const distanceFromBottom = scrollHeight - scrollTop - clientHeight
-    // 20px threshold for "at bottom" detection
-    isStickToBottomRef.current = distanceFromBottom < 20
-
-    // Load more turns when scrolling near top (within 100px)
-    if (scrollTop < 100) {
-      setVisibleTurnCount(prev => {
-        // Check if there are more turns to load
-        const currentStartIndex = Math.max(0, totalTurnCountRef.current - prev)
-        if (currentStartIndex <= 0) return prev // Already showing all
-
-        // Remember scroll height before adding more items
-        const prevScrollHeight = viewport.scrollHeight
-
-        // Schedule scroll position adjustment after render
-        requestAnimationFrame(() => {
-          const newScrollHeight = viewport.scrollHeight
-          viewport.scrollTop = newScrollHeight - prevScrollHeight + scrollTop
-        })
-
-        return prev + TURNS_PER_PAGE
-      })
-    }
-  }, [])
+    if (!isChatAppearance) isStickToBottomRef.current = scrollHeight - scrollTop - clientHeight < 20
+    if (scrollTop >= 100 || (isChatAppearance && isRestoringReadingPosition())) return
+    const currentStartIndex = Math.max(0, totalTurnCountRef.current - visibleTurnCount)
+    if (currentStartIndex <= 0) return
+    const position = readChatPosition(viewport, turnRefs.current, visibleTurnCount, isStickToBottomRef.current)
+    const sessionKey = readingPositionKey
+    setVisibleTurnCount(previous => previous + CHAT_TURNS_PER_PAGE)
+    requestAnimationFrame(() => {
+      if (activeReadingKeyRef.current !== sessionKey) return
+      if (isChatAppearance) restoreChatPosition(viewport, turnRefs.current, position)
+      else viewport.scrollTop = viewport.scrollHeight - scrollHeight + scrollTop
+    })
+  }, [isChatAppearance, isRestoringReadingPosition, readingPositionKey, visibleTurnCount, setVisibleTurnCount])
 
   // Set up scroll event listener
   React.useEffect(() => {
@@ -1006,6 +1025,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   // Auto-scroll using ResizeObserver for streaming content
   // Initial scroll is handled by ScrollOnMount (useLayoutEffect, before paint)
   React.useEffect(() => {
+    if (isChatAppearance) return
     const viewport = scrollViewportRef.current
     if (!viewport) return
 
@@ -1015,7 +1035,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     // On session switch: reset UI state (scroll handled by ScrollOnMount)
     if (isSessionSwitch) {
       isStickToBottomRef.current = true
-      setVisibleTurnCount(TURNS_PER_PAGE)
+      setVisibleTurnCount(CHAT_TURNS_PER_PAGE)
     }
 
     // Debounced scroll for streaming - waits for layout to settle
@@ -1050,7 +1070,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
       resizeObserver.disconnect()
       if (debounceTimer) clearTimeout(debounceTimer)
     }
-  }, [session?.id])
+  }, [session?.id, isChatAppearance, setVisibleTurnCount])
 
   // Commit-time auto-scroll for new user messages.
   // This complements submit-time scrolling and covers cases where attachments delay
@@ -1077,16 +1097,20 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
 
     if (!messageActuallyChanged || !countIncreased) return
     if (lastMessageRole !== 'user') return
+    if (isChatAppearance && !isStickToBottomRef.current) return
 
     // Sending a message should always re-stick to bottom.
     isStickToBottomRef.current = true
 
-    requestAnimationFrame(() => {
-      messagesEndRef.current?.scrollIntoView({
+    const frame = requestAnimationFrame(() => {
+      if (isChatAppearance) {
+        if (isStickToBottomRef.current) scrollToEnd()
+      } else messagesEndRef.current?.scrollIntoView({
         behavior: isFocusedPanelRef.current ? 'smooth' : 'instant',
       })
     })
-  }, [session?.id, messageCount, lastMessageId, lastMessageRole])
+    return () => cancelAnimationFrame(frame)
+  }, [session?.id, messageCount, lastMessageId, lastMessageRole, isChatAppearance, scrollToEnd])
 
   // Handle message submission from InputContainer
   // Backend handles interruption and queueing if currently processing
@@ -1138,7 +1162,9 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     // Immediately scroll to bottom after sending - use requestAnimationFrame
     // to ensure the DOM has updated with the new message
     requestAnimationFrame(() => {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+      if (isChatAppearance) {
+        if (isStickToBottomRef.current) scrollToEnd()
+      } else messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
     })
   }
 
@@ -1240,6 +1266,8 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
         false,
         { rememberForMinutes: adminResponse.rememberForMinutes }
       )
+    } else if (response.type === 'question') {
+      void question.respond(response.response)
     } else if (response.type === 'credential' && pendingCredential && onRespondToCredential) {
       const credResponse = response as CredentialResponse
       onRespondToCredential(
@@ -1271,14 +1299,11 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     if (pendingCredential) {
       return { type: 'credential', data: pendingCredential }
     }
+    if (question.pending) {
+      return { type: 'question', data: { request: question.pending, submitting: question.submitting, error: question.error } }
+    }
     return undefined
-  }, [pendingPermission, pendingCredential])
-
-  // Memoize turn grouping - avoids O(n) iteration on every render/keystroke
-  const allTurns = React.useMemo(() => {
-    if (!session) return []
-    return groupMessagesByTurn(session.messages, { isSessionProcessing: session.isProcessing })
-  }, [session?.messages, session?.isProcessing])
+  }, [pendingPermission, pendingCredential, question.pending, question.submitting, question.error])
 
   // Keep ref in sync for scroll handler
   totalTurnCountRef.current = allTurns.length
@@ -1288,12 +1313,35 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   const turns = allTurns.slice(startIndex)
   const hasMoreAbove = startIndex > 0
 
+  const outlineEntries = useMemo(() => allTurns.flatMap((turn, index) => {
+    if (turn.type !== 'user') return []
+    const nextTurn = allTurns[index + 1]
+    const firstLine = turn.message.content.split('\n')[0]?.trim() || t('chat.navigation.empty')
+    return [{ key: getTurnKey(turn), label: firstLine.length > 60 ? `${firstLine.slice(0, 60).trim()}…` : firstLine,
+      isPlan: nextTurn?.type === 'assistant' && (nextTurn.activities.some(activity => activity.type === 'plan') || !!nextTurn.response?.isPlan) }]
+  }), [allTurns, t])
+  const activeOutlineKey = useMemo(() => {
+    const activeIndex = allTurns.findIndex(turn => getTurnKey(turn) === activeTurnKey)
+    for (let index = activeIndex; index >= 0; index--) {
+      if (allTurns[index]?.type === 'user') return getTurnKey(allTurns[index]!)
+    }
+    return outlineEntries[0]?.key
+  }, [allTurns, activeTurnKey, outlineEntries])
+  const navigateToOutline = useCallback((key: string) => {
+    const index = allTurns.findIndex(turn => getTurnKey(turn) === key)
+    if (index < 0) return
+    const isCurrentNavigation = beginNavigation()
+    if (allTurns.length - index > visibleTurnCount) setVisibleTurnCount(allTurns.length - index)
+    requestAnimationFrame(() => { if (isCurrentNavigation()) navigateToReadingTurn(key) })
+  }, [allTurns, visibleTurnCount, setVisibleTurnCount, navigateToReadingTurn, beginNavigation])
+
   const assistantTurnIndexByMessageId = useMemo(() => {
     const map = new Map<string, number>()
     allTurns.forEach((turn, index) => {
       if (turn.type !== 'assistant') return
       const messageId = turn.response?.messageId
       if (messageId) map.set(messageId, index)
+      for (const activity of turn.activities) map.set(activity.messageId ?? activity.id, index)
     })
     return map
   }, [allTurns])
@@ -1306,8 +1354,10 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     if (targetTurnIndex == null) return
 
     const ensureVisibleCount = allTurns.length - targetTurnIndex
+    const isCurrentNavigation = beginNavigation()
 
     const scrollToTurn = () => {
+      if (isChatAppearance && !isCurrentNavigation()) return true
       const targetTurn = allTurns[targetTurnIndex]
       if (!targetTurn) return false
 
@@ -1315,7 +1365,8 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
       const turnContainer = turnRefs.current.get(turnKey)
       if (!turnContainer) return false
 
-      turnContainer.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      if (isChatAppearance) navigateToReadingTurn(turnKey, 'smooth', 'center')
+      else turnContainer.scrollIntoView({ behavior: 'smooth', block: 'center' })
       return true
     }
 
@@ -1338,7 +1389,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
         void scrollToTurn()
       })
     }
-  }, [assistantTurnIndexByMessageId, allTurns, visibleTurnCount])
+  }, [assistantTurnIndexByMessageId, allTurns, visibleTurnCount, isChatAppearance, navigateToReadingTurn, setVisibleTurnCount, beginNavigation])
 
   const handleFollowUpChipClick = useCallback((item: {
     messageId: string
@@ -1361,7 +1412,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
       anchorY: anchor?.y,
       nonce: followUpOpenNonceRef.current,
     })
-  }, [assistantTurnIndexByMessageId, allTurns, visibleTurnCount])
+  }, [assistantTurnIndexByMessageId, allTurns, visibleTurnCount, setVisibleTurnCount])
 
   const handleFollowUpIndexClick = useCallback((item: {
     messageId: string
@@ -1384,7 +1435,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
 
   return (
     <RunCommandProvider value={session ? handleRunCommand : null}>
-    <div ref={zoneRef} className="flex h-full flex-col min-w-0" data-focus-zone="chat">
+    <div ref={zoneRef} className="flex h-full flex-col min-w-0" data-focus-zone="chat" data-chat-appearance={emptyStateLabel === undefined ? 'chat' : undefined}>
       {session ? (
         <div className="flex flex-1 flex-col min-h-0 min-w-0 relative">
           {/* Content layer */}
@@ -1395,8 +1446,8 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
             <div
               className="h-full"
               style={{
-                maskImage: 'linear-gradient(to bottom, transparent 0%, black 32px, black calc(100% - 32px), transparent 100%)',
-                WebkitMaskImage: 'linear-gradient(to bottom, transparent 0%, black 32px, black calc(100% - 32px), transparent 100%)'
+                maskImage: isChatAppearance ? undefined : 'linear-gradient(to bottom, transparent 0%, black 32px, black calc(100% - 32px), transparent 100%)',
+                WebkitMaskImage: isChatAppearance ? undefined : 'linear-gradient(to bottom, transparent 0%, black 32px, black calc(100% - 32px), transparent 100%)'
               }}
             >
               <ScrollArea className="h-full min-w-0" viewportRef={scrollViewportRef}>
@@ -1405,16 +1456,19 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                 CHAT_LAYOUT.maxWidth,
                 "mx-auto min-w-0",
                 compactMode ? CHAT_LAYOUT.compactContainerPadding : CHAT_LAYOUT.containerPadding,
-                CHAT_LAYOUT.messageSpacing
+                CHAT_LAYOUT.messageSpacing,
+                isChatAppearance && "pt-4 pb-7",
+                isChatAppearance && outlineEntries.length > 1 && "@max-4xl/panel:pr-11"
               )}>
                 {/* Session switch is instant (spec §6.3): the keyed wrapper swaps the whole transcript
                     in the same frame — no crossfade, no exit that holds back the new content. The keys
                     are the same as before, so ScrollOnMount still re-runs for every session. */}
                 <div key={compactMode ? 'compact-session' : session?.id} className="contents">
                     {messagesLoading ? (
-                      showTranscriptSkeleton ? <TranscriptSkeleton /> : null
+                      showTranscriptSkeleton ? <TranscriptSkeleton appearance={chatAppearance} /> : null
                     ) : messagesLoadError ? (
                       <TranscriptLoadError
+                        appearance={chatAppearance}
                         error={messagesLoadError}
                         onRetry={onRetryMessagesLoad}
                         isRetrying={messagesRetrying}
@@ -1429,7 +1483,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                   {/* Skip when search is active on session switch - scroll to first match instead */}
                   <ScrollOnMount
                     targetRef={messagesEndRef}
-                    skip={skipScrollToBottom}
+                    skip={isChatAppearance || skipScrollToBottom}
                     onScroll={() => {
                       skipSmoothScrollUntilRef.current = Date.now() + 500
                     }}
@@ -1439,7 +1493,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                       compact/mobile chats share compactMode but are not edits */}
                   {compactMode && emptyStateLabel !== undefined && turns.length === 0 && <CompactEmptyState />}
                   {emptyStateLabel === undefined && !messagesLoading && !messagesLoadError && turns.length === 0 && !hasUnrenderedLoadedMessages && (
-                    <NewChatEmptyState compact={compactMode}>
+                    <NewChatEmptyState appearance={chatAppearance} compact={compactMode}>
                       {canRunSuggestion && <NewChatSuggestions suggestions={newChatSuggestions} onSelect={handleRunSuggestion} />}
                     </NewChatEmptyState>
                   )}
@@ -1464,6 +1518,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                           className={CHAT_LAYOUT.userMessagePadding}
                         >
                           <MemoizedMessageBubble
+                            appearance={chatAppearance}
                             message={turn.message}
                             onOpenFile={onOpenFile}
                             onOpenUrl={onOpenUrl}
@@ -1485,6 +1540,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                           isAnyMatch={isAnyMatch}
                         >
                           <MemoizedMessageBubble
+                            appearance={chatAppearance}
                             message={turn.message}
                             onOpenFile={onOpenFile}
                             onOpenUrl={onOpenUrl}
@@ -1539,6 +1595,8 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                         isAnyMatch={isAnyMatch}
                       >
                       <TurnCard
+                        appearance={chatAppearance}
+                        searchQuery={isSearchActive ? searchQuery : undefined}
                         sessionId={session.id}
                         onRestore={onRestoreBeforeMessage}
                         restoreUserMessageId={turn.isComplete && turn.response?.messageId ? getNextUserMessageId(session.messages, turn.response.messageId) : undefined}
@@ -1726,11 +1784,12 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                     )}
                 </div>
                 {/* Processing Indicator (live line) - always visible while processing */}
-                {session.isProcessing && (() => {
+                {session.isProcessing && !question.pending && (() => {
                   // Find the last user message timestamp for accurate elapsed time
                   const lastUserMsg = [...session.messages].reverse().find(m => m.role === 'user')
                   return (
                     <ProcessingIndicator
+                      appearance={chatAppearance}
                       startTime={lastUserMsg?.timestamp}
                       statusMessage={session.currentStatus?.message}
                     />
@@ -1741,11 +1800,19 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
               </div>
               </ScrollArea>
             </div>
+            {isChatAppearance && !messagesLoading && !messagesLoadError && <ChatTurnNavigation
+              entries={outlineEntries}
+              activeKey={activeOutlineKey}
+              showScrollToBottom={showScrollToBottom}
+              onNavigate={navigateToOutline}
+              onScrollToBottom={() => scrollToEnd()}
+            />}
           </div>
 
           {/* === INPUT CONTAINER: FreeForm or Structured Input === */}
           <fieldset disabled={!!session.isArchived} className="min-w-0 border-0 p-0 disabled:opacity-50">
           <ChatInputZone
+            appearance={chatAppearance}
             compactMode={compactMode}
             permissionMode={permissionMode}
             onPermissionModeChange={onPermissionModeChange}

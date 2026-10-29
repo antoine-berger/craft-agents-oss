@@ -343,6 +343,7 @@
       "name": "@craft-agent/session-tools-core",
       "version": "0.15.6",
       "dependencies": {
+        "@craft-agent/core": "workspace:*",
         "beautiful-mermaid": "*",
         "gray-matter": "^4.0.3",
         "zod": "^3.23.0",
@@ -394,6 +395,7 @@
         "@uiw/react-json-view": "^2.0.0-alpha.40",
         "beautiful-mermaid": "*",
         "fflate": "^0.8.2",
+        "highlight.js": "11.11.1",
         "nice-ticks": "^1.0.2",
         "unified": "^11.0.0",
         "unist-util-visit": "^5.0.0"
@@ -11145,10 +11147,10 @@
       "sha512-6pEjquH3rqaI6cYAXYPcz9MS4rY6R4ngRgrgfDshRptUZIc3lw0MCIJIGDj9++mfySOuPTHB4nrSW99BCvOPIA=="
     ],
     "highlight.js": [
-      "highlight.js@10.7.3",
+      "highlight.js@11.11.1",
       "",
       {},
-      "sha512-tzcUFauisWKNHaRkN4Wjl/ZA07gENAjFl3J/c480dprkGTg5EQstgaNFqBfUqCq54kZRIEcreTsAgF/m2quD7A=="
+      "sha512-Xwwo44whKBVCYoliBQwaPvtd/2tYFkRQtXDWj1nackaV2JPXx3L0+Jvd8/qCJ2p+ML0/XVkJ2q+Mr+UVdpJK5w=="
     ],
     "hono": [
       "hono@4.11.4",
@@ -18351,6 +18353,12 @@
       "",
       {},
       "sha512-2uNTXIuTTxk7ciZgAU1BQcgnchcG0xXnrs6jzkQfj9SsRa9M2s5zE8WT96hS6KmG4MzWHSrvH43DF1m4XRkrFg=="
+    ],
+    "@earendil-works/pi-coding-agent/highlight.js": [
+      "highlight.js@10.7.3",
+      "",
+      {},
+      "sha512-tzcUFauisWKNHaRkN4Wjl/ZA07gENAjFl3J/c480dprkGTg5EQstgaNFqBfUqCq54kZRIEcreTsAgF/m2quD7A=="
     ],
     "@earendil-works/pi-coding-agent/ignore": [
       "ignore@7.0.8",

@@ -1,3 +1,4 @@
+import { SessionQuestions } from './session-questions'
 import { getSessionAttentionService, disposeSessionAttention } from '../handlers/rpc/session-attention'
 import { canResumeFailedSession, recoverAfterServerRestart, type SessionRecovery } from '@craft-agent/shared/sessions'
 import { readSessionHistory, searchSessionHistory } from '../services/session-history'
@@ -52,7 +53,7 @@ import {
   type Workspace,
   type WorkspaceInfo,
 } from '@craft-agent/shared/config'
-import type { ActiveSessionInfo, ContextUsageSnapshot, PermissionRisk, SessionProcessingStatus } from '@craft-agent/core/types'
+import type { ActiveSessionInfo, ContextUsageSnapshot, PermissionRisk, SessionProcessingStatus, UserQuestion } from '@craft-agent/core/types'
 import { loadWorkspaceConfig } from '@craft-agent/shared/workspaces'
 import {
   // Session persistence functions
@@ -146,6 +147,8 @@ import { getGitHubBranchPrefix } from '../services/repositories/github'
 import { planOwnedWorktree, ensureOwnedWorktree, removeOwnedWorktree, ownedWorktreeWorkingDirectory, adoptExistingWorktree } from '../services/repositories/owned-worktree'
 import { captureStackParent } from '../services/repositories/worktree-stack'
 import { ensureRepositorySetup } from '../services/repositories/setup'
+import { TextStreamStarts } from './text-stream-starts'
+import { applyReasoningMessage } from './reasoning-message'
 import { addTurnUsage, branchStartTotals, type BranchParent } from './turn-usage'
 
 // Import from server-core domain utilities
@@ -752,6 +755,7 @@ interface ManagedSession {
   stopRequested?: boolean
   lastMessageAt: number
   streamingText: string
+  textStreamStarts?: TextStreamStarts
   /** Identity of the unfinished assistant text, used for retry discard boundaries. */
   streamingTurnId?: string
   // Incremented each time a new message starts processing.
@@ -1266,6 +1270,9 @@ const HANDOFF_SUMMARY_WAIT_MS = 30_000
 interface PendingDelta {
   delta: string
   turnId?: string
+  parentToolUseId?: string
+  timestamp?: number
+  blockId?: string
 }
 
 /** Frame an app-generated message the agent receives as a user turn, so it is not mistaken for the user. */
@@ -1892,13 +1899,62 @@ export class SessionManager implements ISessionManager {
     })
   }
 
-  /**
-   * Centralized setter for session processing state.
-   * Automatically notifies the power manager on transitions (true→false, false→true)
-   * so callers don't need to remember to call onSessionStarted/onSessionStopped.
-   */
+  private questionsService?: SessionQuestions
+  private get sessionQuestions(): SessionQuestions {
+    return this.questionsService ??= new SessionQuestions((sessionId, request) => {
+      const managed = this.sessions.get(sessionId)
+      if (!managed) return
+      const attention = getSessionAttentionService()
+      try {
+        if (request) {
+          attention?.upsertReason(sessionId, {
+            id: 'interactive-question', source: 'agent', kind: 'question',
+            title: request.questions[0]?.question ?? 'Answer the agent',
+            createdAt: request.createdAt, action: { type: 'session' },
+          })
+        } else attention?.resolve(sessionId, 'agent', 'interactive-question')
+      } catch (error) {
+        sessionLog.warn('Could not update question attention:', error)
+      }
+      this.sendEvent({ type: 'question_changed', sessionId, request: request ? { ...request, cancelAction: managed.isProcessing ? 'stop' : 'skip' } : null }, managed.workspace.id)
+    })
+  }
+
+  getPendingQuestion(sessionId: string): import('@craft-agent/core/types').PendingUserQuestion | null {
+    const managed = this.sessions.get(sessionId)
+    const request = managed && !managed.isArchived && !managed.isDeleting ? this.sessionQuestions.get(sessionId) : null
+    return request ? { ...request, cancelAction: managed!.isProcessing ? 'stop' : 'skip' } : null
+  }
+
+  respondToQuestion(sessionId: string, requestId: string, response: unknown): boolean {
+    const managed = this.sessions.get(sessionId)
+    if (!managed) throw new Error('This chat no longer exists')
+    this.assertSessionRunnable(managed)
+    if (!this.hasQuestionRuntime(managed) || managed.stopRequested) throw new Error('This chat is no longer waiting for an answer')
+    const stopForeground = managed.isProcessing
+    const answered = this.sessionQuestions.answer(sessionId, requestId, response)
+    if ((response as { cancelled?: boolean }).cancelled === true && stopForeground) {
+      // Run Stop synchronously before the resolved MCP await can resume its foreground agent.
+      // Existing Stop policy deliberately preserves other background work.
+      void this.cancelProcessing(sessionId).catch(error => sessionLog.warn('Could not stop the cancelled question turn:', error))
+    }
+    return answered
+  }
+
+  private hasQuestionRuntime(managed: ManagedSession): boolean {
+    return managed.isProcessing || this.countRunningBackgroundWork(managed) > 0
+  }
+
+  private requestUserQuestion(managed: ManagedSession, questions: UserQuestion[], signal?: AbortSignal) {
+    this.assertSessionRunnable(managed)
+    if (!this.hasQuestionRuntime(managed) || managed.stopRequested) throw new Error('This chat is not running')
+    return this.sessionQuestions.ask(managed.id, questions, signal)
+  }
+
+  /** Keep runtime and power-manager state in sync with the turn lifecycle. */
   private setProcessing(managed: ManagedSession, processing: boolean): void {
     const was = managed.isProcessing
+    if (!processing && this.countRunningBackgroundWork(managed) === 0) this.sessionQuestions.cancel(managed.id, 'The turn ended before the questions were answered')
     managed.isProcessing = processing
     this.scheduleIdleRuntimeRelease(managed)
     if (!was && processing) {
@@ -4059,6 +4115,7 @@ export class SessionManager implements ISessionManager {
   private async disposeManagedAgentRuntime(managed: ManagedSession, reason: string): Promise<boolean> {
     this.clearIdleRuntimeTimer(managed)
     const sessionId = managed.id
+    this.sessionQuestions.cancel(sessionId, `The agent runtime ended: ${reason}`)
     let disposed = true
     // Settle before asynchronous cleanup, but do not tell waiting title calls that auth succeeded.
     managed.agentReadyResolve?.(false)
@@ -5813,6 +5870,7 @@ export class SessionManager implements ISessionManager {
 
       // Wire up session self-management tools (set_session_labels, set_session_status, etc.)
       mergeSessionScopedToolCallbacks(managed.id, {
+        askUserQuestionFn: (questions, signal) => this.requestUserQuestion(managed, questions, signal),
         setSessionLabelsFn: async (sessionId: string | undefined, labels: string[]) => {
           await this.setSessionLabels(sessionId ?? managed.id, labels)
         },
@@ -6310,6 +6368,7 @@ export class SessionManager implements ISessionManager {
   }
 
   private clearArchivedSessionWork(managed: ManagedSession): void {
+    this.sessionQuestions.cancel(managed.id, 'This chat was archived')
     this.recoverPendingSteers(managed)
     managed.messageQueue = []
     managed.acceptedSteers?.clear()
@@ -7432,6 +7491,7 @@ export class SessionManager implements ISessionManager {
     if (managed.isRestoringCheckpoint) throw new Error('Wait for checkpoint restoration before deleting this session')
     this.clearIdleRuntimeTimer(managed)
     managed.isDeleting = true
+    this.sessionQuestions.cancel(sessionId, 'This chat was deleted')
     this.worktreeSetupControllers.get(sessionId)?.abort()
     managed.stopEpoch = (managed.stopEpoch ?? 0) + 1
     await Promise.all([...this.worktreeResources].map(resource => resource.stopSession(sessionId)))
@@ -7853,6 +7913,7 @@ export class SessionManager implements ISessionManager {
     managed.lastMessageAt = Date.now()
     this.setProcessing(managed, true)
     managed.streamingText = ''
+    managed.textStreamStarts?.clear()
     managed.streamingTurnId = undefined
     managed.processingGeneration++
     managed.turnStartFinalMessageId = this.getLastFinalAssistantMessageId(managed.messages)
@@ -8304,6 +8365,7 @@ export class SessionManager implements ISessionManager {
   }
 
   async cancelProcessing(sessionId: string, silent = false): Promise<void> {
+    this.sessionQuestions.cancel(sessionId, 'The owner stopped the chat')
     this.worktreeSetupControllers.get(sessionId)?.abort()
     const managed = this.sessions.get(sessionId)
     if (!managed?.isProcessing) {
@@ -9057,6 +9119,7 @@ export class SessionManager implements ISessionManager {
   /** Publish activity from the same registry used by reconnect snapshots. */
   private publishBackgroundActivity(managed: ManagedSession): void {
     const backgroundAgentCount = countBackgroundAgents(managed.backgroundTaskRegistry.values())
+    if (!this.hasQuestionRuntime(managed)) this.sessionQuestions.cancel(managed.id, 'The last agent finished before the questions were answered')
     this.sendEvent({ type: 'session_metadata_changed', sessionId: managed.id, changes: { backgroundAgentCount } }, managed.workspace.id)
     getSessionAttentionService()?.setWorking(managed.id, managed.isProcessing || backgroundAgentCount > 0)
   }
@@ -9883,14 +9946,27 @@ export class SessionManager implements ISessionManager {
     this.notifySessionActivity(sessionId)
 
     switch (event.type) {
-      case 'text_delta':
+      case 'text_delta': {
+        if (event.contentKind === 'thinking') {
+          this.flushDelta(sessionId, workspaceId)
+          const message = applyReasoningMessage(managed.messages, event, () => this.monotonic())
+          if (message) this.sendEvent({ type: 'text_delta', sessionId, delta: event.text,
+            turnId: event.turnId, parentToolUseId: event.parentToolUseId,
+            contentKind: 'thinking', blockId: message.id, timestamp: message.timestamp }, workspaceId)
+          break
+        }
         managed.streamingText += event.text
         managed.streamingTurnId = event.turnId
         // Queue delta for batched sending (performance: reduces IPC from 50+/sec to ~20/sec)
-        this.queueDelta(sessionId, workspaceId, event.text, event.turnId)
+        managed.textStreamStarts ??= new TextStreamStarts()
+        const startedAt = managed.textStreamStarts.note(event.turnId, event.parentToolUseId, () => this.monotonic(), event.blockId)
+        this.queueDelta(sessionId, workspaceId, event.text, event.turnId, event.parentToolUseId, startedAt, event.blockId)
         break
+      }
 
       case 'text_discard':
+        managed.textStreamStarts?.discard(event.turnId)
+        managed.messages = managed.messages.filter(message => !(message.contentKind === 'thinking' && message.turnId === event.turnId && message.isStreaming))
         // Discard, NEVER flush, the failed attempt's batch before announcing
         // backoff. Otherwise a delayed failed token can arrive after retry start.
         this.discardDelta(sessionId, event.turnId)
@@ -9907,19 +9983,34 @@ export class SessionManager implements ISessionManager {
         break
 
       case 'text_complete': {
+        if (event.contentKind === 'thinking') {
+          this.flushDelta(sessionId, workspaceId)
+          const message = applyReasoningMessage(managed.messages, event, () => this.monotonic())
+          if (message) {
+            this.sendEvent({ ...event, sessionId, messageId: message.id, timestamp: message.timestamp }, workspaceId)
+            this.persistSession(managed)
+          }
+          break
+        }
         // Flush any pending deltas before sending complete (ensures renderer has all content)
         this.flushDelta(sessionId, workspaceId)
 
+        const existingText = event.blockId ? managed.messages.find(message => message.id === event.blockId && message.role === 'assistant' && !message.contentKind) : undefined
+        const completedAt = this.monotonic()
+        const firstDelta = managed.textStreamStarts?.take(event.turnId, event.parentToolUseId, event.blockId)
         const assistantMessage: Message = {
-          id: generateMessageId(),
+          id: event.blockId ?? generateMessageId(),
           role: 'assistant',
           content: event.text,
-          timestamp: this.monotonic(),
+          timestamp: completedAt,
+          startedAt: existingText?.startedAt ?? firstDelta ?? (event.blockId ? completedAt : undefined),
           isIntermediate: event.isIntermediate,
+          responseUsage: event.responseUsage,
           turnId: event.turnId,
           parentToolUseId: event.parentToolUseId,
         }
-        managed.messages.push(assistantMessage)
+        if (existingText) Object.assign(existingText, assistantMessage)
+        else managed.messages.push(assistantMessage)
         managed.streamingText = ''
         managed.streamingTurnId = undefined
 
@@ -9960,7 +10051,7 @@ export class SessionManager implements ISessionManager {
           }
         }
 
-        this.sendEvent({ type: 'text_complete', sessionId, text: event.text, isIntermediate: event.isIntermediate, turnId: event.turnId, parentToolUseId: event.parentToolUseId, timestamp: assistantMessage.timestamp, messageId: assistantMessage.id }, workspaceId)
+        this.sendEvent({ type: 'text_complete', sessionId, text: event.text, responseUsage: event.responseUsage, isIntermediate: event.isIntermediate, turnId: event.turnId, parentToolUseId: event.parentToolUseId, timestamp: assistantMessage.timestamp, startedAt: assistantMessage.startedAt, messageId: assistantMessage.id, blockId: event.blockId }, workspaceId)
 
         // Persist session after complete message to prevent data loss on quit
         this.persistSession(managed)
@@ -10878,7 +10969,8 @@ export class SessionManager implements ISessionManager {
       if (event.type === 'credential_request') attention.upsertReason(id, { id: event.request.requestId, source: 'auth', kind: 'authentication', title: 'Credentials required', createdAt: Date.now(), action: { type: 'session' } })
       if (event.type === 'auth_completed' && event.success) attention.resolve(id, 'auth', event.requestId)
       if (event.type === 'plan_submitted') attention.setReasons(id, 'agent', [{ id: event.message.id, source: 'agent', kind: 'plan', title: 'Plan ready for your approval', createdAt: Date.now(), action: { type: 'session' } }])
-      if (event.type === 'user_message' && !event.message.hidden && !event.message.content.startsWith('[Message from session')) attention.resolve(id, 'agent')
+      if (event.type === 'user_message' && !event.message.hidden && !event.message.content.startsWith('[Message from session')
+        && !this.questionsService?.get(id)) attention.resolve(id, 'agent')
       if (event.type === 'session_deleted') void attention.sync()
     }
 
@@ -10909,7 +11001,9 @@ export class SessionManager implements ISessionManager {
    * Queue a text delta for batched sending (performance optimization)
    * Instead of sending 50+ IPC events per second, batches deltas and flushes every 50ms
    */
-  private queueDelta(sessionId: string, workspaceId: string, delta: string, turnId?: string): void {
+  private queueDelta(sessionId: string, workspaceId: string, delta: string, turnId?: string, parentToolUseId?: string, timestamp?: number, blockId?: string): void {
+    const previous = this.pendingDeltas.get(sessionId)
+    if (previous && (previous.turnId !== turnId || previous.parentToolUseId !== parentToolUseId || previous.blockId !== blockId)) this.flushDelta(sessionId, workspaceId)
     const existing = this.pendingDeltas.get(sessionId)
     if (existing) {
       // Append to existing batch
@@ -10918,7 +11012,7 @@ export class SessionManager implements ISessionManager {
       if (turnId) existing.turnId = turnId
     } else {
       // Start new batch
-      this.pendingDeltas.set(sessionId, { delta, turnId })
+      this.pendingDeltas.set(sessionId, { delta, turnId, parentToolUseId, timestamp, blockId })
     }
 
     // Schedule flush if not already scheduled
@@ -10958,7 +11052,10 @@ export class SessionManager implements ISessionManager {
         type: 'text_delta',
         sessionId,
         delta: pending.delta,
-        turnId: pending.turnId
+        turnId: pending.turnId,
+        parentToolUseId: pending.parentToolUseId,
+        timestamp: pending.timestamp,
+        blockId: pending.blockId,
       }, workspaceId)
       this.pendingDeltas.delete(sessionId)
     }
@@ -11521,6 +11618,7 @@ export class SessionManager implements ISessionManager {
   }
 
   cleanup(): void {
+    this.sessionQuestions.dispose()
     this.changeSummaryDisposed = true
     this.changeSummaryRefreshes.clear()
     for (const controller of this.worktreeSetupControllers.values()) controller.abort()

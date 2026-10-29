@@ -259,8 +259,11 @@ export function getSessionScopedTools(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     function registryTool(name: string, schema: any) {
       const def = SESSION_TOOL_REGISTRY.get(name)!;
-      return tool(name, TOOL_DESCRIPTIONS[name] || def.description, schema, async (args: any) => {
-        const result = await def.handler!(ctx, args);
+      return tool(name, TOOL_DESCRIPTIONS[name] || def.description, schema, async (args: any, extra: unknown) => {
+        // A tool cancellation must not mutate the context shared by parallel calls.
+        const invocation = name === 'AskUserQuestion' ? Object.create(ctx) as SessionToolContext : ctx;
+        if (name === 'AskUserQuestion') invocation.invocationSignal = (extra as { signal?: AbortSignal } | undefined)?.signal;
+        const result = await def.handler!(invocation, args);
         return convertResult(result);
       }, def.readOnly ? { annotations: { readOnlyHint: true } } : undefined);
     }

@@ -7,6 +7,7 @@ import { IconButton } from "@/components/ui/button"
 import { Markdown, CollapsibleMarkdownProvider, StreamingMarkdown, type RenderMode } from "@/components/markdown"
 import type { Message } from "../../../../shared/types"
 import { ErrorMessage } from "./ErrorMessage"
+import { chatMessageState } from "./chat-message-state"
 
 /**
  * MessageBubble - Renders a single message based on its role
@@ -39,6 +40,7 @@ export interface MessageBubbleProps {
   compactMode?: boolean
   /** Callback to resend the user message that preceded an error */
   onRetry?: () => void
+  appearance?: 'default' | 'chat'
 }
 
 /** Info-level notices: icon shape + role color per level (status never by color alone). */
@@ -58,6 +60,7 @@ export function MessageBubble({
   onPopOut,
   compactMode,
   onRetry,
+  appearance = 'default',
 }: MessageBubbleProps) {
   const { t } = useTranslation()
 
@@ -65,6 +68,7 @@ export function MessageBubble({
   if (message.role === 'user') {
     return (
       <UserMessageBubble
+        appearance={appearance === 'chat' ? 'chat' : undefined}
         content={message.content}
         attachments={message.attachments}
         badges={message.badges}
@@ -121,10 +125,15 @@ export function MessageBubble({
 
   // === ERROR MESSAGE: inline error marker with collapsible technical details ===
   if (message.role === 'error') {
-    return <ErrorMessage message={message} onOpenUrl={onOpenUrl} sessionId={sessionId} onRetry={onRetry} />
+    return <ErrorMessage appearance={appearance} message={message} onOpenUrl={onOpenUrl} sessionId={sessionId} onRetry={onRetry} />
   }
 
   // === STATUS MESSAGE: matches the live line (ProcessingIndicator) ===
+  if ((message.role === 'status' && message.statusType === 'retrying')
+    || (message.role === 'info' && chatMessageState(message) === 'interrupted')) {
+    if (appearance === 'chat') return <ErrorMessage appearance="chat" message={message} />
+  }
+
   if (message.role === 'status') {
     return (
       <div className="flex min-h-7 min-w-0 items-center gap-2 text-label text-secondary">
@@ -188,17 +197,17 @@ export function MessageBubble({
  * This wrapper skips re-renders for messages that haven't changed,
  * significantly improving performance for long conversations.
  */
-export const MemoizedMessageBubble = React.memo(MessageBubble, (prev, next) => {
-  // Always re-render streaming messages (content is changing)
-  if (prev.message.isStreaming || next.message.isStreaming) {
-    return false
-  }
-  // Skip re-render if key props unchanged
-  return (
-    prev.message.id === next.message.id &&
-    prev.message.content === next.message.content &&
-    prev.message.role === next.message.role &&
-    prev.sessionId === next.sessionId &&
-    prev.compactMode === next.compactMode
-  )
-})
+export function equalMessageBubbleProps(prev: MessageBubbleProps, next: MessageBubbleProps): boolean {
+  if (prev.message.isStreaming || next.message.isStreaming) return false
+  return prev.message === next.message
+    && prev.sessionId === next.sessionId
+    && prev.compactMode === next.compactMode
+    && prev.appearance === next.appearance
+    && prev.renderMode === next.renderMode
+    && prev.onOpenFile === next.onOpenFile
+    && prev.onOpenUrl === next.onOpenUrl
+    && prev.onRetry === next.onRetry
+    && prev.onPopOut === next.onPopOut
+}
+
+export const MemoizedMessageBubble = React.memo(MessageBubble, equalMessageBubbleProps)

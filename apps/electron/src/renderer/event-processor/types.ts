@@ -15,6 +15,7 @@ export type RetryEvent = Extract<SessionEvent, { type: 'retry' }>
  * Streaming state for a session - replaces streamingTextRef
  */
 export interface StreamingState {
+  blockId?: string
   content: string
   turnId?: string
   parentToolUseId?: string
@@ -36,6 +37,10 @@ export interface TextDeltaEvent {
   sessionId: string
   delta: string
   turnId?: string
+  parentToolUseId?: string
+  contentKind?: 'thinking'
+  blockId?: string
+  timestamp?: number
 }
 
 /**
@@ -52,6 +57,10 @@ export interface TextCompleteEvent {
   timestamp?: number
   /** Authoritative message ID from main process for persistence/branching parity */
   messageId?: string
+  contentKind?: 'thinking'
+  blockId?: string
+  startedAt?: number
+  responseUsage?: import('@craft-agent/core/types').ResponseUsage
 }
 
 /**

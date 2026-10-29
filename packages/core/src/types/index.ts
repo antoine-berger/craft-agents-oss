@@ -44,6 +44,7 @@ export type {
   StoredMessage,
   TokenUsage,
   AgentEventUsage,
+  ResponseUsage,
   RecoveryAction,
   ErrorCode,
   TypedError,
@@ -89,3 +90,5 @@ export type {
   PageConfig,
 } from './page.ts';
 
+export { validateQuestionResponse } from './questions.ts'
+export type { UserQuestion, UserQuestionAnswer, UserQuestionResponse, PendingUserQuestion } from './questions.ts'

@@ -76,6 +76,7 @@ interface ProcessingIndicatorProps {
   startTime?: number
   /** Override cycling messages with explicit status (e.g., "Compacting...") */
   statusMessage?: string
+  appearance?: 'default' | 'chat'
 }
 
 /**
@@ -84,7 +85,7 @@ interface ProcessingIndicatorProps {
  * the elapsed time in tertiary tabular figures. A new label fades in (150ms) in place — no
  * crossfade that waits for the old one to leave.
  */
-export function ProcessingIndicator({ startTime, statusMessage }: ProcessingIndicatorProps) {
+export function ProcessingIndicator({ startTime, statusMessage, appearance = 'default' }: ProcessingIndicatorProps) {
   const { t } = useTranslation()
   const [elapsed, setElapsed] = React.useState(0)
   const [messageIndex, setMessageIndex] = React.useState(() =>
@@ -95,17 +96,17 @@ export function ProcessingIndicator({ startTime, statusMessage }: ProcessingIndi
   React.useEffect(() => {
     const start = startTime || Date.now()
     // Set initial elapsed immediately
-    setElapsed(Math.floor((Date.now() - start) / 1000))
+    setElapsed(Math.max(0, Math.floor((Date.now() - start) / 1000)))
 
     const interval = setInterval(() => {
-      setElapsed(Math.floor((Date.now() - start) / 1000))
+      setElapsed(Math.max(0, Math.floor((Date.now() - start) / 1000)))
     }, 1000)
     return () => clearInterval(interval)
   }, [startTime])
 
   // Cycle through messages every 10 seconds (only when not showing status)
   React.useEffect(() => {
-    if (statusMessage) return  // Don't cycle when showing status
+    if (statusMessage || appearance === 'chat') return
     const interval = setInterval(() => {
       setMessageIndex(prev => {
         // Pick a random different message
@@ -117,16 +118,16 @@ export function ProcessingIndicator({ startTime, statusMessage }: ProcessingIndi
       })
     }, 10000)
     return () => clearInterval(interval)
-  }, [statusMessage])
+  }, [statusMessage, appearance])
 
   // Use status message if provided, otherwise cycle through default messages
-  const displayMessage = statusMessage || t(PROCESSING_MESSAGE_KEYS[messageIndex])
+  const displayMessage = statusMessage || t(appearance === 'chat' ? 'chat.processing.thinking' : PROCESSING_MESSAGE_KEYS[messageIndex])
 
   return (
-    <div className="flex min-h-7 min-w-0 items-center gap-2 text-label text-secondary">
+    <div role="status" className={appearance === 'chat' ? 'flex min-w-0 items-center gap-3 py-1 text-[12px] leading-4 text-secondary' : 'flex min-h-7 min-w-0 items-center gap-2 text-label text-secondary'}>
       {/* Spinner on the same column as the work log chevron and row icons */}
-      <span className="flex size-4 shrink-0 items-center justify-center">
-        <Spinner className="text-caption text-accent" />
+      <span className={appearance === 'chat' ? 'flex size-3 shrink-0 items-center justify-center' : 'flex size-4 shrink-0 items-center justify-center'}>
+        <Spinner className={appearance === 'chat' ? 'text-[12px] text-secondary' : 'text-caption text-accent'} />
       </span>
       <motion.span
         key={displayMessage}
@@ -138,7 +139,7 @@ export function ProcessingIndicator({ startTime, statusMessage }: ProcessingIndi
         {displayMessage}
       </motion.span>
       {elapsed >= 1 && (
-        <span className="shrink-0 text-label-sm tabular-nums text-tertiary">
+        <span className={appearance === 'chat' ? 'shrink-0 font-mono text-[12px] tracking-wider' : 'shrink-0 text-label-sm tabular-nums text-tertiary'}>
           {formatElapsed(elapsed)}
         </span>
       )}

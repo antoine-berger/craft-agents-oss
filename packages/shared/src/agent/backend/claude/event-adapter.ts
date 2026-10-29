@@ -18,6 +18,7 @@ import { contextAfterCompaction, contextFromClaude } from '../../context-usage.t
 import type { AgentError } from '../../errors.ts';
 import { BaseEventAdapter } from '../base-event-adapter.ts';
 import { ToolIndex, extractToolStarts, extractToolResults, isParentTaskTool, type ContentBlock } from '../../tool-matching.ts';
+import { ClaudeReasoningBlocks, ResponseUsageCollector, claudeResponseUsage, proseBlockId } from '../response-data.ts';
 import { classifyClaudeTaskNotification, classifyClaudeTaskProgress } from './task-notification.ts';
 
 /**
@@ -82,7 +83,11 @@ export class ClaudeEventAdapter extends BaseEventAdapter {
   private toolIndex = new ToolIndex();
   private emittedToolStarts = new Set<string>();
   private activeParentTools = new Set<string>();
-  private pendingText: string | null = null;
+  private pendingTexts = new Map<string, Array<Omit<Extract<AgentEvent, { type: 'text_complete' }>, 'type'>>>();
+  private streamedTextBlocks = new Set<string>();
+  private streamTurnIds = new Map<string, string>();
+  private responseData = new ResponseUsageCollector();
+  private reasoningBlocks = new ClaudeReasoningBlocks();
   private manualCompactionRequested = false;
   private manualCompactionBoundarySeen = false;
 
@@ -114,7 +119,11 @@ export class ClaudeEventAdapter extends BaseEventAdapter {
     this.toolIndex = new ToolIndex();
     this.emittedToolStarts = new Set();
     this.activeParentTools = new Set();
-    this.pendingText = null;
+    this.pendingTexts.clear();
+    this.streamedTextBlocks.clear();
+    this.streamTurnIds.clear();
+    this.responseData.clear();
+    this.reasoningBlocks.clear();
     this.lastAssistantUsage = null;
     this.manualCompactionRequested = false;
     this.manualCompactionBoundarySeen = false;
@@ -207,22 +216,17 @@ export class ClaudeEventAdapter extends BaseEventAdapter {
   }
 
   /**
-   * Flush any pending text that hasn't been emitted.
+   * Flush one pending text block. Call until null when draining an ended SDK stream.
    * Called after the for-await loop exits to handle edge cases
    * (e.g., SDK sends assistant message with text but skips message_delta).
    */
   flushPending(): AgentEvent | null {
-    if (this.pendingText) {
-      const event: AgentEvent = {
-        type: 'text_complete',
-        text: this.pendingText,
-        isIntermediate: false,
-        turnId: this.currentTurnId || undefined,
-      };
-      this.pendingText = null;
-      return event;
-    }
-    return null;
+    const entry = this.pendingTexts.entries().next().value;
+    if (!entry) return null;
+    const [scope, pending] = entry;
+    const first = pending.shift()!;
+    if (!pending.length) this.pendingTexts.delete(scope);
+    return { type: 'text_complete', ...first };
   }
 
   /**
@@ -272,6 +276,11 @@ export class ClaudeEventAdapter extends BaseEventAdapter {
       return;
     }
 
+    const sdkMessage = (message as any).message;
+    if (sdkMessage?.id) {
+      this.responseData.record(sdkMessage.id, claudeResponseUsage(sdkMessage));
+    }
+
     // Track usage from non-sidechain assistant messages
     const isSidechain = (message as any).parent_tool_use_id !== null;
     const structuredContextUsage = !isSidechain ? contextFromClaude((message as any).context_usage) : undefined;
@@ -318,6 +327,43 @@ export class ClaudeEventAdapter extends BaseEventAdapter {
     // Full assistant message with content blocks
     const content = (message as any).message?.content ?? [];
 
+    const parentToolUseId = (message as any).parent_tool_use_id || undefined;
+    const messageId = sdkMessage?.id ?? this.streamTurnIds.get(parentToolUseId ?? 'root');
+    const textIndices = content.flatMap((block: any, index: number) => block.type === 'text' ? [index] : []);
+    const orderedBlocks = messageId && (textIndices.length > 1
+      || textIndices.some((index: number) => this.streamedTextBlocks.has(proseBlockId(messageId, index, parentToolUseId)))
+      || (textIndices.length > 0 && content.some((block: any) => block.type !== 'text')));
+    if (orderedBlocks) {
+      if (!parentToolUseId) this.rememberTopLevelToolUses(content as ContentBlock[]);
+      const pending: Array<Omit<Extract<AgentEvent, { type: 'text_complete' }>, 'type'>> = [];
+      for (const [index, block] of content.entries()) {
+        if (block.type === 'text' && block.text) {
+          const prose = { text: block.text, turnId: messageId, parentToolUseId,
+            blockId: proseBlockId(messageId, index, parentToolUseId),
+            isIntermediate: index !== textIndices.at(-1) || sdkMessage?.stop_reason === 'tool_use'
+              || (!sdkMessage?.stop_reason && content.some((candidate: any) => candidate.type === 'tool_use')) };
+          // Persist each block in SDK order now. The stop-reason event below finalizes the last one.
+          events.push({ type: 'text_complete', ...prose, isIntermediate: true });
+          pending.push(prose);
+        } else if (block.type === 'thinking') {
+          events.push(...this.reasoningBlocks.assistant({ parent_tool_use_id: parentToolUseId,
+            message: { id: messageId, content: [block] } }, index));
+        } else if (block.type === 'tool_use') {
+          const starts = extractToolStarts([block], parentToolUseId, this.toolIndex, this.emittedToolStarts,
+            messageId, this.activeParentTools, this.callbacks.sessionDir);
+          for (const start of starts) if (start.type === 'tool_start' && isParentTaskTool(start.toolName)) this.activeParentTools.add(start.toolUseId);
+          events.push(...starts);
+        }
+      }
+      if (pending.length) {
+        const last = pending.at(-1)!;
+        if (!parentToolUseId) last.responseUsage = this.responseData.snapshot();
+        this.pendingTexts.set(parentToolUseId ?? 'root', pending);
+      }
+      return;
+    }
+    events.push(...this.reasoningBlocks.assistant(message as any));
+
     // Extract text from content blocks
     let textContent = '';
     for (const block of content) {
@@ -350,12 +396,22 @@ export class ClaudeEventAdapter extends BaseEventAdapter {
 
     if (textContent) {
       // Don't emit text_complete yet — wait for message_delta to get stop_reason
-      this.pendingText = textContent;
+      const parentToolUseId = (message as any).parent_tool_use_id || undefined;
+      this.pendingTexts.set(parentToolUseId ?? 'root', [{
+        text: textContent, parentToolUseId,
+        turnId: sdkMessage?.id ?? this.currentTurnId ?? undefined,
+        isIntermediate: sdkMessage?.stop_reason === 'tool_use',
+        responseUsage: parentToolUseId ? undefined : this.responseData.snapshot(),
+      }]);
     }
   }
 
   private adaptStreamEvent(message: SDKMessage, events: AgentEvent[]): void {
     const event = (message as any).event;
+    const scope = (message as any).parent_tool_use_id || 'root';
+    if (event.type === 'message_start' && event.message?.id) this.streamTurnIds.set(scope, event.message.id);
+    const streamTurnId = this.streamTurnIds.get(scope) ?? this.currentTurnId ?? undefined;
+    events.push(...this.reasoningBlocks.stream(message as any));
 
     // Debug: log key stream events only (skip per-chunk deltas and frequent pings)
     if (this.callbacks.onDebug && (event.type === 'message_start' || event.type === 'message_stop')) {
@@ -375,24 +431,25 @@ export class ClaudeEventAdapter extends BaseEventAdapter {
     // message_delta contains the actual stop_reason — emit pending text now
     if (event.type === 'message_delta') {
       const stopReason = event.delta?.stop_reason;
-      if (this.pendingText) {
-        const isIntermediate = stopReason === 'tool_use';
-        events.push({
-          type: 'text_complete',
-          text: this.pendingText,
-          isIntermediate,
-          turnId: this.currentTurnId || undefined,
-          parentToolUseId: (message as any).parent_tool_use_id || undefined,
-        });
-        this.pendingText = null;
+      const pending = this.pendingTexts.get(scope);
+      if (pending) {
+        for (const [index, prose] of pending.entries()) events.push({ type: 'text_complete', ...prose, isIntermediate: stopReason === 'tool_use' || index < pending.length - 1 });
+        this.pendingTexts.delete(scope);
       }
     }
 
-    if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
+    const initialText = event.type === 'content_block_start' && event.content_block?.type === 'text'
+      ? event.content_block.text : undefined;
+    if ((event.type === 'content_block_delta' && event.delta.type === 'text_delta') || initialText) {
+      const blockId = streamTurnId && typeof event.index === 'number'
+        ? proseBlockId(streamTurnId, event.index, (message as any).parent_tool_use_id || undefined) : undefined;
+      if (initialText && blockId && this.streamedTextBlocks.has(blockId)) return;
+      if (blockId) this.streamedTextBlocks.add(blockId);
       events.push({
         type: 'text_delta',
-        text: event.delta.text,
-        turnId: this.currentTurnId || undefined,
+        text: initialText ?? event.delta.text,
+        ...(blockId ? { blockId } : {}),
+        turnId: streamTurnId,
         parentToolUseId: (message as any).parent_tool_use_id || undefined,
       });
     } else if (event.type === 'content_block_start' && event.content_block.type === 'tool_use') {
@@ -410,7 +467,7 @@ export class ClaudeEventAdapter extends BaseEventAdapter {
         sdkParentId,
         this.toolIndex,
         this.emittedToolStarts,
-        this.currentTurnId || undefined,
+        streamTurnId,
         this.activeParentTools,
         this.callbacks.sessionDir,
       );
@@ -524,6 +581,10 @@ export class ClaudeEventAdapter extends BaseEventAdapter {
   }
 
   private adaptResult(message: SDKMessage, events: AgentEvent[]): void {
+    while (this.pendingTexts.size) {
+      const pending = this.flushPending();
+      if (pending) events.push(pending);
+    }
     const msg = message as any;
 
     // Debug logging

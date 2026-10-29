@@ -1,4 +1,5 @@
 import * as React from 'react'
+import { ArrowUpRight } from 'lucide-react'
 import ReactMarkdown, { defaultUrlTransform, type Components } from 'react-markdown'
 import rehypeKatex from 'rehype-katex'
 import rehypeRaw from 'rehype-raw'
@@ -25,6 +26,7 @@ import { useCollapsibleMarkdown } from './CollapsibleMarkdownContext'
 import { wrapWithSafeProxy } from './safe-components'
 import { MARKDOWN_MATH_OPTIONS } from './math-options'
 import { markdownUrlTransform } from './url-transform'
+import './chat-markdown.css'
 
 /**
  * Names of preview-block code-fence types that recursive `Markdown` callers
@@ -47,10 +49,12 @@ export type DisablablePreviewBlock =
  * - 'minimal': Clean rendering with syntax highlighting but no extra chrome
  *   Best for: Chat messages, inline content, when you want readability without clutter
  *
+ * - 'chat': Transcript prose and compact code, without document-preview widgets
+ *
  * - 'full': Rich rendering with beautiful tables, styled code blocks, proper typography
  *   Best for: Documentation, long-form content, when presentation matters
  */
-export type RenderMode = 'terminal' | 'minimal' | 'full'
+export type RenderMode = 'terminal' | 'minimal' | 'full' | 'chat'
 
 export interface MarkdownProps {
   children: string
@@ -228,9 +232,12 @@ function createComponents(
         <a
           href={safeHref}
           onClick={handleClick}
-          className="cursor-pointer text-accent underline decoration-accent/40 underline-offset-2 hover:decoration-current"
+          className={mode === 'chat'
+            ? 'cursor-pointer no-underline hover:underline wrap-anywhere'
+            : 'cursor-pointer text-accent underline decoration-accent/40 underline-offset-2 hover:decoration-current'}
         >
           {children}
+          {mode === 'chat' && safeHref && resolveMarkdownLinkTarget(trimmedHref).kind === 'url' && <ArrowUpRight aria-hidden className="ml-1 inline size-3 align-[-0.125em]" />}
         </a>
       )
     },
@@ -263,7 +270,7 @@ function createComponents(
   }
 
   // Minimal mode: clean with syntax highlighting
-  if (mode === 'minimal') {
+  if (mode === 'minimal' || mode === 'chat') {
     return {
       ...baseComponents,
       // Inline code
@@ -274,6 +281,11 @@ function createComponents(
         // Block code
         if (match || isBlock) {
           const code = String(children).replace(/\n$/, '')
+          // The transcript keeps ordinary fences as code; rich document previews stay on other surfaces.
+          if (mode === 'chat' && match?.[1] !== 'mermaid') {
+            return wrapBlock('code', code, <CodeBlock code={code} language={match?.[1]}
+              mode="full" appearance="chat" />, props.node?.position)
+          }
           // Diff code blocks → pierre/diffs for a proper diff viewer
           if (match?.[1] === 'diff') {
             return wrapBlock('code', code, <MarkdownDiffBlock code={code} className="my-2" />, props.node?.position)
@@ -373,7 +385,7 @@ function createComponents(
       },
       // Clean tables
       table: ({ children }) => (
-        <div className="my-3 overflow-x-auto">
+        <div className={mode === 'chat' ? "overflow-x-auto" : "my-3 overflow-x-auto"}>
           <table className="min-w-full text-label-lg">{children}</table>
         </div>
       ),
@@ -618,7 +630,8 @@ export function Markdown({
   )
 
   return (
-    <div className={cn('markdown-content', className)}>
+    <div data-markdown-appearance={mode === 'chat' ? 'chat' : undefined}
+      className={cn('markdown-content', mode === 'chat' && 'conductor-chat-prose', className)}>
       <ReactMarkdown
         remarkPlugins={remarkPlugins}
         rehypePlugins={[rehypeKatex, rehypeRaw]}

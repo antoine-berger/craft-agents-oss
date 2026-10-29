@@ -1,0 +1,224 @@
+[
+  {
+    "draft": "empty",
+    "nodes": {
+      "[data-composer-actions]": {
+        "clientHeight": 28,
+        "height": 28,
+        "scrollHeight": 32,
+        "width": 347,
+        "x": 344.5,
+        "y": 897
+      },
+      "[data-composer-content]": {
+        "clientHeight": 80,
+        "height": 80,
+        "scrollHeight": 80,
+        "width": 332,
+        "x": 355.5,
+        "y": 803
+      },
+      "[data-composer-layout=\"chat\"]": {
+        "clientHeight": 150,
+        "height": 150,
+        "scrollHeight": 150,
+        "width": 366,
+        "x": 337.5,
+        "y": 787
+      },
+      "[data-composer-model]": {
+        "clientHeight": 36,
+        "height": 36,
+        "scrollHeight": 36,
+        "width": 121.3515625,
+        "x": 540.1484375,
+        "y": 893
+      }
+    }
+  },
+  {
+    "draft": "long",
+    "nodes": {
+      "[data-composer-actions]": {
+        "clientHeight": 28,
+        "height": 28,
+        "scrollHeight": 32,
+        "width": 347,
+        "x": 344.5,
+        "y": 897
+      },
+      "[data-composer-content]": {
+        "clientHeight": 180,
+        "height": 180,
+        "scrollHeight": 700,
+        "width": 332,
+        "x": 355.5,
+        "y": 705
+      },
+      "[data-composer-layout=\"chat\"]": {
+        "clientHeight": 248,
+        "height": 248,
+        "scrollHeight": 248,
+        "width": 366,
+        "x": 337.5,
+        "y": 689
+      },
+      "[data-composer-model]": {
+        "clientHeight": 36,
+        "height": 36,
+        "scrollHeight": 36,
+        "width": 121.3515625,
+        "x": 540.1484375,
+        "y": 893
+      }
+    }
+  },
+  {
+    "draft": "empty",
+    "nodes": {
+      "[data-composer-actions]": {
+        "clientHeight": 28,
+        "height": 28,
+        "scrollHeight": 32,
+        "width": 467,
+        "x": 284.5,
+        "y": 897
+      },
+      "[data-composer-content]": {
+        "clientHeight": 80,
+        "height": 80,
+        "scrollHeight": 80,
+        "width": 452,
+        "x": 295.5,
+        "y": 803
+      },
+      "[data-composer-layout=\"chat\"]": {
+        "clientHeight": 150,
+        "height": 150,
+        "scrollHeight": 150,
+        "width": 486,
+        "x": 277.5,
+        "y": 787
+      },
+      "[data-composer-model]": {
+        "clientHeight": 36,
+        "height": 36,
+        "scrollHeight": 36,
+        "width": 135.3046875,
+        "x": 586.1953125,
+        "y": 893
+      }
+    }
+  },
+  {
+    "draft": "long",
+    "nodes": {
+      "[data-composer-actions]": {
+        "clientHeight": 28,
+        "height": 28,
+        "scrollHeight": 32,
+        "width": 467,
+        "x": 284.5,
+        "y": 897
+      },
+      "[data-composer-content]": {
+        "clientHeight": 180,
+        "height": 180,
+        "scrollHeight": 700,
+        "width": 452,
+        "x": 295.5,
+        "y": 705
+      },
+      "[data-composer-layout=\"chat\"]": {
+        "clientHeight": 248,
+        "height": 248,
+        "scrollHeight": 248,
+        "width": 486,
+        "x": 277.5,
+        "y": 689
+      },
+      "[data-composer-model]": {
+        "clientHeight": 36,
+        "height": 36,
+        "scrollHeight": 36,
+        "width": 135.3046875,
+        "x": 586.1953125,
+        "y": 893
+      }
+    }
+  },
+  {
+    "draft": "empty",
+    "nodes": {
+      "[data-composer-actions]": {
+        "clientHeight": 28,
+        "height": 28,
+        "scrollHeight": 32,
+        "width": 875,
+        "x": 80.5,
+        "y": 897
+      },
+      "[data-composer-content]": {
+        "clientHeight": 80,
+        "height": 80,
+        "scrollHeight": 80,
+        "width": 860,
+        "x": 91.5,
+        "y": 803
+      },
+      "[data-composer-layout=\"chat\"]": {
+        "clientHeight": 150,
+        "height": 150,
+        "scrollHeight": 150,
+        "width": 894,
+        "x": 73.5,
+        "y": 787
+      },
+      "[data-composer-model]": {
+        "clientHeight": 36,
+        "height": 36,
+        "scrollHeight": 36,
+        "width": 135.3046875,
+        "x": 790.1953125,
+        "y": 893
+      }
+    }
+  },
+  {
+    "draft": "long",
+    "nodes": {
+      "[data-composer-actions]": {
+        "clientHeight": 28,
+        "height": 28,
+        "scrollHeight": 32,
+        "width": 875,
+        "x": 80.5,
+        "y": 897
+      },
+      "[data-composer-content]": {
+        "clientHeight": 180,
+        "height": 180,
+        "scrollHeight": 700,
+        "width": 860,
+        "x": 91.5,
+        "y": 705
+      },
+      "[data-composer-layout=\"chat\"]": {
+        "clientHeight": 248,
+        "height": 248,
+        "scrollHeight": 248,
+        "width": 894,
+        "x": 73.5,
+        "y": 689
+      },
+      "[data-composer-model]": {
+        "clientHeight": 36,
+        "height": 36,
+        "scrollHeight": 36,
+        "width": 135.3046875,
+        "x": 790.1953125,
+        "y": 893
+      }
+    }
+  }
+]

@@ -75,6 +75,7 @@ export function SessionItem({
   const hasMatch = chatMatchCount != null && chatMatchCount > 0
   const attention = ctx.attention?.[item.id]
   const hasServerAttention = attention?.status === 'needs-human'
+  const hasInteractiveQuestion = attention?.reasons.some(reason => reason.source === 'agent' && reason.id === 'interactive-question') ?? false
   const hasPendingPrompt = ctx.hasPendingPrompt?.(item.id) ?? false
   const isUnread = hasUnreadMeta(item)
   const backgroundTasks = useAtomValue(backgroundTasksAtomFamily(item.id))
@@ -85,8 +86,10 @@ export function SessionItem({
   const sessionBindings = messagingBindingsBySession.get(item.id) ?? []
   const hasMessagingBinding = sessionBindings.length > 0
 
-  // Activity wins while background tasks run; retain attention for when they finish.
-  const runState: 'needs-you' | 'working' | 'failed' | 'plan' | null = isWorking
+  // A real owner question blocks its agent even while its MCP call remains alive.
+  const runState: 'needs-you' | 'working' | 'failed' | 'plan' | null = hasInteractiveQuestion
+    ? 'needs-you'
+    : isWorking
     ? 'working'
     : (hasPendingPrompt || hasServerAttention)
       ? 'needs-you'

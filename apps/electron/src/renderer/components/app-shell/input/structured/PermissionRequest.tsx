@@ -1,4 +1,5 @@
 import { useTranslation } from 'react-i18next'
+import { InlineToolBlock } from '@craft-agent/ui'
 import { Hand, RefreshCw, TriangleAlert } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import type { PermissionRisk } from '@craft-agent/core/types'
@@ -22,6 +23,7 @@ interface PermissionRequestProps {
   onResponse: (response: PermissionResponse) => void
   /** When true, the composer slot (InputContainer) draws the card material and ring */
   unstyled?: boolean
+  appearance?: 'default' | 'chat'
 }
 
 /**
@@ -32,7 +34,7 @@ interface PermissionRequestProps {
  * a sunken well (scrollable), then Allow (primary) · Always Allow (secondary, only when there is
  * something to remember) · Deny (ghost).
  */
-export function PermissionRequest({ request, onResponse, unstyled = false }: PermissionRequestProps) {
+export function PermissionRequest({ request, onResponse, unstyled = false, appearance = 'default' }: PermissionRequestProps) {
   const { t } = useTranslation()
   // Decision-model risk badges (opt-in, informational). Literal keys keep the i18n coverage check effective.
   const riskLabels: Record<PermissionRisk, string> = {
@@ -60,6 +62,26 @@ export function PermissionRequest({ request, onResponse, unstyled = false }: Per
   const handleDeny = () => {
     onResponse({ type: 'permission', allowed: false, alwaysAllow: false })
   }
+
+  if (appearance === 'chat') return (
+    <div data-tutorial="permission-banner" className="flex min-h-0 flex-col gap-4 overflow-y-auto rounded-lg bg-sunken px-4 py-3 text-foreground">
+      <div className="text-[14px] font-medium leading-5">{t('chat.permissionRequired')}</div>
+      <div className="min-w-0 overflow-hidden">
+        <InlineToolBlock sessionId={request.sessionId} activity={{ id: request.requestId, type: 'tool', status: 'pending',
+          toolName: request.toolName, toolInput: request.command ? { command: request.command } : undefined,
+          intent: request.description, timestamp: 0 }} />
+        {request.description && <p className="mt-1 text-[12px] leading-4 text-secondary">{request.description}</p>}
+        {risks.length > 0 && <div className="mt-2 flex flex-wrap gap-1" title={t('chat.permissionRiskHint')}>
+          {risks.map(risk => <span key={risk} className="rounded-sm border border-[var(--destructive-border)] px-1.5 py-0.5 text-[12px] text-destructive">{riskLabels[risk]}</span>)}
+        </div>}
+      </div>
+      <div className="flex flex-col items-stretch gap-2">
+        <Button variant="outline" className="h-9 justify-start border border-strong px-4 text-[14px] shadow-none" onClick={handleAllow} data-tutorial="permission-allow-button">{t('chat.permissionAllow')}</Button>
+        {canRemember && <Button variant="outline" className="h-9 justify-start border border-strong px-4 text-[14px] shadow-none" onClick={handleAlwaysAllow}>{t('chat.permissionAlwaysAllow')}</Button>}
+        <Button variant="outline" className="h-9 justify-start border border-strong px-4 text-[14px] shadow-none" onClick={handleDeny}>{t('chat.permissionDeny')}</Button>
+      </div>
+    </div>
+  )
 
   return (
     <DecisionCard tone={tone} standalone={!unstyled} data-tutorial="permission-banner">

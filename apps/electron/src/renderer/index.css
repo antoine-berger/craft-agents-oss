@@ -662,3 +662,21 @@ html.dark[data-scenic] .fullscreen-overlay-background {
   min-height: 31px;
   padding: 6px 8px;
 }
+
+/* Conductor has separate sidebar and user-bubble inks; keep those roles scoped. */
+html[data-theme="conductor"] [data-focus-zone="sidebar"] {
+  --text: var(--navigator-text);
+  --text-secondary: var(--navigator-text-muted);
+  --text-tertiary: var(--navigator-text-muted);
+  --border: var(--navigator-border);
+}
+html[data-theme="conductor"] .bg-user-message-bubble {
+  color: var(--bubble-text);
+}
+
+html[data-theme="conductor"] [data-craft-composer] {
+  background: var(--surface-input);
+}
+html[data-theme="conductor"] .popover-styled {
+  --text: var(--popover-ink);
+}

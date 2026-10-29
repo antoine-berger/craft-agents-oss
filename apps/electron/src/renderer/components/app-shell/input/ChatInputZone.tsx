@@ -11,6 +11,7 @@ import { pendingLabelValueEditAtom } from '@/atoms/label-value-edit'
 import { useOptionalAppShellContext } from '@/context/AppShellContext'
 import type { BackgroundTask } from '../ActiveTasksBar'
 import { ActiveOptionBadges } from '../ActiveOptionBadges'
+import { BackgroundTaskStrip } from '../BackgroundTaskStrip'
 import { InputContainer } from './InputContainer'
 import { InputErrorBoundary } from './InputErrorBoundary'
 import { COMPOSER_META_CHIP } from './composer-styles'
@@ -44,6 +45,7 @@ function PastedCommandChip({ command, onRun, onDismiss }: { command: string; onR
 }
 
 interface ChatInputZoneProps {
+  appearance?: 'default' | 'chat'
   compactMode?: boolean
   /** Show the row above the composer (background tasks, the mode chip during decision prompts) */
   showOptionBadges?: boolean
@@ -69,6 +71,7 @@ interface ChatInputZoneProps {
 }
 
 export function ChatInputZone({
+  appearance = 'default',
   compactMode = false,
   showOptionBadges,
   permissionMode = 'ask',
@@ -136,14 +139,22 @@ export function ChatInputZone({
 
   return (
     <div className={cn(
-      CHAT_LAYOUT.maxWidth,
+      appearance === 'chat' ? 'max-w-[calc(56rem+32px)]' : CHAT_LAYOUT.maxWidth,
       'mx-auto w-full mt-1',
       // The card lines up with the transcript's text edge: the 16px gutter in compact, the column's
       // 24px gutters on desktop
-      compactMode ? 'px-gutter pb-gutter' : 'px-3 @xs/panel:px-6 pb-3.5',
+      appearance === 'chat' ? 'px-4 pb-4' : compactMode ? 'px-gutter pb-gutter' : 'px-3 @xs/panel:px-6 pb-3.5',
       className,
     )}>
-      {shouldShowOptionBadges && (
+      {shouldShowOptionBadges && (appearance === 'chat' ? (
+        <BackgroundTaskStrip
+          tasks={tasks}
+          sessionId={sessionId}
+          onStopTask={onStopTask}
+          onDismissTask={onDismissTask}
+          onOpenTaskOutput={onOpenTaskOutput}
+        />
+      ) : (
         <ActiveOptionBadges
           showPermissionMode={false}
           permissionMode={permissionMode}
@@ -154,7 +165,7 @@ export function ChatInputZone({
           onDismissTask={onDismissTask}
           onOpenTaskOutput={onOpenTaskOutput}
         />
-      )}
+      ))}
 
       {pastedSnippet && onRunCommand && (
         <PastedCommandChip command={pastedSnippet.command} onRun={handleRunPasted} onDismiss={() => setPastedSnippet(null)} />
@@ -167,6 +178,7 @@ export function ChatInputZone({
       >
         <InputContainer
           {...inputProps}
+          appearance={appearance}
           onConsoleSnippetPaste={onRunCommand ? handleSnippetPaste : undefined}
           compactMode={compactMode}
           showPermissionModeChip={false}

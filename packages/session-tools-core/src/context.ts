@@ -7,6 +7,7 @@
  * This enables writing tool handlers once and running them in both environments.
  */
 
+import type { UserQuestion, UserQuestionResponse } from '@craft-agent/core/types';
 import type {
   AuthRequest,
   ToolResult,
@@ -150,6 +151,9 @@ export interface ValidatorInterface {
  * - Codex: createCodexContext() with callback IPC and limited capabilities
  */
 export interface SessionToolContext {
+  askUserQuestion?: (questions: UserQuestion[], signal?: AbortSignal) => Promise<UserQuestionResponse>;
+  /** Cancellation belongs to this invocation, never the shared session context. */
+  invocationSignal?: AbortSignal;
   markAttention?: (request: { kind: 'question' | 'plan' | 'error'; title: string; detail?: string }) => void | Promise<void>;
   // ============================================================
   // Session Info
