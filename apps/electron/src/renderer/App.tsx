@@ -1,4 +1,4 @@
-import { CANCEL_SESSION_SUBMISSIONS, SessionSubmissions, SubmissionCancelled, recoverSubmissionDraft, canChooseSubmissionRepository, discardPendingSubmission } from './lib/session-submissions'
+import { CANCEL_SESSION_SUBMISSIONS, SessionSubmissions, SubmissionCancelled, recoverSubmissionDraft, canChooseSubmissionRepository, discardPendingSubmission, confirmPendingSubmission } from './lib/session-submissions'
 import { initialRepository, seedSelectedRepositories } from './components/app-shell/input/repository-history'
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -533,10 +533,13 @@ export default function App() {
     })
   }, [])
 
-  const refreshSessionFromServer = useCallback(async (sessionId: string): Promise<'refreshed' | 'preserved_stale_messages' | 'failed'> => {
+  const refreshSessionFromServer = useCallback(async (sessionId: string, canApply?: () => boolean): Promise<'refreshed' | 'preserved_stale_messages' | 'failed'> => {
     try {
+      const before = store.get(sessionAtomFamily(sessionId))
       const fresh = await window.electronAPI.getSessionMessages(sessionId)
       if (!fresh) return 'failed'
+      // A delayed recovery response must never replace events received during the fetch.
+      if (store.get(sessionAtomFamily(sessionId)) !== before || (canApply && !canApply())) return 'preserved_stale_messages'
 
       const prevSession = store.get(sessionAtomFamily(sessionId))
       const preservedStaleMessages = !!prevSession && prevSession.messages.length > 0 && (!fresh.messages || fresh.messages.length === 0)
@@ -846,17 +849,7 @@ export default function App() {
     }
   }, [windowWorkspaceId, refreshLlmConnections])
 
-  // Listen for session events - uses centralized event processor for consistent state transitions
-  //
-  // SOURCE OF TRUTH LOGIC:
-  // - During streaming (atom.isProcessing = true): Atom is source of truth
-  //   All events read from and write to atom. This preserves streaming data.
-  // - When not streaming: React state is source of truth
-  //   Events read/write React state, which syncs to atoms via useEffect.
-  // - Handoff events (complete, error, etc.): End streaming, sync atom → React state
-  //
-  // This is simpler and more robust than checking event types - we just ask
-  // "is this session currently streaming?" and route accordingly.
+  // All events update the per-session atom. Terminal and metadata events also refresh the list.
   useEffect(() => {
     // Handoff events signal end of streaming - need to sync back to React state
     // Also includes todo_state_changed so status updates immediately reflect in sidebar
@@ -1008,96 +1001,48 @@ export default function App() {
         }))
       }
 
-      // Check if session is currently streaming (atom is source of truth)
-      const atomSession = store.get(sessionAtomFamily(sessionId))
-      const isStreaming = atomSession?.isProcessing === true
-      const isHandoff = handoffEventTypes.has(event.type)
-
-      // During streaming OR for handoff events: use atom as source of truth
-      // This ensures all events during streaming see the complete state
-      if (isStreaming || isHandoff) {
-        const currentSession = atomSession ?? null
-
-        // Process the event
-        const { session: updatedSession, effects } = processAgentEvent(
-          agentEvent,
-          currentSession,
-          workspaceId
-        )
-
-        // Update atom directly (UI sees update immediately)
-        updateSessionDirect(sessionId, () => updatedSession)
-
-        // Handle side effects
-        handleEffects(effects, sessionId, event.type)
-
-        // Handle background task events
-        handleBackgroundTaskEvent(store, sessionId, event, agentEvent)
-
-        // For handoff events, update metadata map for list display
-        // NOTE: No sessionsAtom to sync - atom and metadata are the source of truth
-        if (isHandoff) {
-          // Update metadata map
-          const metaMap = store.get(sessionMetaMapAtom)
-          const newMetaMap = new Map(metaMap)
-          newMetaMap.set(sessionId, extractSessionMeta(updatedSession))
-          store.set(sessionMetaMapAtom, newMetaMap)
-
-          // Show notification on complete (when window is not focused)
-          // Skip hidden sessions (mini-agent sessions) - they shouldn't trigger notifications
-          if (event.type === 'complete' && !updatedSession.hidden) {
-            // Get the last assistant/plan message as preview
-            const lastMessage = updatedSession.messages.findLast(
-              m => (m.role === 'assistant' || m.role === 'plan') && !m.isIntermediate
-            )
-            // Strip markdown so OS notifications display clean plain text
-            const rawPreview = lastMessage?.content?.substring(0, 200) || undefined
-            const preview = rawPreview ? stripMarkdown(rawPreview).substring(0, 100) || undefined : undefined
-            showSessionNotification(updatedSession, preview)
-
-            // In-app complement to the OS notification: when a *background*
-            // session (one not shown in any open panel) finishes, queue a chip
-            // above the chat. The OS notification above is suppressed while the
-            // window is focused, so the chip is the only completion signal then.
-            if (
-              store.get(showBackgroundFinishedChipAtom) &&
-              !store.get(visibleSessionIdsAtom).has(sessionId)
-            ) {
-              store.set(pushBackgroundFinishedAtom, {
-                sessionId,
-                title: getSessionTitle(updatedSession),
-                finishedAt: Date.now(),
-              })
-            }
-          }
-        }
-
-        return
-      }
-
-      // Not streaming: use per-session atoms directly (no sessionsAtom)
       const currentSession = store.get(sessionAtomFamily(sessionId))
-
-      const { session: updatedSession, effects } = processAgentEvent(
-        agentEvent,
-        currentSession,
-        workspaceId
-      )
-
-      // Handle side effects
+      const isStreaming = currentSession?.isProcessing === true
+      const isHandoff = handoffEventTypes.has(event.type)
+      const { session: updatedSession, effects } = processAgentEvent(agentEvent, currentSession, workspaceId)
+      updateSessionDirect(sessionId, () => updatedSession)
       handleEffects(effects, sessionId, event.type)
-
-      // Handle background task events
       handleBackgroundTaskEvent(store, sessionId, event, agentEvent)
 
-      // Update per-session atom
-      updateSessionDirect(sessionId, () => updatedSession)
+      // Keep list metadata in sync without rebuilding it for every streaming delta.
+      if (isHandoff || !isStreaming) {
+        const metaMap = new Map(store.get(sessionMetaMapAtom))
+        metaMap.set(sessionId, extractSessionMeta(updatedSession))
+        store.set(sessionMetaMapAtom, metaMap)
+      }
 
-      // Update metadata map
-      const metaMap = store.get(sessionMetaMapAtom)
-      const newMetaMap = new Map(metaMap)
-      newMetaMap.set(sessionId, extractSessionMeta(updatedSession))
-      store.set(sessionMetaMapAtom, newMetaMap)
+      // Show notification on complete (when window is not focused)
+      // Skip hidden sessions (mini-agent sessions) - they shouldn't trigger notifications
+      if (event.type === 'complete' && !updatedSession.hidden) {
+        // Get the last assistant/plan message as preview
+        const lastMessage = updatedSession.messages.findLast(
+          m => (m.role === 'assistant' || m.role === 'plan') && !m.isIntermediate
+        )
+        // Strip markdown so OS notifications display clean plain text
+        const rawPreview = lastMessage?.content?.substring(0, 200) || undefined
+        const preview = rawPreview ? stripMarkdown(rawPreview).substring(0, 100) || undefined : undefined
+        showSessionNotification(updatedSession, preview)
+
+        // In-app complement to the OS notification: when a *background*
+        // session (one not shown in any open panel) finishes, queue a chip
+        // above the chat. The OS notification above is suppressed while the
+        // window is focused, so the chip is the only completion signal then.
+        if (
+          store.get(showBackgroundFinishedChipAtom) &&
+          !store.get(visibleSessionIdsAtom).has(sessionId)
+        ) {
+          store.set(pushBackgroundFinishedAtom, {
+            sessionId,
+            title: getSessionTitle(updatedSession),
+            finishedAt: Date.now(),
+          })
+        }
+      }
     })
 
     return cleanup
@@ -1453,6 +1398,9 @@ export default function App() {
         deliveryMode,
         repository,
       })
+      if (store.get(sessionAtomFamily(sessionId))?.messages.some(item => item.id === optimisticMessageId && item.isPending)) {
+        updateSessionById(sessionId, s => ({ messages: confirmPendingSubmission(s.messages, userMessage.id) }))
+      }
     } catch (error) {
       if (!(error instanceof SubmissionCancelled)) sessionSubmissions.cancel(sessionId)
       const confirmed = optimisticMessageId !== undefined && store.get(sessionAtomFamily(sessionId))?.messages

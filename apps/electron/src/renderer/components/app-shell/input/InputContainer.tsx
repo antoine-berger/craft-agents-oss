@@ -68,7 +68,6 @@ export function InputContainer({
   )
   const [structuredHeight, setStructuredHeight] = React.useState<number | null>(null)
   const [isFocused, setIsFocused] = React.useState(false)
-  const hasInitializedRef = React.useRef(false)
 
   // Create a stable key for the current content
   const contentKey = mode === 'freeform' ? 'freeform' : `structured-${structuredInput?.type}`
@@ -133,10 +132,9 @@ export function InputContainer({
 
   // Handle height changes from FreeFormInput (synchronous, no measuring div needed)
   const handleFreeformHeightChange = React.useCallback((height: number) => {
+    // A transient hidden/relayout measurement must not permanently collapse the card.
+    if (!Number.isFinite(height) || height <= 0) return
     setFreeformHeight(height)
-    if (!hasInitializedRef.current) {
-      hasInitializedRef.current = true
-    }
   }, [])
 
   // Handle focus changes from FreeFormInput
@@ -157,12 +155,6 @@ export function InputContainer({
         const height = entry.contentRect.height
         if (height > 0) {
           setStructuredHeight(height)
-          // Mark as initialized after first measurement
-          if (!hasInitializedRef.current) {
-            requestAnimationFrame(() => {
-              hasInitializedRef.current = true
-            })
-          }
         }
       }
     })

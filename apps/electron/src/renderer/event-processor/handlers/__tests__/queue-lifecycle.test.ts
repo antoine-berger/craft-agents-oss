@@ -21,6 +21,10 @@ describe('queue renderer delivery identity',()=>{
   const after=processEvent(state([queued('a')]),{type:'user_message',sessionId:'queue',optimisticMessageId:'opt-b',status:'queued',message:queued('backend-b')}).state
   expect(after.session.messages.map(m=>m.id)).toEqual(['a','backend-b'])
  })
+ it('does not guess a local submission identity from a server prompt with matching text',()=>{
+  const after=processEvent(state([queued('local')]),{type:'user_message',sessionId:'queue',status:'queued',message:queued('server')}).state
+  expect(after.session.messages.map(m=>m.id)).toEqual(['local','server'])
+ })
  it('removes only the requested queued message without losing streaming state',()=>{
   const original=state([queued('opt-a'),queued('opt-b')]);original.streaming={turnId:'active'} as any
   const after=processEvent(original,{type:'queued_message_removed',sessionId:'queue',messageId:'backend-b',optimisticMessageId:'opt-b'}).state

@@ -133,6 +133,8 @@ export interface Session {
   hidden?: boolean
   isArchived?: boolean
   queuePaused?: boolean
+  /** Runtime queue observation for a loaded transcript; never stored as conversation data. */
+  queuedMessageCount?: number
   archivedAt?: number
   supportsBranching?: boolean
   /** Workspace-scoped project id this session is bound to (undefined = unbound) */
@@ -498,7 +500,7 @@ export type SessionEvent =
   | { type: 'name_changed'; sessionId: string; name?: string }
   | { type: 'session_model_changed'; sessionId: string; model: string | null }
   | { type: 'session_status_changed'; sessionId: string; sessionStatus: SessionStatus }
-  | { type: 'session_metadata_changed'; sessionId: string; changes: Partial<Pick<Session, 'taskNodeCount' | 'kanbanColumn' | 'taskDraft' | 'taskSlug' | 'projectId' | 'backgroundAgentCount' | 'recovery' | 'queuePaused'>> }
+  | { type: 'session_metadata_changed'; sessionId: string; changes: Partial<Pick<Session, 'taskNodeCount' | 'kanbanColumn' | 'taskDraft' | 'taskSlug' | 'projectId' | 'backgroundAgentCount' | 'recovery' | 'queuePaused' | 'isProcessing'>> }
   | { type: 'session_deleted'; sessionId: string }
   | { type: 'session_created'; sessionId: string }
   | { type: 'session_shared'; sessionId: string; sharedUrl: string }

@@ -51,6 +51,12 @@ export function discardPendingSubmission(messages: Message[], messageId: string 
   return messages.filter(message => message.id !== messageId || !message.isPending)
 }
 
+/** The persisted RPC acknowledgement confirms delivery even if its UI event was missed. */
+export function confirmPendingSubmission(messages: Message[], messageId: string): Message[] {
+  return messages.map(message => message.id === messageId && message.isPending
+    ? { ...message, isPending: false } : message)
+}
+
 /** A late draft-file read must keep attachments restored while that read was in flight. */
 export function mergeHydratedAttachments(hydrated: FileAttachment[], current: FileAttachment[]): FileAttachment[] {
   return [...hydrated.filter(file => !current.some(value => value.path === file.path && value.name === file.name

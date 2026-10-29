@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test'
 import { registerSessionsHandlers } from '@craft-agent/server-core/handlers/rpc/sessions'
 import { RPC_CHANNELS, type FileAttachment } from '@craft-agent/shared/protocol'
 import type { SessionDraft } from '@craft-agent/shared/config'
-import { SessionSubmissions, SubmissionCancelled, recoverSubmissionDraft, canChooseSubmissionRepository, discardPendingSubmission, mergeHydratedAttachments } from '../session-submissions'
+import { SessionSubmissions, SubmissionCancelled, recoverSubmissionDraft, canChooseSubmissionRepository, discardPendingSubmission, confirmPendingSubmission, mergeHydratedAttachments } from '../session-submissions'
 import { CONTENT_PERSIST_CAP } from '../drafts'
 
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(r => { resolve = r }); return { promise, resolve } }
@@ -113,4 +113,13 @@ test('late attachment hydration preserves restored bytes and existing draft file
   expect(mergeHydratedAttachments([old, restored], [restored])).toHaveLength(2)
   const differentBytes = { ...restored, base64: 'BBBB' }
   expect(mergeHydratedAttachments([restored], [differentBytes])).toHaveLength(2)
+})
+
+test('a persisted RPC ACK clears only its pending flag when the live UI confirmation was missed', () => {
+  const first = { id: 'first', role: 'user', content: 'same text', timestamp: 1, isPending: true, isQueued: true } as any
+  const second = { ...first, id: 'second', attachments: [{ id: 'file' }] }
+  const after = confirmPendingSubmission([first, second], 'second')
+  expect(after[0]).toBe(first)
+  expect(after[1]).toEqual({ ...second, isPending: false })
+  expect(discardPendingSubmission(after, 'second')).toHaveLength(2)
 })

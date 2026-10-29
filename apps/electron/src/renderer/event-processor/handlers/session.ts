@@ -524,13 +524,8 @@ export function handleUserMessage(
   const { message, status } = event
 
   // Identity wins even when two pending messages contain the same text.
-  let existingIndex = session.messages.findIndex(m => m.role === 'user'
+  const existingIndex = session.messages.findIndex(m => m.role === 'user'
     && (m.id === message.id || m.id === event.optimisticMessageId))
-  if (existingIndex < 0 && !event.optimisticMessageId) {
-    const candidates = session.messages.map((m, index) => ({ m, index })).filter(({ m }) => m.role === 'user'
-      && m.isPending && m.content === message.content && Math.abs(m.timestamp - message.timestamp) < 5000)
-    if (candidates.length === 1) existingIndex = candidates[0]!.index
-  }
 
   let updatedMessages: Message[]
 
@@ -591,8 +586,8 @@ export function handleUserMessage(
         messages: updatedMessages,
         lastMessageAt: Date.now(),
         lastMessageRole: 'user',  // Clear plan badge when user responds
-        // Set isProcessing when message is accepted/processing (enables multi-window sync)
-        isProcessing: status === 'accepted' || status === 'processing',
+        // A queued acknowledgement says nothing about the turn already running.
+        isProcessing: status === 'queued' ? session.isProcessing : true,
       },
       streaming,
     },

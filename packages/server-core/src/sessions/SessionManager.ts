@@ -1227,7 +1227,8 @@ function managedToSession(m: ManagedSession, overrides?: Partial<Session>): Sess
     preview: m.preview,
     lastMessageRole: m.lastMessageRole,
     tokenUsage: m.tokenUsage,
-    messageCount: m.messageCount,
+    messageCount: m.messagesLoaded ? m.messages.length : m.messageCount,
+    queuedMessageCount: m.messagesLoaded ? m.messages.filter(message => message.role === 'user' && message.isQueued).length : undefined,
     lastFinalMessageId: m.lastFinalMessageId,
     // Runtime-only fields
     workspaceId: m.workspace.id,
@@ -1915,6 +1916,7 @@ export class SessionManager implements ISessionManager {
     } else if (was && !processing) {
       sessionRuntimeHooks.onSessionStopped()
     }
+    if (was !== processing) this.sendEvent({ type: 'session_metadata_changed', sessionId: managed.id, changes: { isProcessing: processing } }, managed.workspace.id)
   }
 
   private setSessionRecovery(managed: ManagedSession, recovery: SessionRecovery | null): void {

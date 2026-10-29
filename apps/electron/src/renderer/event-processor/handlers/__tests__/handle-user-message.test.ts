@@ -31,6 +31,21 @@ function processingEvent(timestamp: number): UserMessageEvent {
 }
 
 describe('handleUserMessage queued replay', () => {
+  it('keeps the active turn running when another message is queued', () => {
+    const state = makeState([{ id: 'history', role: 'assistant', content: 'Working', timestamp: 1 }])
+    const next = handleUserMessage(state, { ...processingEvent(200), status: 'queued' })
+    expect(next.state.session.isProcessing).toBe(true)
+    expect(next.state.session.messages[0]).toBe(state.session.messages[0])
+    expect(next.state.session.messages[1]?.isQueued).toBe(true)
+  })
+
+  it('does not start an idle turn when a queued message is edited or recovered', () => {
+    const state = makeState([])
+    state.session.isProcessing = false
+    const next = handleUserMessage(state, { ...processingEvent(200), status: 'queued' })
+    expect(next.state.session.isProcessing).toBe(false)
+  })
+
   it('applies the canonical replay timestamp without replacing the optimistic id', () => {
     const state = makeState([
       {
