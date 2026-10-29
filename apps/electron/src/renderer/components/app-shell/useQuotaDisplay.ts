@@ -4,21 +4,22 @@ import { mergeQuotaSnapshot, QUOTA_REFRESH_MS, quotaRefreshDue, readQuotaDisplay
 
 type GetQuotas = (request?: ProviderQuotasRequest) => Promise<ProviderQuotasSnapshot>
 
-/** One selected-account refresh per minute; server cooldown/backoff applies across app windows. */
+/** Refresh the selected meter, or all accounts while their usage menu is visible. */
 export function useQuotaDisplay(getQuotas: GetQuotas, scope: string) {
   const [initial] = useState(() => readQuotaDisplay(scope))
   const [snapshot, setSnapshot] = useState(initial.snapshot)
   const [selectedId, setSelectedId] = useState<string | null>(initial.selectedId)
   const [busy, setBusy] = useState(false)
   const [failed, setFailed] = useState(false)
+  const [expanded, setExpanded] = useState(false)
   const [clock, setClock] = useState(Date.now)
-  const state = useRef({ snapshot, selectedId })
-  state.current = { snapshot, selectedId }
+  const state = useRef({ snapshot, selectedId, expanded })
+  state.current = { snapshot, selectedId, expanded }
   const request = useRef(getQuotas)
   request.current = getQuotas
   const mounted = useRef(false)
   const pending = useRef(false)
-  const lastFailureAt = useRef({ accountId: '', at: 0 })
+  const lastFailureAt = useRef({ key: '', at: 0 })
   const selected = snapshot?.accounts.find(account => !account.disabled && account.accountId === selectedId)
     ?? snapshot?.accounts.find(account => !account.disabled)
 
@@ -27,21 +28,25 @@ export function useQuotaDisplay(getQuotas: GetQuotas, scope: string) {
     const current = state.current
     const account = current.snapshot?.accounts.find(value => !value.disabled && value.accountId === current.selectedId)
       ?? current.snapshot?.accounts.find(value => !value.disabled)
-    const readCacheOnly = cachedOnly || (manual && !account)
-    if (!readCacheOnly && (!account || (!manual && (!quotaRefreshDue(account, Date.now()) || (lastFailureAt.current.accountId === account.accountId && Date.now() - lastFailureAt.current.at < QUOTA_REFRESH_MS))))) return
+    const allAccounts = manual || current.expanded
+    const readCacheOnly = cachedOnly
+    if (!readCacheOnly && !manual && !account) return
+    const key = allAccounts ? '*' : account?.accountId ?? ''
+    const due = allAccounts ? current.snapshot?.accounts.some(value => quotaRefreshDue(value, Date.now())) : quotaRefreshDue(account, Date.now())
+    if (!readCacheOnly && !manual && (!due || (lastFailureAt.current.key === key && Date.now() - lastFailureAt.current.at < QUOTA_REFRESH_MS))) return
     pending.current = true
     setBusy(true)
     try {
-      const incoming = await request.current({ refresh: !readCacheOnly, ...(!readCacheOnly ? { accountId: account!.accountId } : {}) })
+      const incoming = await request.current({ refresh: !readCacheOnly, ...(!readCacheOnly && !allAccounts ? { accountId: account!.accountId } : {}) })
       if (!mounted.current) return
       const value = mergeQuotaSnapshot(state.current.snapshot, incoming)
       state.current = { ...state.current, snapshot: value }
       setSnapshot(value)
       saveQuotaDisplay(scope, value, state.current.selectedId)
       setFailed(false)
-      lastFailureAt.current = incoming.serviceAvailable ? { accountId: '', at: 0 } : { accountId: account?.accountId ?? '', at: Date.now() }
+      lastFailureAt.current = incoming.serviceAvailable ? { key: '', at: 0 } : { key, at: Date.now() }
     } catch {
-      if (mounted.current) { setFailed(true); lastFailureAt.current = { accountId: account?.accountId ?? '', at: Date.now() } }
+      if (mounted.current) { setFailed(true); lastFailureAt.current = { key, at: Date.now() } }
     } finally {
       pending.current = false
       if (mounted.current) { setBusy(false); setClock(Date.now()) }
@@ -72,7 +77,7 @@ export function useQuotaDisplay(getQuotas: GetQuotas, scope: string) {
   }, [refresh])
   useEffect(() => {
     if (!busy && document.visibilityState !== 'hidden') void refresh()
-  }, [selected?.accountId, busy, refresh])
+  }, [selected?.accountId, expanded, busy, refresh])
   useEffect(() => { if (snapshot) saveQuotaDisplay(scope, snapshot, selectedId) }, [scope, snapshot, selectedId])
-  return { snapshot, selectedId, setSelectedId, busy, failed, refresh, clock }
+  return { snapshot, selectedId, setSelectedId, setExpanded, busy, failed, refresh, clock }
 }

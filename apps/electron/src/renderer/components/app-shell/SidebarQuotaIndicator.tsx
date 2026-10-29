@@ -45,7 +45,7 @@ export function SidebarQuotaIndicator(props: SidebarQuotaIndicatorProps) {
 }
 
 function QuotaIndicatorContent({ getQuotas, className, cacheKey = 'local' }: SidebarQuotaIndicatorProps) {
-  const { snapshot, selectedId, setSelectedId, busy, failed, refresh } = useQuotaDisplay(getQuotas, cacheKey)
+  const { snapshot, selectedId, setSelectedId, setExpanded, busy, failed, refresh } = useQuotaDisplay(getQuotas, cacheKey)
   const accounts = (snapshot?.accounts ?? []).filter(account => !account.disabled).map(account => account.freshness === 'fresh' && expiresAt(account) <= Date.now()
     ? { ...account, freshness: 'stale' as const, availability: 'unknown' as const } : account)
   const selected = accounts.find(account => account.accountId === selectedId) ?? accounts.find(account => !account.disabled) ?? accounts[0]
@@ -53,13 +53,12 @@ function QuotaIndicatorContent({ getQuotas, className, cacheKey = 'local' }: Sid
   const weekly = selectedWindow(selected, 'weekly')
   const monitoredName = selected ? `${selected.provider === 'claude' ? 'Claude' : 'GPT'} · ${selected.name}` : 'Account quotas'
   const fresh = selected?.freshness === 'fresh'
-  return <div className={className}><Popover onOpenChange={open => { if (open) void refresh(false, true) }}>
+  return <div className={className}><Popover onOpenChange={setExpanded}>
     <PopoverTrigger asChild>
       <button type="button" className="flex h-9 w-full items-center gap-2.5 rounded-lg px-2 text-tertiary hover:bg-foreground/5 hover:text-foreground transition-colors"
         aria-label={`Account quotas · ${monitoredName}`} title={`${monitoredName} · 5h ${formatPercent(fiveHour?.usedPercent)} · Weekly ${formatPercent(weekly?.usedPercent)}${fresh ? '' : ' · Last known usage'}`}>
         <QuotaRings account={selected} />
         <span className="min-w-0 flex-1 truncate text-left text-sm">Usage</span>
-        <span className="text-xs tabular-nums">{formatPercent(fiveHour?.usedPercent)}</span>
       </button>
     </PopoverTrigger>
     <PopoverContent side="right" align="end" sideOffset={10} className="w-[320px] p-0 text-sm">
@@ -73,9 +72,10 @@ function QuotaIndicatorContent({ getQuotas, className, cacheKey = 'local' }: Sid
         {accounts.map(account => <div key={account.accountId} className="px-4 py-3">
           <button type="button" className="flex w-full items-center gap-2 text-left" onClick={() => {
             setSelectedId(account.accountId)
-          }} aria-label={`Monitor ${account.name}`} aria-pressed={selected?.accountId === account.accountId}>
+          }} aria-label={`Monitor ${account.provider === 'claude' ? 'Claude' : 'GPT'} · ${account.name}`} aria-pressed={selected?.accountId === account.accountId}>
             <QuotaRings account={account} className="size-5" />
             <span className="min-w-0 flex-1 truncate text-foreground font-medium" title={`${account.name} · ${account.provider === 'claude' ? 'Claude' : 'GPT'}${account.plan ? ` · ${account.plan}` : ''}`}>{account.name}</span>
+            <span className="shrink-0 text-[11px] text-tertiary">{account.provider === 'claude' ? 'Claude' : 'GPT'}</span>
             {selected?.accountId === account.accountId && <Check className="size-3.5 text-tertiary" />}
           </button>
           <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2">

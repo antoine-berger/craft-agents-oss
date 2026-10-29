@@ -18,7 +18,7 @@ const getQuotas = async (request: ProviderQuotasRequest = {}) => {
   calls.push(request)
   if (offline) throw new Error('disconnected')
   if (unavailable) return snapshot([], false)
-  if (request.refresh) server = server.map(value => value.accountId === request.accountId ? account(value.accountId, value.accountId === 'a' ? 25 : 75) : value)
+  if (request.refresh) server = server.map(value => !value.disabled && (!request.accountId || value.accountId === request.accountId) ? account(value.accountId, value.accountId === 'a' ? 25 : 75, value.provider) : value)
   return snapshot(server)
 }
 function Probe({ scope = 'server-one', reader = getQuotas }: { scope?: string; reader?: typeof getQuotas }) { result = useQuotaDisplay(reader, scope); return null }
@@ -130,8 +130,68 @@ test('manual refresh recovers the account inventory immediately after a failed i
   offline = true; await mount(); expect(calls).toHaveLength(1)
   offline = false
   await act(async () => { await result.refresh(true) })
-  expect(calls.slice(1)).toEqual([{ refresh: false }, { refresh: true, accountId: 'a' }])
-  expect(result.snapshot?.accounts[0]?.windows[0]?.usedPercent).toBe(25)
+  expect(calls.slice(1)).toEqual([{ refresh: true }])
+  expect(result.snapshot?.accounts.map(value => value.windows[0]?.usedPercent)).toEqual([25, 75])
+})
+
+test('opening the usage menu checks all accounts, including GPT, then refreshes only while visible', async () => {
+  server.push(account('gpt', null, 'codex'))
+  await mount()
+  expect(result.snapshot?.accounts.map(value => value.checkedAt !== null)).toEqual([true, false, false])
+  await act(async () => { result.setExpanded(true) })
+  expect(calls.at(-1)).toEqual({ refresh: true })
+  expect(result.snapshot?.accounts.map(value => value.windows[0]?.usedPercent)).toEqual([25, 75, 75])
+  expect(result.snapshot?.accounts[2]?.provider).toBe('codex')
+  await tick()
+  expect(calls.at(-1)).toEqual({ refresh: true })
+  Object.assign(document, { visibilityState: 'hidden' })
+  const before = calls.length
+  await tick()
+  expect(calls).toHaveLength(before)
+  Object.assign(document, { visibilityState: 'visible' })
+  await act(async () => { result.setExpanded(false) })
+  expect(calls.at(-1)).toEqual({ refresh: true, accountId: 'a' })
+})
+
+test('the menu stays fresh after reconnect, keeps values across a server cache reset and does not loop on failure', async () => {
+  await mount()
+  await act(async () => { result.setExpanded(true) })
+  server = [account('a'), account('b')]
+  await act(async () => { for (const cb of connected) cb({ status: 'connected' }) })
+  expect(calls.at(-1)).toEqual({ refresh: true })
+  expect(result.snapshot?.accounts.map(value => value.windows[0]?.usedPercent)).toEqual([25, 75])
+  offline = true
+  const before = calls.length
+  await tick()
+  expect(calls).toHaveLength(before + 1)
+  expect(result.failed).toBe(true)
+  expect(result.snapshot?.accounts.map(value => value.windows[0]?.usedPercent)).toEqual([25, 75])
+  await act(async () => { for (let n = 0; n < 10; n++) window.dispatchEvent(new Event('focus')) })
+  expect(calls).toHaveLength(before + 1)
+})
+
+test('opening during an initial read queues an all-account check after the inventory arrives', async () => {
+  let finish!: (value: ProviderQuotasSnapshot) => void
+  const pending = new Promise<ProviderQuotasSnapshot>(resolve => { finish = resolve })
+  const reader = async (request: ProviderQuotasRequest = {}) => !request.refresh ? pending : getQuotas(request)
+  await act(async () => { root = create(<Probe reader={reader} />) })
+  await act(async () => { result.setExpanded(true) })
+  await act(async () => { finish(snapshot(server)); await Promise.resolve() })
+  expect(calls).toEqual([{ refresh: true }])
+  expect(result.snapshot?.accounts.map(value => value.windows[0]?.usedPercent)).toEqual([25, 75])
+})
+
+test('opening the menu and manual refresh respect server cooldowns without auto-retry loops', async () => {
+  const limited = { ...account('b'), state: 'rate_limited' as const, checkedAt: now, nextRefreshAt: now + 300000 }
+  server = [account('a', 25), limited]
+  await mount()
+  await act(async () => { result.setExpanded(true) })
+  expect(calls).toEqual([{ refresh: false }])
+  // The real server applies per-account backoff even to an explicit all-account refresh.
+  const before = calls.length
+  await tick()
+  expect(calls).toHaveLength(before + 1)
+  expect(calls.at(-1)).toEqual({ refresh: true })
 })
 
 test('changing selection during a pending request retains that selection and refreshes the new account next', async () => {

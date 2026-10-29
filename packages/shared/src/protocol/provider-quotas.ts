@@ -35,7 +35,7 @@ export interface ProviderQuotasSnapshot {
 }
 
 export interface ProviderQuotasRequest {
-  /** False reads the cache only; refresh reads the selected account with server-enforced cooldown/backoff. */
+  /** False reads the cache only; refresh reads one account, or all enabled accounts when accountId is omitted, respecting server cooldown/backoff. */
   refresh?: boolean
   accountId?: string
 }
