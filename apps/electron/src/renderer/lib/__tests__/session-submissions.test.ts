@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test'
 import { registerSessionsHandlers } from '@craft-agent/server-core/handlers/rpc/sessions'
 import { RPC_CHANNELS, type FileAttachment } from '@craft-agent/shared/protocol'
 import type { SessionDraft } from '@craft-agent/shared/config'
-import { SessionSubmissions, SubmissionCancelled, recoverSubmissionDraft, canChooseSubmissionRepository } from '../session-submissions'
+import { SessionSubmissions, SubmissionCancelled, recoverSubmissionDraft, canChooseSubmissionRepository, discardPendingSubmission, mergeHydratedAttachments } from '../session-submissions'
 import { CONTENT_PERSIST_CAP } from '../drafts'
 
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(r => { resolve = r }); return { promise, resolve } }
@@ -96,4 +96,21 @@ test('follow-ups never redefine the repository while the worktree is pending aft
   expect(canChooseSubmissionRepository({ isProcessing: true, messages: [] })).toBe(false)
   expect(canChooseSubmissionRepository({ isProcessing: true, messages: [{ role: 'user' }] })).toBe(false)
   expect(canChooseSubmissionRepository({ isProcessing: false, messages: [{ role: 'user' }] })).toBe(false)
+})
+
+test('a pre-ACK rejected attempt is removed so its first repository submission can be retried, while confirmed users remain', () => {
+  const pending: any = { id: 'optimistic', role: 'user', content: 'B', timestamp: 1, isPending: true }
+  const messages = discardPendingSubmission([pending], 'optimistic')
+  expect(messages).toEqual([])
+  expect(canChooseSubmissionRepository({ isProcessing: false, messages })).toBe(true)
+  expect(discardPendingSubmission([{ ...pending, isPending: false }], 'optimistic')).toHaveLength(1)
+  expect(discardPendingSubmission([{ ...pending, id: 'canonical' }], 'optimistic')).toHaveLength(1)
+})
+
+test('late attachment hydration preserves restored bytes and existing draft files without duplicating them', () => {
+  const old = file('existing.png'), restored = file('B.png')
+  expect(mergeHydratedAttachments([old], [restored]).map(value => value.name)).toEqual(['existing.png', 'B.png'])
+  expect(mergeHydratedAttachments([old, restored], [restored])).toHaveLength(2)
+  const differentBytes = { ...restored, base64: 'BBBB' }
+  expect(mergeHydratedAttachments([restored], [differentBytes])).toHaveLength(2)
 })

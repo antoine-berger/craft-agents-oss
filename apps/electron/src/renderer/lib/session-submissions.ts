@@ -1,3 +1,4 @@
+import type { Message } from '@craft-agent/core/types'
 import type { FileAttachment } from '@craft-agent/shared/protocol'
 import type { SessionDraft } from '@craft-agent/shared/config'
 import { toDraftRef } from './drafts'
@@ -43,4 +44,15 @@ export function recoverSubmissionDraft(existing: SessionDraft | undefined, text:
 /** Only a session's first submission can still choose its repository. */
 export function canChooseSubmissionRepository(session: { isProcessing?: boolean; messages: { role: string }[] } | null | undefined): boolean {
   return !session?.isProcessing && !session?.messages.some(message => message.role === 'user')
+}
+
+/** Remove only this attempt when it has not already been confirmed by a backend event. */
+export function discardPendingSubmission(messages: Message[], messageId: string | undefined): Message[] {
+  return messages.filter(message => message.id !== messageId || !message.isPending)
+}
+
+/** A late draft-file read must keep attachments restored while that read was in flight. */
+export function mergeHydratedAttachments(hydrated: FileAttachment[], current: FileAttachment[]): FileAttachment[] {
+  return [...hydrated.filter(file => !current.some(value => value.path === file.path && value.name === file.name
+    && value.base64 === file.base64 && value.text === file.text)), ...current]
 }
