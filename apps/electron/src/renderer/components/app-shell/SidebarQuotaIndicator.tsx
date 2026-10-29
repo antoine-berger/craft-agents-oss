@@ -1,31 +1,31 @@
-import { useEffect, useRef, useState } from 'react'
 import { Check, RefreshCw } from 'lucide-react'
 import type { ProviderAccountQuota, ProviderQuotaWindow, ProviderQuotasRequest, ProviderQuotasSnapshot } from '@craft-agent/shared/protocol'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { cn } from '@/lib/utils'
+import { quotaExpiresAt as expiresAt } from './quota-display-state'
+import { useQuotaDisplay } from './useQuotaDisplay'
 
 export interface SidebarQuotaIndicatorProps {
   getQuotas: (request?: ProviderQuotasRequest) => Promise<ProviderQuotasSnapshot>
   className?: string
+  cacheKey?: string
 }
 
-const SELECTION_KEY = 'craft.quota-display-account'
 const selectedWindow = (account: ProviderAccountQuota | undefined, period: ProviderQuotaWindow['period']) => account?.windows.find(window => window.period === period && !window.scope)
 const formatPercent = (value: number | null | undefined) => typeof value === 'number' ? `${Math.round(value)}%` : '—'
 const dateLabel = (value: number | null) => value === null ? 'Not provided' : new Date(value).toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' })
-const expiresAt = (account: ProviderAccountQuota) => Math.min(account.observedAt === null ? Infinity : account.observedAt + 300_000,
-  ...account.windows.map(window => window.resetsAt !== null && account.observedAt !== null && window.resetsAt > account.observedAt ? window.resetsAt : Infinity))
+
 
 /** A neutral meter for one explicitly monitored account. It never changes account routing. */
 export function QuotaRings({ account, className }: { account?: ProviderAccountQuota; className?: string }) {
   return <svg viewBox="0 0 28 28" className={cn('size-6 shrink-0 -rotate-90', className)} aria-hidden="true">
     {([['five_hour', 11], ['weekly', 7]] as const).map(([period, radius]) => {
       const window = selectedWindow(account, period)
-      const known = account?.freshness === 'fresh' && window?.usedPercent !== null && window?.usedPercent !== undefined
+      const known = window?.usedPercent !== null && window?.usedPercent !== undefined
       const length = Math.PI * 2 * radius
       return <g key={period}>
         <circle cx="14" cy="14" r={radius} fill="none" stroke="currentColor" strokeWidth="2" opacity={0.2} strokeDasharray={known ? undefined : '2 3'} />
-        {known && <circle cx="14" cy="14" r={radius} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeDasharray={`${length * window.usedPercent! / 100} ${length}`} />}
+        {known && <circle cx="14" cy="14" r={radius} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" opacity={account?.freshness === 'fresh' ? 1 : 0.45} strokeDasharray={`${length * window.usedPercent! / 100} ${length}`} />}
       </g>
     })}
   </svg>
@@ -40,27 +40,12 @@ function availabilityLabel(account: ProviderAccountQuota): string {
   return account.availability === 'exhausted' ? 'Limit reached' : account.availability === 'available' ? 'Available' : 'Availability unknown'
 }
 
-export function SidebarQuotaIndicator({ getQuotas, className }: SidebarQuotaIndicatorProps) {
-  const [snapshot, setSnapshot] = useState<ProviderQuotasSnapshot>()
-  const [selectedId, setSelectedId] = useState<string | null>(() => { try { return localStorage.getItem(SELECTION_KEY) } catch { return null } })
-  const [busy, setBusy] = useState(false)
-  const [failed, setFailed] = useState(false)
-  const [, invalidateClock] = useState(0)
-  const requestRef = useRef(getQuotas)
-  requestRef.current = getQuotas
-  const mounted = useRef(true)
-  useEffect(() => {
-    mounted.current = true
-    void requestRef.current({ refresh: false }).then(value => { if (mounted.current) setSnapshot(value) }).catch(() => { if (mounted.current) setFailed(true) })
-    return () => { mounted.current = false }
-  }, [])
-  useEffect(() => {
-    const next = Math.min(...(snapshot?.accounts ?? []).map(expiresAt).filter(time => time > Date.now()))
-    if (!Number.isFinite(next)) return
-    // One local expiry timer updates presentation only. It never requests provider data.
-    const timeout = setTimeout(() => invalidateClock(value => value + 1), Math.min(next - Date.now() + 10, 2_147_483_647))
-    return () => clearTimeout(timeout)
-  }, [snapshot])
+export function SidebarQuotaIndicator(props: SidebarQuotaIndicatorProps) {
+  return <QuotaIndicatorContent key={props.cacheKey ?? 'local'} {...props} />
+}
+
+function QuotaIndicatorContent({ getQuotas, className, cacheKey = 'local' }: SidebarQuotaIndicatorProps) {
+  const { snapshot, selectedId, setSelectedId, busy, failed, refresh } = useQuotaDisplay(getQuotas, cacheKey)
   const accounts = (snapshot?.accounts ?? []).filter(account => !account.disabled).map(account => account.freshness === 'fresh' && expiresAt(account) <= Date.now()
     ? { ...account, freshness: 'stale' as const, availability: 'unknown' as const } : account)
   const selected = accounts.find(account => account.accountId === selectedId) ?? accounts.find(account => !account.disabled) ?? accounts[0]
@@ -68,29 +53,19 @@ export function SidebarQuotaIndicator({ getQuotas, className }: SidebarQuotaIndi
   const weekly = selectedWindow(selected, 'weekly')
   const monitoredName = selected ? `${selected.provider === 'claude' ? 'Claude' : 'GPT'} · ${selected.name}` : 'Account quotas'
   const fresh = selected?.freshness === 'fresh'
-  const refresh = async () => {
-    if (busy) return
-    setBusy(true)
-    setFailed(false)
-    try { const value = await requestRef.current({ refresh: true }); if (mounted.current) setSnapshot(value) }
-    catch { if (mounted.current) setFailed(true) }
-    finally { if (mounted.current) setBusy(false) }
-  }
-  return <div className={className}><Popover onOpenChange={open => {
-    if (open) void requestRef.current({ refresh: false }).then(value => { if (mounted.current) setSnapshot(value) }).catch(() => { if (mounted.current) setFailed(true) })
-  }}>
+  return <div className={className}><Popover onOpenChange={open => { if (open) void refresh(false, true) }}>
     <PopoverTrigger asChild>
       <button type="button" className="flex h-9 w-full items-center gap-2.5 rounded-lg px-2 text-tertiary hover:bg-foreground/5 hover:text-foreground transition-colors"
-        aria-label={`Account quotas · ${monitoredName}`} title={`${monitoredName} · 5h ${fresh ? formatPercent(fiveHour?.usedPercent) : '—'} · Weekly ${fresh ? formatPercent(weekly?.usedPercent) : '—'}`}>
+        aria-label={`Account quotas · ${monitoredName}`} title={`${monitoredName} · 5h ${formatPercent(fiveHour?.usedPercent)} · Weekly ${formatPercent(weekly?.usedPercent)}${fresh ? '' : ' · Last known usage'}`}>
         <QuotaRings account={selected} />
         <span className="min-w-0 flex-1 truncate text-left text-sm">Usage</span>
-        <span className="text-xs tabular-nums">{fresh ? formatPercent(fiveHour?.usedPercent) : '—'}</span>
+        <span className="text-xs tabular-nums">{formatPercent(fiveHour?.usedPercent)}</span>
       </button>
     </PopoverTrigger>
     <PopoverContent side="right" align="end" sideOffset={10} className="w-[320px] p-0 text-sm">
       <div className="flex items-center justify-between px-4 py-3 border-b border-foreground/5">
         <div className="font-medium text-foreground">Usage</div>
-        <button type="button" onClick={() => void refresh()} disabled={busy} className="rounded-md p-1.5 text-tertiary hover:bg-foreground/5 hover:text-foreground disabled:opacity-40" aria-label="Refresh account quotas" title="Refresh quotas">
+        <button type="button" onClick={() => void refresh(true)} disabled={busy} className="rounded-md p-1.5 text-tertiary hover:bg-foreground/5 hover:text-foreground disabled:opacity-40" aria-label="Refresh account quotas" title="Refresh quotas">
           <RefreshCw className={cn('size-3.5', busy && 'animate-spin')} />
         </button>
       </div>
@@ -98,7 +73,6 @@ export function SidebarQuotaIndicator({ getQuotas, className }: SidebarQuotaIndi
         {accounts.map(account => <div key={account.accountId} className="px-4 py-3">
           <button type="button" className="flex w-full items-center gap-2 text-left" onClick={() => {
             setSelectedId(account.accountId)
-            try { localStorage.setItem(SELECTION_KEY, account.accountId) } catch { /* Private browser storage may be disabled. */ }
           }} aria-label={`Monitor ${account.name}`} aria-pressed={selected?.accountId === account.accountId}>
             <QuotaRings account={account} className="size-5" />
             <span className="min-w-0 flex-1 truncate text-foreground font-medium" title={`${account.name} · ${account.provider === 'claude' ? 'Claude' : 'GPT'}${account.plan ? ` · ${account.plan}` : ''}`}>{account.name}</span>

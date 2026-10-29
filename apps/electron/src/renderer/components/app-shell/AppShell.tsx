@@ -1,3 +1,4 @@
+import { quotaCacheScope } from './quota-display-state'
 import { isProjectPilot, projectPilotRows, projectTaskRows } from './project-pilots'
 import { SidebarQuotaIndicator } from './SidebarQuotaIndicator'
 import * as React from "react"
@@ -2438,7 +2439,7 @@ function AppShellContent({
               onKeyDown={handleSidebarKeyDown}
               links={sidebarLinks}
               footerLinks={sidebarFooterLinks}
-              footerTop={<SidebarQuotaIndicator getQuotas={window.electronAPI.getProviderQuotas} className="mx-2 mt-1.5" />}
+              footerTop={<SidebarQuotaIndicator cacheKey={quotaCacheScope(activeWorkspace?.remoteServer?.url, activeWorkspace?.remoteServer?.remoteWorkspaceId ?? activeWorkspaceId ?? undefined)} getQuotas={window.electronAPI.getProviderQuotas} className="mx-2 mt-1.5" />}
               getItemProps={getSidebarItemProps}
               focusedItemId={focusedSidebarItemId}
               onNewSession={(openInNewWindow) => handleNewChat(openInNewWindow)}
