@@ -251,11 +251,12 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   // Listen for restore-input events (queued messages restored to input on abort)
   React.useEffect(() => {
     const handler = (e: Event) => {
-      const { sessionId: targetId, text } = (e as CustomEvent).detail ?? {}
+      const { sessionId: targetId, text, attachments } = (e as CustomEvent).detail ?? {}
       if (targetId === sessionId) {
         const nextText = coerceInputText(text)
         setInputValue(nextText)
         inputValueRef.current = nextText
+        if (attachments?.length) setAttachmentsValue(current => [...current, ...attachments])
       }
     }
     window.addEventListener('craft:restore-input', handler)
