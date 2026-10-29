@@ -1,3 +1,4 @@
+import { mergeHydratedAttachments } from '@/lib/session-submissions'
 /**
  * ChatPage
  *
@@ -217,6 +218,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
 
   // Track draft value for this session
   const [inputValue, setInputValue] = React.useState(() => coerceInputText(getDraft(sessionId)))
+  const attachmentRestoreRevision = React.useRef(0)
   const inputValueRef = React.useRef(inputValue)
   inputValueRef.current = inputValue
 
@@ -256,7 +258,10 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
         const nextText = coerceInputText(text)
         setInputValue(nextText)
         inputValueRef.current = nextText
-        if (attachments?.length) setAttachmentsValue(current => [...current, ...attachments])
+        if (attachments?.length) {
+          attachmentRestoreRevision.current++
+          setAttachmentsValue(current => [...current, ...attachments])
+        }
       }
     }
     window.addEventListener('craft:restore-input', handler)
@@ -277,9 +282,10 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
 
   React.useEffect(() => {
     let cancelled = false
+    const restoreRevision = attachmentRestoreRevision.current
     setAttachmentsValue([])
     hydrateDraftAttachments(sessionId).then((atts) => {
-      if (!cancelled) setAttachmentsValue(atts)
+      if (!cancelled) setAttachmentsValue(current => restoreRevision === attachmentRestoreRevision.current ? atts : mergeHydratedAttachments(atts, current))
     })
     return () => { cancelled = true }
   }, [sessionId, hydrateDraftAttachments])

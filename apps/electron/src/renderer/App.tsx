@@ -1,4 +1,4 @@
-import { CANCEL_SESSION_SUBMISSIONS, SessionSubmissions, SubmissionCancelled, recoverSubmissionDraft, canChooseSubmissionRepository } from './lib/session-submissions'
+import { CANCEL_SESSION_SUBMISSIONS, SessionSubmissions, SubmissionCancelled, recoverSubmissionDraft, canChooseSubmissionRepository, discardPendingSubmission } from './lib/session-submissions'
 import { initialRepository, seedSelectedRepositories } from './components/app-shell/input/repository-history'
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -1307,7 +1307,7 @@ export default function App() {
       checkEpoch()
       if (store.get(sessionAtomFamily(sessionId))?.isArchived || store.get(sessionMetaMapAtom).get(sessionId)?.isArchived) throw new SubmissionCancelled()
     }
-    let optimisticAdded = false
+    let optimisticMessageId: string | undefined
     let processingAtDispatch = false
     try {
       check()
@@ -1444,7 +1444,7 @@ export default function App() {
 
       // Optimistic UI update - add user message and set processing state
       processingAtDispatch = store.get(sessionAtomFamily(sessionId))?.isProcessing === true
-      optimisticAdded = true
+      optimisticMessageId = userMessage.id
       updateSessionById(sessionId, (s) => ({
         messages: [...s.messages, userMessage],
         isProcessing: true,
@@ -1468,9 +1468,10 @@ export default function App() {
       if (error instanceof SubmissionCancelled) return
       console.error('Failed to send message:', error)
       updateSessionById(sessionId, (s) => ({
-        ...(optimisticAdded ? { isProcessing: s.isProcessing && processingAtDispatch } : {}),
+        ...(optimisticMessageId && s.messages.some(message => message.id === optimisticMessageId && message.isPending)
+          ? { isProcessing: s.isProcessing && processingAtDispatch } : {}),
         messages: [
-          ...s.messages,
+          ...discardPendingSubmission(s.messages, optimisticMessageId),
           {
             id: generateMessageId(),
             role: 'error' as const,
