@@ -1,3 +1,4 @@
+import { isProjectPilot, projectPilotRows } from './project-pilots'
 import { useState, useCallback, useEffect, useMemo, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { useTranslation } from "react-i18next"
@@ -22,7 +23,7 @@ import { SessionItem } from "./SessionItem"
 import { SessionListProvider, type SessionListContextValue } from "@/context/SessionListContext"
 import { useSessionSelection, useSessionSelectionStore } from "@/hooks/useSession"
 import { useSessionAttention } from "@/hooks/useSessionAttention"
-import { useSessionSearch, sessionMatchesCurrentFilter, type FilterMode } from "@/hooks/useSessionSearch"
+import { useSessionSearch, type FilterMode } from "@/hooks/useSessionSearch"
 import { useSessionActions } from "@/hooks/useSessionActions"
 import { useEntityListInteractions } from "@/hooks/useEntityListInteractions"
 import { useFocusZone } from "@/hooks/keyboard"
@@ -247,16 +248,11 @@ export function SessionList({
 
   // --- Data pipeline (search, filtering, pagination, grouping) ---
   const scrollViewportRef = useRef<HTMLDivElement>(null)
-  const pinnedItems = useMemo(() => items.filter(item =>
-    !item.hidden && !item.isArchived
-    && projects?.some(project => project.id === item.projectId && project.pilotSessionId === item.id)
-    && sessionMatchesCurrentFilter(item, currentFilter, { evaluateViews, statusFilter, labelFilterMap, labelConfigs: labels })
-  ), [items, projects, currentFilter, evaluateViews, statusFilter, labelFilterMap, labels])
+  const pinnedItems = useMemo(() => projectPilotRows(items, projects ?? [], scopedProjectId), [items, projects, scopedProjectId])
   const searchableItems = useMemo(() => {
     if (searchActive && searchQuery.length >= 2) return items
-    const pinnedIds = new Set(pinnedItems.map(item => item.id))
-    return items.filter(item => !pinnedIds.has(item.id))
-  }, [items, pinnedItems, searchActive, searchQuery])
+    return items.filter(item => item.isArchived || !isProjectPilot(item.id, projects ?? []))
+  }, [items, projects, searchActive, searchQuery])
 
   const {
     isSearchMode,

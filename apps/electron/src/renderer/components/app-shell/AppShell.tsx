@@ -1,3 +1,4 @@
+import { isProjectPilot, projectPilotRows, projectTaskRows } from './project-pilots'
 import { SidebarQuotaIndicator } from './SidebarQuotaIndicator'
 import * as React from "react"
 import { useTranslation, Trans } from "react-i18next"
@@ -668,6 +669,7 @@ function AppShellContent({
     () => projects.map(p => ({ id: p.config.id, slug: p.config.slug, name: p.config.name, color: p.config.color, pilotSessionId: p.config.pilotSessionId })),
     [projects],
   )
+  const isPilotSession = useCallback((id: string) => isProjectPilot(id, projectMenuOptions), [projectMenuOptions])
   const handleSessionProjectChange = useCallback(async (sessionId: string, projectId: string | null) => {
     try {
       await window.electronAPI.sessionCommand(sessionId, { type: 'setProjectId', projectId })
@@ -1215,7 +1217,7 @@ function AppShellContent({
 
   // Count sessions by todo state (scoped to workspace)
   const isMetaDone = (s: SessionMeta) => s.sessionStatus === 'done' || s.sessionStatus === 'cancelled'
-  const flaggedCount = activeSessionMetas.filter(s => s.isFlagged).length
+  const flaggedCount = activeSessionMetas.filter(s => !isPilotSession(s.id) && s.isFlagged).length
   const archivedCount = workspaceSessionMetas.filter(s => s.isArchived).length
 
   // Compute session counts per label (cumulative: parent includes descendants).
@@ -1227,7 +1229,7 @@ function AppShellContent({
     for (const label of allLabels) {
       // Direct count: sessions explicitly tagged with this label (handles valued entries like "priority::3")
       const directCount = activeSessionMetas.filter(
-        s => s.labels?.some(l => extractLabelId(l) === label.id)
+        s => !isPilotSession(s.id) && s.labels?.some(l => extractLabelId(l) === label.id)
       ).length
       counts[label.id] = directCount
     }
@@ -1236,13 +1238,13 @@ function AppShellContent({
       const descendants = getDescendantIds(labelConfigs, label.id)
       if (descendants.length > 0) {
         const descendantCount = activeSessionMetas.filter(
-          s => s.labels?.some(l => descendants.includes(extractLabelId(l)))
+          s => !isPilotSession(s.id) && s.labels?.some(l => descendants.includes(extractLabelId(l)))
         ).length
         counts[label.id] = (counts[label.id] || 0) + descendantCount
       }
     }
     return counts
-  }, [activeSessionMetas, labelConfigs])
+  }, [activeSessionMetas, labelConfigs, isPilotSession])
 
   // Count sessions by individual todo state (dynamic based on effectiveSessionStatuses)
   // Uses activeSessionMetas to exclude archived sessions from counts.
@@ -1254,12 +1256,13 @@ function AppShellContent({
     }
     // Count sessions
     for (const s of activeSessionMetas) {
+      if (isPilotSession(s.id)) continue
       const state = (s.sessionStatus || 'todo') as SessionStatusId
       // Increment count (initialize to 0 if status not in effectiveSessionStatuses yet)
       counts[state] = (counts[state] || 0) + 1
     }
     return counts
-  }, [activeSessionMetas, effectiveSessionStatuses])
+  }, [activeSessionMetas, effectiveSessionStatuses, isPilotSession])
 
   // Count sources by type for the Sources dropdown subcategories
   const sourceTypeCounts = useMemo(() => {
@@ -1396,8 +1399,11 @@ function AppShellContent({
       }
     }
 
-    return result
-  }, [workspaceSessionMetas, activeSessionMetas, sessionFilter, listFilter, labelFilter, projectFilter, labelConfigs])
+    if (sessionFilter.kind === 'archived') return result
+    const tasks = projectTaskRows(result, projectMenuOptions)
+    const projectId = projectFilter.size === 1 ? [...projectFilter].find(([, mode]) => mode === 'include')?.[0] : undefined
+    return [...projectPilotRows(activeSessionMetas, projectMenuOptions, projectId), ...tasks]
+  }, [workspaceSessionMetas, activeSessionMetas, sessionFilter, listFilter, labelFilter, projectFilter, labelConfigs, isPilotSession, projectMenuOptions])
 
   // Derive "pinned" (non-removable) filters from the current sessionFilter path.
   // These represent filters that are implicit in the current deeplink/route and
@@ -2114,7 +2120,7 @@ function AppShellContent({
     {
       id: "nav:allSessions",
       title: t("sidebar.allSessions"),
-      label: String(workspaceSessionMetas.length),
+      label: String(workspaceSessionMetas.filter(s => !isPilotSession(s.id)).length),
       icon: Inbox,
       variant: sessionFilter?.kind === 'allSessions' ? "default" : "ghost",
       onClick: handleAllSessionsClick,
