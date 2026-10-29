@@ -134,7 +134,7 @@
     },
     "apps/electron": {
       "name": "@craft-agent/electron",
-      "version": "0.15.13",
+      "version": "0.15.21",
       "dependencies": {
         "@craft-agent/core": "workspace:*",
         "@craft-agent/messaging-gateway": "workspace:*",
@@ -351,7 +351,7 @@
     },
     "packages/shared": {
       "name": "@craft-agent/shared",
-      "version": "0.15.13",
+      "version": "0.15.21",
       "dependencies": {
         "@craft-agent/core": "workspace:*",
         "@craft-agent/session-tools-core": "workspace:*",
