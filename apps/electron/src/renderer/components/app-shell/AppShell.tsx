@@ -1,3 +1,4 @@
+import { CANCEL_SESSION_SUBMISSIONS } from '@/lib/session-submissions'
 import { quotaCacheScope } from './quota-display-state'
 import { isProjectPilot, projectPilotRows, projectTaskRows } from './project-pilots'
 import { SidebarQuotaIndicator } from './SidebarQuotaIndicator'
@@ -1017,6 +1018,7 @@ function AppShellContent({
         // handleEscapePress returns true on second press (within timeout)
         const shouldInterrupt = handleEscapePress()
         if (shouldInterrupt) {
+          window.dispatchEvent(new CustomEvent(CANCEL_SESSION_SUBMISSIONS, { detail: { sessionId: effectiveSessionId } }))
           window.electronAPI.cancelProcessing(effectiveSessionId, false).catch(err => {
             console.error('[AppShell] Failed to cancel processing:', err)
           })
