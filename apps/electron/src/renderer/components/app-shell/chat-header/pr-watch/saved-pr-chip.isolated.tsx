@@ -4,7 +4,11 @@ import { act, create } from 'react-test-renderer'
 import { savedPrSummary } from '../../../../../../../../packages/server-core/src/services/pr-watch/association-store'
 
 const opened: string[] = []
-mock.module('@/context/AppShellContext', () => ({ useAppShellContext: () => ({ onOpenUrl: (url: string) => opened.push(url) }) }))
+const sent: Array<{ id: string; message: string }> = []
+mock.module('@/context/AppShellContext', () => ({ useAppShellContext: () => ({
+  onOpenUrl: (url: string) => opened.push(url),
+  onSendMessage: async (id: string, message: string) => { sent.push({ id, message }) },
+}) }))
 mock.module('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }))
 mock.module('@craft-agent/ui', () => ({ Spinner: () => null }))
 mock.module('@/components/ui/styled-dropdown', () => ({ DropdownMenu: () => null, DropdownMenuTrigger: () => null,
@@ -60,4 +64,28 @@ test('reopened UI keeps the saved PR button and link without claiming fresh gree
   act(() => button.props.onClick())
   expect(opened).toEqual([summary.url])
   act(() => view!.unmount())
+})
+
+test('agent shortcut buttons actually send the concise selected action to their own session', async () => {
+  sent.length = 0
+  for (const [change, label, prefix] of [
+    [{ mergeState: 'behind' }, 'Rebase', 'Rebase this branch onto'],
+    [{ checks: 'failure' }, 'Fix CI', 'Fix the failing CI actions.'],
+    [{ unresolvedThreads: 1 }, 'Fix review', 'Address the open review comments.'],
+    [{ mergeState: 'conflicting' }, 'Resolve', 'Fetch the base remote and merge'],
+  ] as const) {
+    const summary: any = Object.assign({ number: 7, url: 'https://github.com/acme/app/pull/7', headRef: 'me/topic', baseRef: 'release/next',
+      state: 'open', headOid: 'abc', headMatchesLocal: true, localDirty: false, localAhead: 0,
+      checks: 'success', reviewDecision: 'approved', mergeState: 'clean', unresolvedThreads: 0 }, change)
+    let view: ReturnType<typeof create>
+    act(() => { view = create(React.createElement(PrQuickActions, { sessionId: 'selected-chat', origin: 'branch', state: { kind: 'pr', summary } })) })
+    const button = view!.root.findAllByType('button')[0]!
+    expect(button.children).toContain(label)
+    await act(async () => { button.props.onClick(); await Promise.resolve() })
+    expect(sent.at(-1)?.id).toBe('selected-chat')
+    expect(sent.at(-1)?.message).toStartWith(prefix)
+    expect(sent.at(-1)?.message).toContain(summary.url)
+    act(() => view!.unmount())
+  }
+  expect(sent).toHaveLength(4)
 })
