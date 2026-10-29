@@ -50,3 +50,40 @@ describe('handleSendAgentMessage delivery ack', () => {
     expect(res.isError).toBe(true);
   });
 });
+
+describe('grouped agent messages', () => {
+  it('dispatches independent recipients together, preserving prompts, attachments and partial results', async () => {
+    const calls: Array<{ id: string; text: string; files: unknown }> = []
+    let release!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    const ctx = {
+      sessionId: 'pilot',
+      sendAgentMessage: async (id: string, text: string, files: unknown) => {
+        calls.push({ id, text, files })
+        if (id === 'slow') await gate
+        if (id === 'archived') throw Error('chat is archived')
+        return { delivery: 'delivered', targetBusy: false, messageId: id }
+      },
+    } as any
+    const attachments = [{ path: '/tmp/plan.md' }]
+    const result = handleSendAgentMessage(ctx, { messages: [
+      { sessionId: 'slow', message: '/ship', attachments },
+      { sessionId: 'other', message: '/ship' },
+      { sessionId: 'archived', message: '/ship' },
+      { sessionId: 'pilot', message: 'self-send forbidden' },
+    ] })
+    expect(calls.map(call => call.id)).toEqual(['slow', 'other', 'archived'])
+    expect(calls[0]!.text.endsWith('\n/ship')).toBe(true)
+    expect(calls[0]!.files).toEqual(attachments)
+    release()
+    const response = await result
+    const payload = JSON.parse((response.content[0] as any).text)
+    expect(payload.results.map((item: any) => item.delivery)).toEqual(['delivered', 'delivered', 'error', 'error'])
+  })
+  it('rejects mixed single/batch arguments without sending any entry', async () => {
+    let calls = 0
+    const result = await handleSendAgentMessage({ sessionId: 'pilot', sendAgentMessage: async () => { calls++; return { delivery: 'delivered', targetBusy: false } } } as any,
+      { sessionId: 'single', messages: [{ sessionId: 'batch', message: 'hello' }] })
+    expect(result.isError).toBe(true); expect(calls).toBe(0)
+  })
+})

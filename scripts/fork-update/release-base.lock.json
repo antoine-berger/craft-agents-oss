@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "description": "Verified fork-v0.15.20 plus reviewed PR parity, pilot visibility, durable usage refresh and owner-controlled FIFO follow-ups.",
+  "description": "Verified fork-v0.15.21 plus durable receipt acknowledgements, parallel message/session batches and manual pilot instructions.",
   "sourceFiles": {
     "packages/server-core/src/services/pr-watch/github-queries.ts": "e7f8aa04b211075ab11a6a782b71ef739046443647d332635ed9f12bdf20e7a9",
     "packages/server-core/src/services/pr-watch/map-github.ts": "63e8df57d0666dd1e4e28d720429fdda0d7d793301763942a2f8a92e224b19f0",
@@ -14,7 +14,7 @@
     "apps/electron/src/renderer/hooks/pr-watch-snapshots.ts": "e4b6c4480bb60e3a8f40a673f4371959794ce7bfccf20937c404c5aa3022d67c",
     "apps/electron/src/renderer/atoms/sessions.ts": "b3c9f00d10a5b0bb893679424619f152563df181fd1c423a7bdc44d39958d256",
     "apps/electron/src/renderer/event-processor/handlers/text.ts": "e46a290e9ebb28b647d31799da3cc207e1e4d510a5cc1ddf6ce75f2567b104ca",
-    "packages/server-core/src/sessions/SessionManager.ts": "7fb4072b047aa3111a30b2b1eb075ace8058e8df9e7584962116aa0d953df887",
+    "packages/server-core/src/sessions/SessionManager.ts": "24592750ba76dd44e6017f74b747c21cd6a0b7a2eb1b51a8a008d4afd5c20453",
     "packages/shared/src/protocol/dto.ts": "36ab20155212bf86817dfa27cbb12dfce4de75567f1eaffdb679cf383b99cdc0",
     "packages/core/src/types/message.ts": "01bf8d075648020549e22c326e9cf7ebcbabeadf41fa2632940006bf898d8c83",
     "packages/shared/src/agent/claude-agent.ts": "913c280699605bba86d57dc4da3fce424c8964110dc512fc4c2d0cda8d07eed3",
@@ -45,7 +45,7 @@
     "apps/electron/src/renderer/components/app-shell/chat-header/pr-watch/pr-quick-actions.ts": "82bc74fb55ffdb75417c60cedaaaae5c3cd3ded158ba72c2fb0b9ef6af438f8c",
     "packages/server-core/src/pr-watch/operations.ts": "d5e22df7e2bfd075944f8e68abd808d15e83918eaa879221ed85e25313d0cb35",
     "packages/server-core/src/services/cli-proxy/connectors.ts": "2aff0dac504f64966a1de7e8fed293cfb7890e7bb56f76294b4701ea74da2061",
-    "apps/electron/resources/portable-config/skills/monitor/SKILL.md": "1b48956b770d20804195b3b264f5d057cf1d7911ea5c4b8a6b274dda957e030b",
+    "apps/electron/resources/portable-config/skills/monitor/SKILL.md": "abcd265d5c9447b0cf6717b3e8179dd9214c7f81b1545bed93a093c684f4a609",
     "apps/electron/src/renderer/App.tsx": "b30db763a212354c4d8594223b30d98e3f43fc2d5646e9a298e7eee4ce063098",
     "apps/electron/src/renderer/components/app-shell/AppShell.tsx": "300b833d26ff385f21e3b36eda3cb114ce9a91704a4cdbd79a3e61d7fba6ef08",
     "apps/electron/src/renderer/components/app-shell/ChatDisplay.tsx": "cbd39288ce3458286a439d52ccf7d4860b1c785c7e3fa529d8531f02868d15f0",
@@ -63,10 +63,19 @@
     "apps/electron/src/renderer/event-processor/handlers/session.ts": "50f76205110c3219d600cdc127f3e1df4c266949de11c9f189d39124068bf704",
     "apps/electron/src/renderer/event-processor/processor.ts": "4fe68de99c0d207b552c59fb1dbdecc0f288fb7dca216b9da1e7509175076014",
     "apps/electron/src/renderer/pages/ChatPage.tsx": "9abd28df6831804a9b5c05fea6c4bff58aa2226bf73bd9fd483179f23744d7ad",
-    "packages/server-core/src/handlers/rpc/sessions.ts": "1ed8014090cf3915863c0a1b18ec223495d9b228b94d9a283052410434fa9198",
+    "packages/server-core/src/handlers/rpc/sessions.ts": "549a1c00825c6c8eeef2d79c74698ddacaf07b252132afec687667db95fd3b69",
     "packages/server-core/src/handlers/session-manager-interface.ts": "de949c166a1299349bf06f4c3d649c8797ce06c4b1627ddfcdd808072d19c20d",
     "packages/shared/src/protocol/provider-quotas.ts": "0012a354fc720289232c41d1f7d0db36257ea68153d9b55e6b2860a798d58dd6",
-    "apps/electron/src/renderer/lib/session-submissions.ts": "34055e3ba3f53bb5bede2cd1fc3a980452cf4a23b563f9eb3ed3a82b41a5fd54"
+    "apps/electron/src/renderer/lib/session-submissions.ts": "34055e3ba3f53bb5bede2cd1fc3a980452cf4a23b563f9eb3ed3a82b41a5fd54",
+    "packages/server-core/src/services/repositories/worktree.ts": "7ae570db0d3e86855a52b62854092eedf45eca3f5143bd5410feb10afd0921e0",
+    "packages/session-tools-core/src/context.ts": "049f7155057bd7badf4897d583f82a3035e16cdf224a6d5d8b796af6d2ebfd50",
+    "packages/session-tools-core/src/handlers/send-agent-message.ts": "ebec426603741756f3cb6b0877f1df2445b5898ecf18f804bb24f0df80dfa12a",
+    "packages/session-tools-core/src/index.ts": "12c2cbb659233619aaf10211669b157da4b93635db723050212fd6b0ac62229a",
+    "packages/session-tools-core/src/tool-defs.ts": "c865045c6e2c7392d6facd9554479c7140d28d1c7aa1645180bd159835fc268c",
+    "packages/shared/src/agent/base-agent.ts": "67c864901832e0032616a192e8457ca0252def635500dbf5e7eb5be1fbad2842",
+    "packages/shared/src/agent/spawn-session-tool.ts": "819bdd8c8a9ea50b0ca23522cd7675b31393f698143c5ad11db9938c0cc722e2",
+    "packages/shared/src/prompts/system.ts": "4365a104fc6d03021851020ff1222d959dbfad1e5f9266774e7f0e2d6082a44b",
+    "packages/server-core/src/sessions/message-ack.ts": "0050acfd0e0559988db88f9ab456fa7f86418b7e0f3dc4e323dadf15c6788796"
   },
   "compiledClientFiles": {
     "apps/electron/src/renderer/hooks/usePrWatch.ts": "67272de71a3d83c45caad6820f3d3fe45ef46f97d31d578780c656fa67733cc0",

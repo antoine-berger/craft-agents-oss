@@ -243,7 +243,7 @@ const RepositorySelectionSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('github'), nameWithOwner: z.string().regex(/^[\w.-]+\/[\w.-]+$/), start: RepositoryStartSchema.optional() }),
 ]);
 
-export const SpawnSessionSchema = z.object({
+const SpawnSessionOptionsSchema = z.object({
   help: z.boolean().optional().describe('If true, returns available connections, models, and sources instead of creating a session'),
   prompt: z.string().optional().describe('Instructions for the new session (required when not in help mode)'),
   name: z.string().optional().describe('Session name'),
@@ -261,6 +261,12 @@ export const SpawnSessionSchema = z.object({
     path: z.string().describe('Absolute file path on disk'),
     name: z.string().optional().describe('Display name (defaults to file basename)'),
   })).optional().describe('Files to include with the prompt'),
+});
+
+export const SpawnSessionSchema = SpawnSessionOptionsSchema.extend({
+  sessions: z.array(SpawnSessionOptionsSchema.omit({ help: true }).extend({
+    prompt: z.string().min(1).describe('Exact initial prompt for this new chat'),
+  })).min(1).max(100).optional().describe('Create these independent chats concurrently in one call. Put all per-chat options here; do not mix with single-chat arguments or help.'),
 });
 
 // Session self-management tools
@@ -406,13 +412,17 @@ export const ListBackgroundTasksSchema = z.object({
 });
 
 // Inter-session messaging
-export const SendAgentMessageSchema = z.object({
-  sessionId: z.string().describe('Target session ID to send the message to'),
-  message: z.string().describe('The message to send to the target session'),
+const AgentMessageSchema = z.object({
+  sessionId: z.string().min(1).describe('Target session ID'),
+  message: z.string().min(1).describe('Exact message to send'),
   attachments: z.array(z.object({
     path: z.string().describe('Absolute file path on disk'),
     name: z.string().optional().describe('Display name (defaults to file basename)'),
   })).optional().describe('Files to include with the message'),
+});
+export const SendAgentMessageSchema = AgentMessageSchema.partial().extend({
+  messages: z.array(AgentMessageSchema).min(1).max(100).optional()
+    .describe('Send these messages concurrently to independent chats in one call. Preserve input order for repeated session IDs. Do not mix with single-message arguments.'),
 });
 
 export const ListMessagingChannelsSchema = z.object({
@@ -664,7 +674,7 @@ Privacy: the state is sent to the user's configured decision provider (TypeSafe,
 Use this when the user asks for a new chat or parallel independent work. Native SDK subagents are separate from this tool. The invoking chat and its checkout are preserved.
 
 Call with help=true first to discover available connections, models, and sources.
-When spawning, the 'prompt' parameter is required.
+For one chat, 'prompt' is required. For independent approved work, prefer one call with sessions:[{prompt,projectId,...}, ...]. Each item gets its own chat and worktree; do not wait for an earlier chat's answer before starting the next. The result confirms first-message persistence, not task completion. A failed item does not cancel successful ones; never retry the entire batch blindly.
 
 Optional overrides: \`model\`, \`llmConnection\`, \`permissionMode\`, \`thinkingLevel\`, \`enabledSourceSlugs\`, \`labels\`, \`workingDirectory\`, \`projectId\`, \`repository\`. Omitted fields inherit from the spawning session or the workspace default.
 
@@ -781,6 +791,7 @@ Never guess or claim "the app restarted" — report exactly what this tool retur
 
 Use this to coordinate with spawned sessions, send follow-up instructions, or relay information between sessions.
 Use list_sessions to find session IDs, or use the sessionId returned by spawn_session.
+For multiple independent recipients, prefer one call with messages:[{sessionId,message}, ...]. Messages to different chats are dispatched concurrently; repeated IDs preserve input order. Return values confirm durable receipt or queueing, never task completion. Inspect each result and retry only failed items after verifying their status; do not resend successful items. Only dispatch work the owner has authorized.
 
 The target session receives your message with a sender envelope containing your session ID, so it can use send_agent_message to reply.`,
 

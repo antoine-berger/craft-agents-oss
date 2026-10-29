@@ -1,3 +1,4 @@
+import { sendMessageUntilAck } from './message-ack'
 import { getSessionAttentionService, disposeSessionAttention } from '../handlers/rpc/session-attention'
 import { canResumeFailedSession, recoverAfterServerRestart, type SessionRecovery } from '@craft-agent/shared/sessions'
 import { readSessionHistory, searchSessionHistory } from '../services/session-history'
@@ -1427,6 +1428,7 @@ export class SessionManager implements ISessionManager {
   private archiveStops = new Map<string, Promise<void>>()
   private archiveStopFailures = new Set<string>()
   private worktreeLocks: Map<string, Promise<void>> = new Map()
+  private agentMessageDispatches = new Map<string, Promise<void>>()
   private checkpointRestores = new Map<string, ManagedSession>()
   /** Monotonic clock to ensure strictly increasing message timestamps */
   private lastTimestamp = 0
@@ -3981,11 +3983,16 @@ export class SessionManager implements ISessionManager {
 
     // (session_created is emitted by createSession above.)
 
-    // Fire and forget — send the message but don't await completion
-    this.assertSessionRunnable(managed, stopEpoch)
-    this.sendMessage(session.id, request.prompt, fileAttachments, undefined, { repository }).catch(err => {
-      sessionLog.error(`Failed to send message to spawned session ${session.id}:`, err)
-    })
+    // Wait for ordinary first-send setup and durable receipt, never the model turn.
+    try {
+      this.assertSessionRunnable(managed, stopEpoch)
+      await sendMessageUntilAck(
+        onAck => this.sendMessage(session.id, request.prompt, fileAttachments, undefined, { repository }, undefined, undefined, onAck),
+        error => sessionLog.error(`First message accepted by spawned session ${session.id}, but its turn failed:`, error),
+      )
+    } catch (error) {
+      throw Object.assign(new Error(`Chat ${session.id} was created, but its first prompt was not accepted: ${error instanceof Error ? error.message : String(error)}`), { sessionId: session.id })
+    }
 
     return {
       sessionId: session.id,
@@ -4511,6 +4518,66 @@ export class SessionManager implements ISessionManager {
     } finally {
       managed.isRestoringCheckpoint = false
       if (this.checkpointRestores.get(plan.path) === managed) this.checkpointRestores.delete(plan.path)
+    }
+  }
+
+  private async deliverAgentMessage(
+    managed: ManagedSession,
+    sessionId: string,
+    message: string,
+    attachments?: Array<{ path: string; name?: string }>,
+  ): Promise<import('@craft-agent/session-tools-core').SendAgentMessageResult> {
+    this.assertSessionRunnable(managed)
+    const stopEpoch = managed.stopEpoch ?? 0
+    return this.withAgentMessageDispatch(sessionId, async () => {
+      this.assertSessionRunnable(managed, stopEpoch)
+      const target = this.sessions.get(sessionId)
+      if (!target || target.workspace.id !== managed.workspace.id) throw new Error('Target chat is not available in this workspace')
+      this.assertSessionRunnable(target)
+      // Build FileAttachment[] from paths (same pattern as spawn_session)
+      let fileAttachments: FileAttachment[] | undefined
+      if (attachments?.length) {
+        const builtAttachments: FileAttachment[] = []
+        for (const a of attachments) {
+          try {
+            const extraDirs = getWorkspaceAllowedDirs(managed.workspace.id)
+            const safePath = await validateFilePath(a.path, extraDirs)
+            const attachment = readFileAttachment(safePath)
+            if (attachment) {
+              if (a.name) attachment.name = a.name
+              builtAttachments.push(attachment)
+            }
+          } catch (error) {
+            const msg = error instanceof Error ? error.message : String(error)
+            sessionLog.warn(`send_agent_message: blocked attachment path ${a.path}: ${msg}`)
+          }
+        }
+        if (builtAttachments.length > 0) fileAttachments = builtAttachments
+      }
+
+      this.assertSessionRunnable(managed, stopEpoch)
+      const targetBusy = target.isProcessing === true
+      const { messageId } = await sendMessageUntilAck(
+        onAck => this.sendMessage(sessionId, message, fileAttachments, undefined, undefined, undefined, undefined, onAck),
+        error => sessionLog.error(`Message accepted by ${sessionId}, but its turn failed:`, error),
+      )
+      return {
+        delivery: target.messages.find(item => item.id === messageId)?.isQueued ? ('queued' as const) : ('delivered' as const),
+        targetBusy,
+        messageId,
+      }
+    })
+  }
+
+  /** Preserve cross-agent send order per destination, only through persistence ACK. */
+  private async withAgentMessageDispatch<T>(sessionId: string, operation: () => Promise<T>): Promise<T> {
+    const previous = this.agentMessageDispatches.get(sessionId) ?? Promise.resolve()
+    const result = previous.then(operation)
+    const settled = result.then(() => {}, () => {})
+    this.agentMessageDispatches.set(sessionId, settled)
+    try { return await result }
+    finally {
+      if (this.agentMessageDispatches.get(sessionId) === settled) this.agentMessageDispatches.delete(sessionId)
     }
   }
 
@@ -5986,43 +6053,7 @@ export class SessionManager implements ISessionManager {
 
           return { resolved: null, available }
         },
-        sendAgentMessageFn: async (sessionId: string, message: string, attachments?: Array<{ path: string; name?: string }>) => {
-          this.assertSessionRunnable(managed)
-          const stopEpoch = managed.stopEpoch ?? 0
-          // Build FileAttachment[] from paths (same pattern as spawn_session)
-          let fileAttachments: FileAttachment[] | undefined
-          if (attachments?.length) {
-            const builtAttachments: FileAttachment[] = []
-            for (const a of attachments) {
-              try {
-                const extraDirs = getWorkspaceAllowedDirs(managed.workspace.id)
-                const safePath = await validateFilePath(a.path, extraDirs)
-                const attachment = readFileAttachment(safePath)
-                if (attachment) {
-                  if (a.name) attachment.name = a.name
-                  builtAttachments.push(attachment)
-                }
-              } catch (error) {
-                const msg = error instanceof Error ? error.message : String(error)
-                sessionLog.warn(`send_agent_message: blocked attachment path ${a.path}: ${msg}`)
-              }
-            }
-            if (builtAttachments.length > 0) fileAttachments = builtAttachments
-          }
-
-          // Capture the target's busy state BEFORE delivery so the sender gets a
-          // truthful ack. A busy (mid-turn) target queues the message and replays
-          // it after the current turn (anthropic defaults to 'queue'); an idle
-          // target starts processing immediately. sendMessage throws for an
-          // unknown session — that rejection propagates to the handler's catch.
-          const targetBusy = this.sessions.get(sessionId)?.isProcessing === true
-          this.assertSessionRunnable(managed, stopEpoch)
-          await this.sendMessage(sessionId, message, fileAttachments)
-          return {
-            delivery: targetBusy ? ('queued' as const) : ('delivered' as const),
-            targetBusy,
-          }
-        },
+        sendAgentMessageFn: (sessionId, message, attachments) => this.deliverAgentMessage(managed, sessionId, message, attachments),
         activateSourceInSessionFn: async (sourceSlug: string) => {
           const cb = managed.agent?.onSourceActivationRequest
           if (!cb) {
@@ -7709,17 +7740,6 @@ export class SessionManager implements ISessionManager {
         await this.flushSession(managed.id)
       }
       this.assertSessionRunnable(managed, turnStopEpoch)
-      onAck?.(userMessage.id)
-
-      // Emit user_message event so UI can confirm the optimistic message
-      this.sendEvent({
-        type: 'user_message',
-        sessionId,
-        message: userMessage,
-        status: 'accepted',
-        optimisticMessageId: options?.optimisticMessageId
-      }, managed.workspace.id)
-
       // If this is the first user message and no title exists, set one immediately
       // AI generation will enhance it later, but we always have a title from the start
       // Automation sessions (triggeredBy set) already have a title and skip AI generation entirely
@@ -7746,6 +7766,12 @@ export class SessionManager implements ISessionManager {
         this.persistSession(managed)
         // Flush immediately so disk is authoritative before notifying renderer
         await this.flushSession(managed.id)
+        if ((managed.stopEpoch ?? 0) !== turnStopEpoch) {
+          managed.messages = managed.messages.filter(item => item !== userMessage)
+          this.persistSession(managed)
+          await this.flushSession(managed.id)
+        }
+        this.assertSessionRunnable(managed, turnStopEpoch)
         this.sendEvent({
           type: 'title_generated',
           sessionId,
@@ -7804,6 +7830,17 @@ export class SessionManager implements ISessionManager {
     // Capture the generation to detect if a new request supersedes this one.
     // This prevents the finally block from clobbering state when a follow-up message arrives.
     const myGeneration = managed.processingGeneration
+
+    if (!existingMessageId) {
+      // Reserve the turn before acknowledging: another sender may immediately
+      // submit a follow-up as soon as this receipt resolves.
+      onAck?.(userMessage.id)
+      this.sendEvent({
+        type: 'user_message', sessionId, message: userMessage, status: 'accepted',
+        optimisticMessageId: options?.optimisticMessageId,
+      }, managed.workspace.id)
+    }
+
 
     // Pre-enable sources required by invoked skills (Issue #249)
     // This eliminates the two-turn penalty where the agent discovers missing sources at runtime.

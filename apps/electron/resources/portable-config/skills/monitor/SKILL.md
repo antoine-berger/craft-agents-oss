@@ -36,7 +36,7 @@ For each ticket record its sessionId, dependencies, stage, branch, PR URL/head/b
 
 ## Launch approved tickets as normal independent chats
 
-Use spawn_session (help=true first), one chat per approved ticket, explicitly setting this projectId. Inherit the selected repository and use the standard independent-worktree path. Do not supply parentSessionId, share the pilot's checkout, reuse another chat's SDK ID, or use create_task/TaskRunner. Native subagents remain appropriate for the ticket's internal checks.
+Use spawn_session (help=true first), one chat per approved ticket, explicitly setting this projectId. For an approved set of independent tickets, make one spawn_session call with `sessions:[{prompt:"/ship-plan ISSUE-1",projectId,...},{prompt:"/ship-plan ISSUE-2",projectId,...}]`. Each item creates its own chat and worktree. Do not wait for the first ticket's plan or answer before dispatching the others. Apply the existing authorization and dependency checks to every item; batch launch does not approve additional work. Inherit the selected repository and use the standard independent-worktree path. Do not supply parentSessionId, share the pilot's checkout, reuse another chat's SDK ID, or use create_task/TaskRunner. Native subagents remain appropriate for the ticket's internal checks.
 
 For independent work use the repository's verified current default branch. For B depending on A, B becomes eligible as soon as A's PR exists on GitHub (draft is fine): the owner does not want to wait for A's review, CI or human review. Verify the actual PR HEAD and published branch; a chat claiming 'done' is insufficient. A merged A means B starts from the updated default branch. Multiple unmerged parents or uncertain compatibility require an owner decision, not an automatic merge.
 
@@ -52,7 +52,7 @@ Record the returned sessionId immediately. A 'started' response is not proof the
 
 ## Start implementation in an existing ticket chat
 
-After the required owner approval, use send_agent_message with the ticket's recorded sessionId and set its message argument to EXACTLY `/ship`. This also applies to an approved subsequent Ship feedback round. Reuse the existing chat and worktree; do not spawn another session.
+After the required owner approval, use send_agent_message with the ticket's recorded sessionId and set its message argument to EXACTLY `/ship`. For several independently approved existing chats, use one call with `messages:[{sessionId:"first recorded ID",message:"/ship"},{sessionId:"second recorded ID",message:"/ship"}]`. Dispatch them together instead of waiting for one to finish before sending to the next. Receipt or queueing is not completion; inspect each result. Retry only failed items after checking their actual chat state, never the entire batch. A failed spawn may include the already-created sessionId: inspect that chat instead of creating a duplicate. This also applies to an approved subsequent Ship feedback round. Reuse the existing chat and worktree; do not spawn another session.
 
 The message is one line containing only `/ship`: no prefix, suffix, ticket ID, approval quote, context, scope summary, collaboration contract or extra instructions. Do not add attachments or send the removed wrapper as an automatic follow-up. Keep coordination details in the pilot's own note and keep /ship's existing plan-approval rules.
 

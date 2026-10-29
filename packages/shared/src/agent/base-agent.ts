@@ -14,6 +14,7 @@
  */
 
 import { existsSync } from 'node:fs';
+import { SpawnSessionSchema } from '@craft-agent/session-tools-core';
 import { join } from 'node:path';
 
 import type { AgentEvent } from '@craft-agent/core/types';
@@ -116,6 +117,10 @@ export interface SpawnSessionResult {
   status: 'started';
   connection?: string;
   model?: string;
+}
+
+export interface SpawnSessionBatchResult {
+  results: Array<({ index: number } & SpawnSessionResult) | { index: number; status: 'error'; error: string; sessionId?: string }>;
 }
 
 export interface SpawnSessionHelpResult {
@@ -1149,7 +1154,26 @@ ${formattedMessages}
    */
   protected async preExecuteSpawnSession(
     input: Record<string, unknown>
-  ): Promise<SpawnSessionResult | SpawnSessionHelpResult> {
+  ): Promise<SpawnSessionResult | SpawnSessionHelpResult | SpawnSessionBatchResult> {
+    const parsed = SpawnSessionSchema.safeParse(input);
+    if (!parsed.success) throw new Error(`Invalid spawn_session arguments: ${parsed.error.message}`);
+    input = parsed.data;
+    if (input.sessions !== undefined) {
+      if (Object.keys(input).some(key => key !== 'sessions' && input[key] !== undefined)) {
+        throw new Error('Use sessions alone for a batch; put overrides on each item.');
+      }
+      const results = await Promise.all((input.sessions as Record<string, unknown>[]).map(async (entry, index) => {
+        try {
+          const result = await this.preExecuteSpawnSession(entry) as SpawnSessionResult;
+          return { index, ...result };
+        } catch (error) {
+          const sessionId = error && typeof error === 'object' && 'sessionId' in error ? String(error.sessionId) : undefined;
+          return { index, status: 'error' as const, error: error instanceof Error ? error.message : String(error), ...(sessionId ? { sessionId } : {}) };
+        }
+      }));
+      return { results };
+    }
+
     // Help mode — return available config info
     if (input.help) {
       return this.getSpawnSessionHelp();

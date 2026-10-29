@@ -283,6 +283,7 @@ export type {
 // Tool definitions — single source of truth
 export {
   // Individual Zod schemas
+  SpawnSessionSchema,
   SubmitPlanSchema,
   ReadSessionSchema,
   SearchSessionsSchema,

@@ -7,7 +7,7 @@
 import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { basename, join } from 'node:path'
+import { basename, join, resolve } from 'node:path'
 import type { CreateWorktreeRequest, CreateWorktreeResult } from '@craft-agent/shared/protocol'
 import { runGit, runGitResult } from '../git'
 import { commonGitDir, repoCommandDir, worktreeParentFor } from './discover'
@@ -88,7 +88,21 @@ export function gitReason(stderr: string): string {
   return (reasons.length ? reasons : [stderr.trim()]).map(line => line.replace(/^(fatal|error):\s*/i, '')).join('\n')
 }
 
+const repositoryResolutions = new Map<string, Promise<unknown>>()
+
+/** Only initial clone/reuse checks share a lane; individual worktrees remain independent. */
 export async function resolveWorktreeRepository(request: Pick<CreateWorktreeRequest, 'gitDir' | 'cloneNameWithOwner'>, cloneRoot: string | null): Promise<{ gitDir: string; cloned: boolean }> {
+  if (!request.cloneNameWithOwner || !cloneRoot) return resolveWorktreeRepositoryUnlocked(request, cloneRoot)
+  const key = resolve(cloneRoot, request.cloneNameWithOwner.split('/')[1] ?? '')
+  const previous = repositoryResolutions.get(key) ?? Promise.resolve()
+  const result = previous.then(() => resolveWorktreeRepositoryUnlocked(request, cloneRoot))
+  const settled = result.then(() => {}, () => {})
+  repositoryResolutions.set(key, settled)
+  try { return await result }
+  finally { if (repositoryResolutions.get(key) === settled) repositoryResolutions.delete(key) }
+}
+
+async function resolveWorktreeRepositoryUnlocked(request: Pick<CreateWorktreeRequest, 'gitDir' | 'cloneNameWithOwner'>, cloneRoot: string | null): Promise<{ gitDir: string; cloned: boolean }> {
   let gitDir: string | null = null
   let cloned = false
   if (request.cloneNameWithOwner) {

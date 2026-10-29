@@ -997,6 +997,8 @@ export interface SendAgentMessageResult {
    *   processed after the current turn finishes.
    */
   delivery: 'delivered' | 'queued';
+  /** Durable destination message identity, when provided by the host. */
+  messageId?: string;
   /** Whether the target session was processing a turn when the message arrived. */
   targetBusy: boolean;
 }
