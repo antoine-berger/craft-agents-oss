@@ -146,7 +146,7 @@ export function usePrWatch(sessionId: string, enabled: boolean, workingDirectory
     })
     const refetchOnFocus = () => {
       if (foreground && !cancelled && document.visibilityState !== 'hidden' && subscriptionId) {
-        void api.prWatchRefresh?.(sessionId, false).catch(() => {})
+        void api.prWatchRefresh?.(sessionId, true).catch(() => {})
       }
     }
     window.addEventListener('focus', refetchOnFocus)
@@ -158,9 +158,9 @@ export function usePrWatch(sessionId: string, enabled: boolean, workingDirectory
         }
         subscriptionId = result.subscriptionId
         subscribed.current = !!subscriptionId
-        // Reconcile the opened chat once, even when the automatic budget gate is paused.
+        // Reconcile the opened chat while respecting quota and error backoff.
         // Sidebar rows share the background poll and never force a request on entry/focus.
-        if (foreground && subscriptionId) void api.prWatchRefresh?.(sessionId, false).catch(() => {})
+        if (foreground && subscriptionId) void api.prWatchRefresh?.(sessionId, true).catch(() => {})
         if (!pushed) {
           setBase(result.state)
         } else if (pushed.kind === 'ready' && pushed.incomplete && result.state.kind === 'ready') {
