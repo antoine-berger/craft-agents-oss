@@ -1,5 +1,5 @@
 import type { PrEntry, PrSummary, PrWatchState } from '@craft-agent/shared/protocol'
-import { hasReviewFeedback, pinnedCheckoutPreface, prCardActionMessage } from './pr-watch-state'
+import { hasReviewFeedback } from './pr-watch-state'
 
 export type PrQuickAction = 'create' | 'commit-push' | 'push' | 'pull' | 'rebase' | 'resolve' | 'fix' | 'fix-ci' | 'ready' | 'rerun' | 'auto-merge' | 'disable-auto-merge' | 'merge' | 'queued' | 'archive'
 
@@ -33,17 +33,27 @@ export function nextPrQuickAction(state: PrWatchState, origin?: PrEntry['origin'
 }
 
 export function prQuickActionMessage(action: PrQuickAction, state: PrWatchState, origin?: PrEntry['origin']): string | null {
-  if (action === 'create') return 'Create a pull request for the changes in this session’s worktree. Review the diff, run the relevant checks, commit and push the changes, and write a clear PR title and description. Use the intended base branch (including the parent PR branch when this is a stack). If there are no changes, tell me instead of creating an empty PR.'
+  if (action === 'create') return 'Create a PR for this worktree. Review the changes, run the relevant checks, commit and push. Use the parent branch as the base for a stack. If there are no changes, do not create an empty PR.'
   if (state.kind !== 'pr') return null
   const { summary: pr, details } = state
-  if (action === 'resolve' || action === 'fix' || action === 'fix-ci') return prCardActionMessage(action, pr, details, origin)
-  const target = origin === 'bound' ? 'that separate checkout' : 'this session’s worktree'
-  const scope = `${origin === 'bound' ? pinnedCheckoutPreface(pr) + '\n\n' : ''}Work on PR #${pr.number} (${pr.url}), branch ${JSON.stringify(pr.headRef)}, in ${target}.`
-  if (action === 'commit-push') return `${scope} Review the local changes, run the relevant checks, commit them and push to the PR branch. Do not merge the PR.`
-  if (action === 'push') return `${scope} Push the local commits to the PR branch. Use a normal push; if it needs a force push, explain why and ask first. Do not merge the PR.`
-  if (action === 'pull') return `${scope} Fetch the PR branch and bring this worktree up to date with it using a fast-forward. Preserve all local changes. If branches diverged, explain the divergence and ask before rewriting commits.`
-  if (action === 'rebase') return `${scope} Fetch the PR’s current base branch ${JSON.stringify(pr.baseRef)} and rebase this branch onto that base, preserving the parent branch if this PR is stacked. Resolve conflicts while preserving both sides’ intent, run the relevant checks, then push with --force-with-lease pinned to the remote head fetched before the rebase. Never force push without a lease and never merge the PR. If the remote head changed, stop and explain.`
-  return null
+  let message: string
+  switch (action) {
+    case 'commit-push': message = 'Commit and push all changes. Review the diff and run the relevant checks first. Do not merge.'; break
+    case 'push': message = 'Push the local commits. Use a normal push; ask before any force push. Do not merge.'; break
+    case 'pull': message = 'Fetch the PR branch and fast-forward this worktree to it. Preserve local changes; if branches diverge, ask before rewriting commits.'; break
+    case 'rebase': message = `Rebase this branch onto the remote-tracking base (${JSON.stringify(pr.baseRef)}). Fetch it first and preserve the parent branch for stacks. Resolve conflicts, run the relevant checks, then push with --force-with-lease pinned to the fetched remote head; stop if it changes. Do not merge.`; break
+    case 'resolve': message = `Fetch the base remote and merge its remote-tracking ref (${JSON.stringify(pr.baseRef)}) into this branch. Resolve conflicts. Preserve both sides’ intent; ask if a decision is needed. Run the relevant checks, commit the merge and summarize resolutions. Don't rebase. Don't push unless I ask.`; break
+    case 'fix': message = "Address the open review comments. Read reviews and unresolved inline threads, fix applicable issues, run the relevant checks and summarize changes; explain any disagreement. Don't push, reply on GitHub or resolve threads unless I ask."; break
+    case 'fix-ci': message = "Fix the failing CI actions. Read the failure logs, reproduce and fix actual failures, then rerun the relevant checks. If flaky or unrelated, explain instead of changing code. Don't push unless I ask."; break
+    default: return null
+  }
+  const context = `PR #${pr.number} (${pr.url}), branch ${JSON.stringify(pr.headRef)}.`
+  const checkout = origin === 'bound'
+    ? "This PR is pinned to this session. Reuse its existing worktree or create a separate checkout of the PR's repository. Don't switch this folder's branch or change its files. Work there and report its path."
+    : ''
+  const checks = action === 'fix-ci' ? details?.checks.filter(check => check.status === 'failure')
+    .map(check => `- ${check.name}${check.url ? ` (${check.url})` : ''}`).join('\n') : ''
+  return [message, context, checkout, checks].filter(Boolean).join('\n\n')
 }
 
 export function canRerunPrChecks(pr: PrSummary): boolean {
