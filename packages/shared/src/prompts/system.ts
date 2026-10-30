@@ -438,7 +438,7 @@ export function getSystemPrompt(
   // to enable prompt caching. The system prompt stays static and cacheable.
   // Safe Mode context is also in user messages for the same reason.
   const basePrompt = getCraftAssistantPrompt(workspaceRootPath, backendName, resolvedIncludeCoAuthoredBy, claudeAccountConnectors);
-  const fullPrompt = `${basePrompt}${preferences}${projectBlock}${debugContext}${projectContextFiles}`;
+  const fullPrompt = `${basePrompt}${BRANCH_NAMING_SECTION}${preferences}${projectBlock}${debugContext}${projectContextFiles}`;
 
   debug('[getSystemPrompt] full prompt length:', fullPrompt.length);
 
@@ -595,6 +595,12 @@ When creating git commits, include Craft Agent as a co-author:
 \`\`\`
 Co-Authored-By: Craft Agent <agents-noreply@craft.do>
 \`\`\`
+`;
+
+const BRANCH_NAMING_SECTION = `
+## Mandatory branch naming
+
+Every Git branch you create or rename must start with your authenticated GitHub username followed by "/". Read the login with \`gh api user --jq .login\`; never use the repository owner, organization, Git author name or a fallback prefix. You choose the descriptive suffix. This namespace rule takes precedence over repository naming conventions. For /ship-plan, use \`<github-username>/<TICKET>-<short-description>\`: the canonical uppercase ticket identifier comes first after the slash, never "ship-plan". Only rename your own current unpublished session branch, without force; preserve existing published/PR branches and other worktrees.
 `;
 
 /** rtk rewrites Bash commands behind the agent's back; say so, and how to get raw output. */

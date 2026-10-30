@@ -32,6 +32,18 @@ const GIT_CONVENTIONS_HEADING = '## Git Conventions'
 const CO_AUTHOR_TRAILER = 'Co-Authored-By: Craft Agent <agents-noreply@craft.do>'
 
 describe('system prompt guidance', () => {
+  it('makes the GitHub username namespace mandatory for both backends even with co-authoring disabled', () => {
+    for (const backend of ['Claude Code', 'Craft Agents Backend']) {
+      const prompt = getSystemPrompt('', undefined, '/tmp/workspace', '/tmp/workspace', undefined, backend, false)
+      expect(prompt).toContain('## Mandatory branch naming')
+      expect(prompt).toContain('gh api user --jq .login')
+      expect(prompt).toContain('You choose the descriptive suffix')
+      expect(prompt).toContain('<github-username>/<TICKET>-<short-description>')
+      expect(prompt).toContain('takes precedence over repository naming conventions')
+      expect(prompt).not.toContain(CO_AUTHOR_TRAILER)
+    }
+  })
+
   it('keeps the default static prompt below the budget', () => {
     const prompt = getSystemPrompt(undefined, undefined, '/tmp/workspace', '/tmp/workspace')
 

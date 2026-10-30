@@ -22,7 +22,7 @@ beforeEach(async () => {
   git(repo, 'init', '-b', 'main'); git(repo, 'config', 'user.name', 'Checkpoint Test'); git(repo, 'config', 'user.email', 'test@example.invalid')
   writeFileSync(join(repo, 'code.txt'), 'base\n'); writeFileSync(join(repo, '.gitignore'), '.env\nnode_modules/\n')
   git(repo, 'add', '.'); git(repo, 'commit', '-m', 'Initial')
-  plan = await ensureOwnedWorktree(await planOwnedWorktree({ repositoryPath: repo, ownerId: 'workspace/session-one', sessionId: 'session-one', baseBranch: 'main' }))
+  plan = await ensureOwnedWorktree(await planOwnedWorktree({ repositoryPath: repo, ownerId: 'workspace/session-one', sessionId: 'session-one', branchPrefix: 'developer', baseBranch: 'main' }))
   sessionDir = join(root, 'sessions', 'session-one'); mkdirSync(sessionDir, { recursive: true })
   writeFileSync(recordFile(), jsonl([user]))
 })

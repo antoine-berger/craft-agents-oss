@@ -4,7 +4,9 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpath
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { OwnedWorktree } from '@craft-agent/shared/sessions'
-import { ensureOwnedWorktree, OwnedWorktreeError, ownedWorktreeWorkingDirectory, planOwnedWorktree, removeOwnedWorktree } from './owned-worktree'
+import { ensureOwnedWorktree, OwnedWorktreeError, ownedWorktreeWorkingDirectory, planOwnedWorktree as planWithPrefix, removeOwnedWorktree, taskBranchSlug } from './owned-worktree'
+
+const planOwnedWorktree = (input: Parameters<typeof planWithPrefix>[0]) => planWithPrefix({ branchPrefix: 'developer', ...input })
 
 let root: string
 let repo: string
@@ -30,6 +32,30 @@ afterEach(() => rmSync(root, { recursive: true, force: true }))
 const plan = (sessionId = 'test-session', baseBranch?: string) => planOwnedWorktree({ repositoryPath: repo, ownerId: `workspace/${sessionId}`, sessionId, baseBranch })
 
 describe('session-owned worktrees', () => {
+  it('requires a GitHub login for every new branch without creating a fallback', async () => {
+    await expect(planWithPrefix({ repositoryPath: repo, ownerId: 'workspace/no-login', sessionId: 'no-login', taskTitle: 'New task' }))
+      .rejects.toThrow('authenticated GitHub username is required')
+    expect(git(repo, 'branch', '--list')).toBe('* main')
+    expect(existsSync(join(repo, '.git', 'craft-session-worktrees'))).toBe(false)
+  })
+
+  it('places a ship-plan ticket immediately after the username and lets the agent choose the final suffix', async () => {
+    const planned = await planOwnedWorktree({ repositoryPath: repo, ownerId: 'workspace/ticket', sessionId: 'ticket', taskTitle: '/ship-plan sap-1234' })
+    expect(planned.branch).toBe('developer/SAP-1234')
+    const ready = await ensureOwnedWorktree(planned)
+    const commit = git(ready.path, 'rev-parse', 'HEAD')
+    writeFileSync(join(ready.path, 'code.txt'), 'preserve draft\n')
+    git(ready.path, 'branch', '-m', '--', 'developer/SAP-1234-fix-login')
+    const resumed = await ensureOwnedWorktree(ready)
+    expect(resumed.path).toBe(ready.path)
+    expect(resumed.checkout?.branch).toBe('developer/SAP-1234-fix-login')
+    expect(git(ready.path, 'rev-parse', 'HEAD')).toBe(commit)
+    expect(readFileSync(join(ready.path, 'code.txt'), 'utf8')).toBe('preserve draft\n')
+    expect(taskBranchSlug('/ship-plan https://linear.app/team/issue/SAP-1234/fix-login')).toBe('SAP-1234')
+    expect(taskBranchSlug('/ship-plan https://linear.app/acme-2025/issue/SAP-1234/fix-login')).toBe('SAP-1234')
+    expect(taskBranchSlug('/ship-plan SAP-1234 Fix login')).toBe('SAP-1234-fix-login')
+  })
+
   it('uses readable task names and atomically separates concurrent matching tasks', async () => {
     const [a, b] = await Promise.all([
       planOwnedWorktree({ repositoryPath: repo, ownerId: 'workspace/task-a', sessionId: 'task-a', branchPrefix: 'developer', taskTitle: 'Fix login redirect' }),

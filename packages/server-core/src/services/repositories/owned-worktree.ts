@@ -79,11 +79,19 @@ function expectedPath(gitDir: string, branch: string, ownerId?: string): string 
 
 /** Only names appear in Git; the durable ownership digest stays in private metadata/path. */
 export function taskBranchSlug(title: string): string {
+  const ticket = /^\s*\/ship-plan\b/i.test(title)
+    ? (title.match(/https?:\/\/linear\.app\/[^\s/]+\/issue\/([a-z][a-z0-9]*-\d+)\b/i)?.[1]
+      ?? title.replace(/https?:\/\/\S+/g, ' ').match(/\b([a-z][a-z0-9]*-\d+)\b/i)?.[1])?.toUpperCase()
+    : undefined
   const slug = title.replace(/```[\s\S]*?```/g, ' ')
     .replace(/https?:\/\/\S+/g, ' ').replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, ' ')
     .replace(/(?:sk-[A-Za-z0-9_-]{12,}|gh[pousr]_[A-Za-z0-9_]{12,}|github_pat_[A-Za-z0-9_]+|[A-Za-z0-9_-]{28,})/g, 'reference')
     .normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
     .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+  if (ticket) {
+    const suffix = slug.replace(/^ship-plan(?:-|$)/, '').replace(new RegExp(`(?:^|-)${ticket.toLowerCase()}(?=-|$)`), '').replace(/^-+|-+$/g, '')
+    return [ticket, suffix].filter(Boolean).join('-').slice(0, 72).replace(/-+$/g, '')
+  }
   return slug.slice(0, 72).replace(/-+$/g, '') || 'task'
 }
 function allocationPath(plan: Pick<OwnedWorktree, 'gitDir' | 'branch'>): string {
@@ -249,6 +257,9 @@ async function readReservation(plan: OwnedWorktree): Promise<OwnedWorktree | nul
 /** Plan before Git checkout. Named branches atomically reserve private metadata for crash-safe allocation. */
 export async function planOwnedWorktree(input: PlanOwnedWorktreeInput): Promise<OwnedWorktree> {
   if (!input.ownerId || !input.sessionId) throw new OwnedWorktreeError('A worktree requires a session owner', 'invalid-plan')
+  if (!input.existingBranch && !input.branchPrefix) {
+    throw new OwnedWorktreeError('An authenticated GitHub username is required to create a session branch', 'invalid-plan')
+  }
   if (input.branchPrefix !== undefined && !isValidGitHubLogin(input.branchPrefix)) {
     throw new OwnedWorktreeError('Invalid GitHub username for the session branch', 'invalid-plan')
   }
@@ -274,7 +285,7 @@ export async function planOwnedWorktree(input: PlanOwnedWorktreeInput): Promise<
       if (subdirectory && await runGit(repoPath, ['cat-file', '-t', `${baseCommit}:${subdirectory.split(sep).join('/')}`]) !== 'tree') throw new OwnedWorktreeError('The project directory does not exist in the selected branch', 'invalid-directory')
       const entries = await worktrees({ repoPath })
       if (input.existingBranch && entries.some(entry => entry.branch === input.existingBranch)) throw new OwnedWorktreeError(`Branch "${input.existingBranch}" is already checked out. Choose a new branch copy instead.`, 'collision')
-      const initial = input.existingBranch ?? `${input.branchPrefix ?? 'craft'}/${taskBranchSlug(input.taskTitle ?? input.sessionId)}`
+      const initial = input.existingBranch ?? `${input.branchPrefix}/${taskBranchSlug(input.taskTitle ?? input.sessionId)}`
       await mkdir(join(gitDir, MARKER_DIRECTORY, 'branches'), { recursive: true })
       for (let number = 1; number <= 1000; number++) {
         const branch = number === 1 ? initial : `${initial}-${number}`
@@ -318,7 +329,7 @@ export async function planOwnedWorktree(input: PlanOwnedWorktreeInput): Promise<
     throw new OwnedWorktreeError(`The project subdirectory "${subdirectory}" is not a directory in base branch "${input.baseBranch ?? base}"`, 'invalid-directory')
   }
   const sessionName = branchSlug(input.sessionId).slice(0, 48)
-  const branch = `${input.branchPrefix ?? 'craft'}/session-${sessionName}-${ownerKey(input.ownerId).slice(0, 16)}`
+  const branch = `${input.branchPrefix}/session-${sessionName}-${ownerKey(input.ownerId).slice(0, 16)}`
   const plan: OwnedWorktree = {
     version: 1,
     ownerId: input.ownerId,
