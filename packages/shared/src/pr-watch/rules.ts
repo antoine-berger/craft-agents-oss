@@ -144,21 +144,17 @@ function actionTemplate(action: PrCardAction, summary: PrSummary, details: PrDet
   }
 }
 
-/**
- * The message the card's "Resolve" button sends to the session: a fixed template (no model). It asks
- * for a merge of the base branch (never a rebase, which would need a force-push), conflicts resolved
- * by intent, tests, and a per-file summary, and keeps it local.
- */
+/** The Rebase and Resolve shortcuts share one instruction for the current PR base. */
+export function rebaseAndPushInstruction(summary: Pick<PrSummary, 'baseRef'>): string {
+  return `Rebase your branch onto the remote base branch (${JSON.stringify(summary.baseRef)}) and resolve conflicts. Stage the resolved files and run \`git rebase --continue\`, then push --force-with-lease. Fetch the base and PR head first; use the base's actual remote-tracking ref and pin the lease to the fetched PR head. Preserve the parent branch for stacks and run the relevant checks before pushing. Do not merge.`
+}
+
+/** The card sends the same rebase-and-push request as the compact action buttons. */
 export function resolveConflictsMessage(summary: PrSummary): string {
   return [
-    `Resolve the merge conflicts between \`${summary.headRef}\` and \`${summary.baseRef}\` on pull request #${summary.number} (${summary.url}).`,
+    rebaseAndPushInstruction(summary),
     '',
-    `1. Fetch \`origin/${summary.baseRef}\` and merge it into \`${summary.headRef}\`. Don't rebase.`,
-    "2. Resolve each conflict keeping the intent of both sides. If a conflict needs a decision only I can make, stop and ask.",
-    '3. Run the relevant tests and type checks.',
-    '4. Commit the merge and summarize how you resolved each file.',
-    '',
-    "Don't push unless I ask.",
+    `PR #${summary.number} (${summary.url}), branch ${JSON.stringify(summary.headRef)}.`,
   ].join('\n')
 }
 

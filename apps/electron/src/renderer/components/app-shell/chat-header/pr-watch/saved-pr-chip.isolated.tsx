@@ -69,10 +69,10 @@ test('reopened UI keeps the saved PR button and link without claiming fresh gree
 test('agent shortcut buttons actually send the concise selected action to their own session', async () => {
   sent.length = 0
   for (const [change, label, prefix] of [
-    [{ mergeState: 'behind' }, 'Rebase', 'Rebase this branch onto'],
+    [{ mergeState: 'behind' }, 'Rebase', 'Rebase your branch onto'],
     [{ checks: 'failure' }, 'Fix CI', 'Fix the failing CI actions.'],
     [{ unresolvedThreads: 1 }, 'Fix review', 'Address the open review comments.'],
-    [{ mergeState: 'conflicting' }, 'Resolve', 'Fetch the base remote and merge'],
+    [{ mergeState: 'conflicting' }, 'Resolve', 'Rebase your branch onto'],
   ] as const) {
     const summary: any = Object.assign({ number: 7, url: 'https://github.com/acme/app/pull/7', headRef: 'me/topic', baseRef: 'release/next',
       state: 'open', headOid: 'abc', headMatchesLocal: true, localDirty: false, localAhead: 0,

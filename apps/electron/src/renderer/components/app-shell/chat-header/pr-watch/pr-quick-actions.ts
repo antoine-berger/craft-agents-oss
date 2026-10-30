@@ -1,4 +1,5 @@
 import type { PrEntry, PrSummary, PrWatchState } from '@craft-agent/shared/protocol'
+import { rebaseAndPushInstruction } from '@craft-agent/shared/pr-watch'
 import { hasReviewFeedback } from './pr-watch-state'
 
 export type PrQuickAction = 'create' | 'commit-push' | 'push' | 'pull' | 'rebase' | 'resolve' | 'fix' | 'fix-ci' | 'ready' | 'rerun' | 'auto-merge' | 'disable-auto-merge' | 'merge' | 'queued' | 'archive'
@@ -41,8 +42,8 @@ export function prQuickActionMessage(action: PrQuickAction, state: PrWatchState,
     case 'commit-push': message = 'Commit and push all changes. Review the diff and run the relevant checks first. Do not merge.'; break
     case 'push': message = 'Push the local commits. Use a normal push; ask before any force push. Do not merge.'; break
     case 'pull': message = 'Fetch the PR branch and fast-forward this worktree to it. Preserve local changes; if branches diverge, ask before rewriting commits.'; break
-    case 'rebase': message = `Rebase this branch onto the remote-tracking base (${JSON.stringify(pr.baseRef)}). Fetch it first and preserve the parent branch for stacks. Resolve conflicts, run the relevant checks, then push with --force-with-lease pinned to the fetched remote head; stop if it changes. Do not merge.`; break
-    case 'resolve': message = `Fetch the base remote and merge its remote-tracking ref (${JSON.stringify(pr.baseRef)}) into this branch. Resolve conflicts. Preserve both sides’ intent; ask if a decision is needed. Run the relevant checks, commit the merge and summarize resolutions. Don't rebase. Don't push unless I ask.`; break
+    case 'rebase':
+    case 'resolve': message = rebaseAndPushInstruction(pr); break
     case 'fix': message = "Address the open review comments. Read reviews and unresolved inline threads, fix applicable issues, run the relevant checks and summarize changes; explain any disagreement. Don't push, reply on GitHub or resolve threads unless I ask."; break
     case 'fix-ci': message = "Fix the failing CI actions. Read the failure logs, reproduce and fix actual failures, then rerun the relevant checks. If flaky or unrelated, explain instead of changing code. Don't push unless I ask."; break
     default: return null

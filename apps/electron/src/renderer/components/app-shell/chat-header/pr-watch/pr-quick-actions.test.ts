@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test'
 import { savedPrSummary } from '../../../../../../../../packages/server-core/src/services/pr-watch/association-store'
 import { nextPrQuickAction, prQuickActionMessage, type PrQuickAction } from './pr-quick-actions'
 import type { PrWatchState } from '@craft-agent/shared/protocol'
+import { resolveConflictsMessage } from '@craft-agent/shared/pr-watch'
 
 const live: Extract<PrWatchState, { kind: 'pr' }> = { kind: 'pr', summary: {
   number: 7, title: 'Feature', url: 'https://github.com/acme/app/pull/7', state: 'open',
@@ -33,14 +34,22 @@ test('button prompts are concise and keep the selected PR and branch explicit', 
   expect(create).toContain('do not create an empty PR')
 })
 
-test('rebase retains stack, checks, lease and changed-remote safeguards', () => {
-  const message = prQuickActionMessage('rebase', live, 'branch')!
-  expect(message).toStartWith('Rebase this branch onto the remote-tracking base ("release/next").')
-  expect(message).toContain('Fetch it first')
-  expect(message).toContain('preserve the parent branch for stacks')
-  expect(message).toContain('run the relevant checks')
-  expect(message).toContain('--force-with-lease pinned to the fetched remote head; stop if it changes')
-  expect(message).toContain('Do not merge')
+test('Resolve and Rebase use the same rebase-and-push prompt as the PR card', () => {
+  for (const action of ['resolve', 'rebase'] as const) {
+    const message = prQuickActionMessage(action, live, 'branch')!
+    expect(message).toBe(resolveConflictsMessage(live.summary))
+    expect(message).toStartWith('Rebase your branch onto the remote base branch ("release/next")')
+    expect(message).toContain('Fetch the base and PR head first')
+    expect(message).toContain("base's actual remote-tracking ref")
+    expect(message).toContain('Preserve the parent branch for stacks')
+    expect(message).toContain('run the relevant checks before pushing')
+    expect(message).toContain('git rebase --continue')
+    expect(message).toContain('push --force-with-lease')
+    expect(message).toContain('pin the lease to the fetched PR head')
+    expect(message).toContain('Do not merge')
+    expect(message).not.toContain("Don't rebase")
+    expect(message).not.toContain("Don't push")
+  }
 })
 
 test('CI references actual failing checks without inventing attached logs', () => {
@@ -58,15 +67,11 @@ test('CI references actual failing checks without inventing attached logs', () =
   expect(message).toContain("Don't push unless I ask")
 })
 
-test('review and conflict shortcuts preserve their existing limits', () => {
+test('review shortcut retains its own existing limits', () => {
   const review = prQuickActionMessage('fix', live, 'branch')!
   expect(review).toContain('unresolved inline threads')
   expect(review).toContain('explain any disagreement')
   expect(review).toContain("Don't push, reply on GitHub or resolve threads unless I ask")
-  const resolve = prQuickActionMessage('resolve', live, 'branch')!
-  expect(resolve).toContain('Fetch the base remote and merge its remote-tracking ref ("release/next")')
-  expect(resolve).toContain('ask if a decision is needed')
-  expect(resolve).toContain("Don't rebase. Don't push unless I ask")
 })
 
 test('pinned PR shortcuts cannot switch or change the current checkout', () => {

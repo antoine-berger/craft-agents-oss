@@ -162,11 +162,14 @@ describe('Card actions', () => {
     expect(prCardActionMessage('ok', summary, details)).toBeNull()
   })
 
-  it('asks for a merge of the base branch, never a rebase or push', () => {
+  it('rebases on the PR base and pushes the resolved branch with a lease', () => {
     const message = resolveConflictsMessage(summary)
-    expect(message).toStartWith('Resolve the merge conflicts between `feat/pr-watcher` and `main` on pull request #481')
-    expect(message).toContain("merge it into `feat/pr-watcher`. Don't rebase.")
-    expect(message).toEndWith("Don't push unless I ask.")
+    expect(message).toStartWith('Rebase your branch onto the remote base branch ("main")')
+    expect(message).toContain('git rebase --continue')
+    expect(message).toContain('push --force-with-lease')
+    expect(message).toContain('PR #481')
+    expect(message).toContain('branch "feat/pr-watcher"')
+    expect(message).not.toContain("Don't push")
   })
 
   it('lists the failing checks with their links', () => {
