@@ -61,6 +61,7 @@ import { runGitResult } from '../git'
 import { runPrQuickOperation, rerunFailedJobs } from './quick-actions'
 import { TokenChain, type TokenCandidate } from './token-chain'
 import { associatePr, savedPrSummary, type PrAssociation, type PrAssociationStore } from './association-store'
+import { webhookCoversRepo, type GithubWebhookChange } from '../github-webhooks/events'
 
 /** Details are cached this long, so a card re-asking every 15 s costs at most one query. */
 const DETAILS_TTL_MS = 10_000
@@ -123,6 +124,7 @@ interface Watcher {
   inFlight: Promise<void> | null
   stopRefWatch: () => void
   details: { at: number; value: PrDetails | null } | null
+  detailsRevision: number
 }
 
 type WatchableRepo = RepoInfo & { repo: RepoCoordinates; branch: string; remoteBranch: string }
@@ -200,6 +202,59 @@ export class PrWatchRegistry {
   private activeRequests = 0
   private readonly waitingRequests: Array<() => void> = []
   private disposed = false
+  private webhookRepositories: readonly string[] = []
+
+  /** Only explicitly configured webhook scopes use the slower reconciliation cadence. */
+  configureWebhookRepositories(repositories: readonly string[]): void {
+    this.webhookRepositories = repositories
+    for (const watcher of this.watchers.values()) if (!watcher.inFlight) this.schedule(watcher)
+  }
+
+  /** Invalidate tracked PRs through existing listeners; never execute payload text or actions. */
+  async invalidateFromWebhook(change: GithubWebhookChange): Promise<number | null> {
+    if (this.disposed) return 30_000
+    const matchesRepo = (coords: RepoCoordinates) => coordsKey(coords).toLowerCase() === coordsKey(change.repo).toLowerCase()
+    const matches = (watcher: Watcher): boolean => {
+      const summary = watcher.state.kind === 'pr' ? watcher.state.summary : null
+      if (watcher.pr && matchesRepo(watcher.pr.coords) && (change.all || change.numbers.includes(watcher.pr.number)
+        || change.shas.includes(watcher.pr.headOid) || !!summary && (change.headRefs.includes(summary.headRef) || change.baseRefs.includes(summary.baseRef)))) return true
+      const target = watcher.target
+      if (target.kind === 'number') return matchesRepo(target.coords) && (change.all || change.numbers.includes(target.number))
+      if (!matchesRepo(target.repo.repo) && !(target.repo.upstreamRepo && matchesRepo(target.repo.upstreamRepo))) return false
+      return change.all || change.headRefs.includes(target.repo.remoteBranch)
+        || !!watcher.pr && change.shas.includes(watcher.pr.headOid)
+        || !watcher.pr && (change.numbers.length > 0 || change.baseRefs.length > 0)
+    }
+    const delays = await Promise.all([...this.watchers.values()].filter(matches).map(async watcher => {
+      watcher.details = null
+      watcher.detailsRevision++
+      this.markStale(watcher)
+      // A read already in flight may predate this delivery. Read again after it settles.
+      if (watcher.inFlight) await watcher.inFlight
+      if (this.disposed) return 30_000
+      if (this.watchers.get(watcher.key) !== watcher) return 0
+      this.markStale(watcher)
+      const now = this.now()
+      const retryAt = Math.max(watcher.retryAfterUntil ?? 0, watcher.consecutiveErrors > 0 ? watcher.nextPollAt ?? 0 : 0)
+      if (retryAt > now || !this.canPollWatcher(watcher)) {
+        this.markStale(watcher)
+        return Math.max(1000, retryAt - now, (watcher.nextPollAt ?? now + POLL.errorBase) - now)
+      }
+      const knownNumber = watcher.pr?.number
+      if (watcher.target.kind === 'branch' && change.headRefs.includes(watcher.target.repo.remoteBranch)
+        && change.numbers.some(number => number !== knownNumber)) {
+        // A branch can be reused for a new PR; the known-number shortcut would keep the old PR.
+        watcher.pr = null
+      }
+      await this.refresh(watcher)
+      if (watcher.consecutiveErrors || watcher.state.kind === 'unavailable' || watcher.state.kind === 'pr' && watcher.state.summary.attentionStale) {
+        return Math.max(30_000, (watcher.nextPollAt ?? now) - now)
+      }
+      return 0
+    }))
+    const retry = Math.max(0, ...delays)
+    return retry > 0 ? retry : null
+  }
 
   /** Server observers do not depend on any renderer subscription. */
   onSessionState(listener: (sessionId: string, state: PrWatchSessionState) => void): () => void {
@@ -493,14 +548,17 @@ export class PrWatchRegistry {
     if (watcher.details && this.now() - watcher.details.at < DETAILS_TTL_MS) return watcher.details.value
 
     const { coords, number, headOid } = watcher.pr
+    const detailsRevision = watcher.detailsRevision
     const [response, local] = await Promise.all([
       this.withToken(watcher, coords, token => this.deps.graphql<GqlDetailsResponse>(coords.host, token, DETAILS_QUERY, { owner: coords.owner, name: coords.repo, number })).catch(() => null),
       watcher.target.kind === 'branch' ? this.localStatus(watcher.target.repo.root, headOid) : Promise.resolve(null),
     ])
-    if (local) this.updateLocal(watcher, local)
     const raw = response?.result.repository?.pullRequest
     const value = raw ? mapDetails(raw) : null
-    watcher.details = { at: this.now(), value }
+    if (watcher.detailsRevision === detailsRevision && watcher.pr?.headOid === headOid && watcher.pr?.number === number) {
+      if (local) this.updateLocal(watcher, local)
+      watcher.details = { at: this.now(), value }
+    }
     return value
   }
 
@@ -689,6 +747,7 @@ export class PrWatchRegistry {
       inFlight: null,
       stopRefWatch: () => {},
       details: null,
+      detailsRevision: 0,
     }
     const saved = this.loadAssociation(workspaceRootPath, key, target)
     if (saved) {
@@ -983,6 +1042,8 @@ export class PrWatchRegistry {
       rateLimit: this.hostBudgets.get(this.watcherHost(watcher)) ?? watcher.rateLimit,
     })
     if (delay === null) return
+    const repo = watcher.pr?.coords ?? (watcher.target.kind === 'number' ? watcher.target.coords : watcher.target.repo.repo)
+    if (!watcher.consecutiveErrors && webhookCoversRepo(repo, this.webhookRepositories)) delay = Math.max(delay, POLL.background)
     if (watcher.retryAfterUntil && watcher.retryAfterUntil > now) delay = Math.max(delay, watcher.retryAfterUntil - now)
     watcher.nextPollAt = now + delay
     watcher.timer = this.setTimer(() => {

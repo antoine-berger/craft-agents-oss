@@ -23,6 +23,8 @@
  *   CRAFT_WEBUI_WS_URL         — optional browser-facing ws:// or wss:// URL returned by /api/config
  *   CRAFT_MESSAGING_WA_WORKER  — absolute path to worker.cjs (default: packages/messaging-whatsapp-worker/dist/worker.cjs)
  *   CRAFT_MESSAGING_NODE_BIN   — Node binary used to spawn the WhatsApp worker (default: node)
+ *   CRAFT_GITHUB_WEBHOOK_SECRET — dedicated webhook secret (32+ characters; disabled by default)
+ *   CRAFT_GITHUB_WEBHOOK_REPOSITORIES — comma-separated owner/repo or owner/* scopes
  */
 
 import { HeadlessBrowserPaneManager } from '@craft-agent/server-core/browser'
@@ -36,6 +38,8 @@ import type { WebuiHandler } from '@craft-agent/server-core/webui'
 import { getCredentialManager } from '@craft-agent/shared/credentials'
 import { getWorkspaces } from '@craft-agent/shared/config'
 import { CONFIG_DIR } from '@craft-agent/shared/config/paths'
+import { getPrWatchRegistry } from '@craft-agent/server-core/handlers/rpc/pr-watch'
+import { parseGithubWebhookConfig, createGithubWebhookHttpHandler, GithubWebhookReceiver } from '@craft-agent/server-core/services'
 import { createMessagingBootstrap, type MessagingBootstrapHandle } from '@craft-agent/messaging-gateway'
 
 // --generate-token: print a crypto-random token and exit
@@ -152,6 +156,16 @@ if (webuiEnabled && serverToken) {
   webuiNodeHandler = nodeHttpAdapter(webuiHandler.fetch)
 }
 
+// The same endpoint accepts repository and organization deliveries, with or without WebUI.
+const webhookConfig = parseGithubWebhookConfig(process.env)
+const webhookReceiver = webhookConfig ? new GithubWebhookReceiver({
+  config: webhookConfig,
+  statePath: join(CONFIG_DIR, 'github-webhooks', 'inbox.json'),
+  onChange: change => getPrWatchRegistry()?.invalidateFromWebhook(change) ?? Promise.resolve(30_000),
+  log: console.log,
+}) : null
+const httpHandler = webhookReceiver ? createGithubWebhookHttpHandler(webhookReceiver, webuiNodeHandler) : webuiNodeHandler
+
 // Resolve WhatsApp worker paths up-front so the helper + Docker env stay in sync.
 // The worker is a Node subprocess — Bun cannot run it directly — so we must
 // pass an explicit `nodeBin` (Electron defaults nodeBin to process.execPath
@@ -180,7 +194,7 @@ const instance = await (async () => {
           }
         : undefined,
       // Embed the WebUI HTTP handler on the WS server's port
-      httpHandler: webuiNodeHandler,
+      httpHandler,
       applyPlatformToSubsystems: (platform) => {
         setFetcherPlatform(platform)
         setSessionPlatform(platform)
@@ -321,6 +335,12 @@ if (webuiHandler) {
 }
 
 // Start HTTP health endpoint if CRAFT_HEALTH_PORT is set
+if (webhookReceiver && webhookConfig) {
+  getPrWatchRegistry()?.configureWebhookRepositories(webhookConfig.repositories)
+  webhookReceiver.start()
+  console.log('[github-webhook] Enabled POST /webhooks/github for configured repositories')
+}
+
 const healthPort = parseInt(process.env.CRAFT_HEALTH_PORT ?? '0', 10)
 const healthServer = await startHealthHttpServer({
   port: healthPort,
@@ -360,6 +380,7 @@ if (!isLocalBind && instance.protocol === 'ws') {
 }
 
 const shutdown = async () => {
+  await webhookReceiver?.stop()
   await serverBrowser?.close()
   webuiHandler?.dispose()
   healthServer?.stop()

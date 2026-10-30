@@ -5,7 +5,7 @@
     "packages/server-core/src/services/pr-watch/github-queries.ts": "e7f8aa04b211075ab11a6a782b71ef739046443647d332635ed9f12bdf20e7a9",
     "packages/server-core/src/services/pr-watch/map-github.ts": "58c55b6323050d05f1c70e24f19cb29391fc9a4a7f6f2e509ece103e6efb20d5",
     "packages/server-core/src/services/session-attention/service.ts": "b2e86b54b86fb6c38c05f34c536b02fe8e327814b1d8caba81772a7c2b79e903",
-    "packages/server-core/src/services/pr-watch/registry.ts": "7157d06456eb6e15e0ec9357e2f66346719ad41a60fa8b158829511dc95e5668",
+    "packages/server-core/src/services/pr-watch/registry.ts": "e5b8c604f635d534b38b44e5bed3a79f8e6a028e1b40d9429b37ef90eaf9b12a",
     "packages/server-core/src/services/pr-watch/schedule.ts": "a749e55f0b8b3f1dd26409c61f7b048ba62702518b7cc226afb465a8ac76dc30",
     "packages/server-core/src/handlers/rpc/pr-watch.ts": "d312f56ef38bfb73a2e093287cf3e1259e91879437fdc164d408f5ed5ff85fe8",
     "packages/server-core/src/services/pr-watch/github-client.ts": "edd0eaeae392852bb17bd96eb87a5ec2044e06eebb8ec9d3e9256976bf4228dc",
@@ -88,7 +88,12 @@
     "apps/electron/src/renderer/components/app-shell/session-run-state.ts": "29dcdbf47b0da85fe4d11fd423dd52942d6c22d9026238e8a4fd21537fe2d41e",
     "packages/shared/src/protocol/pr-watch.ts": "0570adf9fdd4d5a833a73bdec65810842d3eab08243656bd66b653138a02e62a",
     "apps/electron/src/renderer/components/app-shell/session-activity/session-activity.css": "3ca5f10bd6f2e9c0d5215a937539572e63460510ecf6d1c63bb2e2d2d9818a82",
-    "apps/electron/src/renderer/components/app-shell/chat-header/pr-watch/pr-watch-visuals.tsx": "6db7f3800107f3fffde6a979e9dbfb65f7392e96d30bc31f389417107d80aed9"
+    "apps/electron/src/renderer/components/app-shell/chat-header/pr-watch/pr-watch-visuals.tsx": "6db7f3800107f3fffde6a979e9dbfb65f7392e96d30bc31f389417107d80aed9",
+    "packages/server/src/index.ts": "141f3054201591ed52df98d4ac6a209e593fff7dc77a5f4e51b3ce957aff79e1",
+    "packages/server-core/src/services/index.ts": "1d3b28e857875d5cc910afeef609e1649f8fd3f507ca00ab079e91008dd8618d",
+    "packages/server-core/src/services/github-webhooks/events.ts": "7b99e77e5ebbd7dce474aacce17e353dd1c71572c7fedd00e03b8a4ba3ec8b48",
+    "packages/server-core/src/services/github-webhooks/receiver.ts": "cb93972c0b6bbe595ca35cf6e0bffa769ac8f725eb72a3141fd3601f288d2e38",
+    "docs/github-webhooks.md": "bffad212f8b123f0f6b7a48b457e8dba0a6e3f1d8a95a8fcd4ad102c68fa36a6"
   },
   "compiledClientFiles": {
     "apps/electron/src/renderer/hooks/usePrWatch.ts": "67272de71a3d83c45caad6820f3d3fe45ef46f97d31d578780c656fa67733cc0",

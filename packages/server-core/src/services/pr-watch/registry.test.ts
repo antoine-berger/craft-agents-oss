@@ -9,6 +9,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { diskPrAssociations, associatePr, type PrAssociationStore } from './association-store'
+import type { GithubWebhookChange } from '../github-webhooks/events'
 
 const REPO: RepoInfo = {
   root: '/work/app',
@@ -20,6 +21,75 @@ const REPO: RepoInfo = {
   repo: { host: 'github.com', owner: 'acme', repo: 'app' },
   upstreamRepo: null,
 }
+
+describe('targeted GitHub webhook reconciliation', () => {
+  const event: GithubWebhookChange = { repo: { host: 'github.com', owner: 'acme', repo: 'app' },
+    numbers: [7], shas: [], headRefs: [], baseRefs: [], all: false }
+
+  it('slows only explicitly covered repositories and retains a fallback read', async () => {
+    const t = setup()
+    try {
+      t.registry.configureWebhookRepositories(['acme/*'])
+      await t.registry.subscribe({ ...sub(), foreground: true }); await t.flush()
+      expect(t.nextDelay()).toBe(POLL.background)
+      const calls = t.calls.length
+      await t.advance(POLL.foreground)
+      expect(t.calls).toHaveLength(calls)
+      await t.advance(POLL.background)
+      expect(t.calls.length).toBeGreaterThan(calls)
+      t.registry.configureWebhookRepositories(['other/*'])
+      expect(t.nextDelay()).toBe(POLL.foreground)
+    } finally { t.registry.dispose() }
+  })
+
+  it('refreshes only matching PR numbers, including bound watchers', async () => {
+    const t = setup({ byNumber: { 8: { ...PR, number: 8, id: 'PR_8' } } })
+    try {
+      await t.registry.subscribe({ ...sub(), boundPrs: [bound(8, 'acme', 'app')] }); await t.flush()
+      const calls = t.calls.length
+      expect(await t.registry.invalidateFromWebhook(event)).toBeNull()
+      expect(t.calls.slice(calls).map(call => call.variables.number)).toEqual([7])
+      const latest = t.calls.length
+      expect(await t.registry.invalidateFromWebhook({ ...event, repo: { ...event.repo, owner: 'untracked' }, all: true })).toBeNull()
+      expect(t.calls).toHaveLength(latest)
+    } finally { t.registry.dispose() }
+  })
+
+  it('never bypasses the shared quota and retains a stale flag until the retry', async () => {
+    const t = setup({ rateLimit: { remaining: 499, resetAt: new Date(1_360_000).toISOString() } })
+    try {
+      await t.registry.subscribe({ ...sub(), foreground: true }); await t.flush()
+      const calls = t.calls.length
+      expect(await t.registry.invalidateFromWebhook(event)).toBeGreaterThanOrEqual(360_000)
+      expect(t.calls).toHaveLength(calls)
+      expect(firstPr(t.registry.cachedSessionState('s1')!)?.summary.attentionStale).toBe(true)
+    } finally { t.registry.dispose() }
+  })
+
+  it('defers during Retry-After without a forced GitHub request', async () => {
+    const t = setup()
+    try {
+      await t.registry.subscribe({ ...sub(), foreground: true }); await t.flush()
+      t.failNextWith(new GitHubRateLimitError(429, 120_000))
+      expect(await t.registry.invalidateFromWebhook(event)).toBeGreaterThanOrEqual(120_000)
+      const calls = t.calls.length
+      expect(await t.registry.invalidateFromWebhook(event)).toBeGreaterThanOrEqual(120_000)
+      expect(t.calls).toHaveLength(calls)
+      await t.advance(120_000)
+      expect(await t.registry.invalidateFromWebhook(event)).toBeNull()
+    } finally { t.registry.dispose() }
+  })
+
+  it('refreshes PRs targeting a base branch after a merge or a push to that base', async () => {
+    const t = setup()
+    try {
+      await t.registry.subscribe(sub()); await t.flush()
+      const calls = t.calls.length
+      await t.registry.invalidateFromWebhook({ ...event, numbers: [99], baseRefs: ['main'] })
+      expect(t.calls.length).toBe(calls + 1)
+    } finally { t.registry.dispose() }
+  })
+})
 
 /** A repository that allows auto-merge and every merge method, defaulting to squash for the viewer. */
 const MERGE_SETTINGS: GqlRepoMergeSettings = {
