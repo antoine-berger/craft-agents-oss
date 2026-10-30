@@ -23,13 +23,25 @@ describe('Conductor classic PR priorities', () => {
 })
 
 describe('session attention and activity', () => {
-  it('puts plan, permission and question before working, in that order', () => {
-    expect(sessionRunState(item, attention('question', 'plan', 'permission'), true, true, false)).toBe('plan')
-    expect(sessionRunState(item, attention('question'), true, true, false)).toBe('permission')
-    expect(sessionRunState(item, attention('question'), false, true, false)).toBe('question')
+  it('retains plan, permission and question priority once activity stops', () => {
+    expect(sessionRunState(item, attention('question', 'plan', 'permission'), true, false, false)).toBe('plan')
+    expect(sessionRunState(item, attention('question'), true, false, false)).toBe('permission')
+    expect(sessionRunState(item, attention('question'), false, false, false)).toBe('question')
   })
   it('keeps the requested yellow-hand attention for GitHub feedback', () => {
-    expect(sessionRunState(item, attention('review'), false, true, false)).toBe('question')
+    expect(sessionRunState(item, attention('review'), false, false, false)).toBe('question')
+  })
+  it('shows working and subagent animations ahead of outstanding attention', () => {
+    for (const kind of ['plan', 'permission', 'authentication', 'question', 'review', 'ci', 'ship', 'error'] as const) {
+      expect(sessionRunState(item, attention(kind), true, true, false)).toBe('working')
+      expect(sessionRunState(item, attention(kind), true, true, true)).toBe('waiting')
+    }
+  })
+  it('restores the yellow hand after work completes and removes it when attention clears', () => {
+    const pending = attention('review')
+    expect(sessionRunState(item, pending, false, true, false)).toBe('working')
+    expect(sessionRunState(item, pending, false, false, false)).toBe('question')
+    expect(sessionRunState(item, undefined, false, false, false)).toBeNull()
   })
   it('uses actual activity and failed-request metadata, without inventing setup/cancelling', () => {
     const failed = { ...item, recovery: { status: 'failed', at: 1 } } as SessionMeta
@@ -41,6 +53,6 @@ describe('session attention and activity', () => {
   it('does not mistake the real server error-attention event for a question', () => {
     expect(sessionRunState(item, attention('error'), false, false, false)).toBe('failed')
     expect(sessionRunState(item, attention('error'), false, true, false)).toBe('working')
-    expect(sessionRunState(item, attention('error', 'question'), false, true, false)).toBe('question')
+    expect(sessionRunState(item, attention('error', 'question'), false, true, false)).toBe('working')
   })
 })
