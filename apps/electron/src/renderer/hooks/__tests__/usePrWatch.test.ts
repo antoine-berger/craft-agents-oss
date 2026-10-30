@@ -1,4 +1,4 @@
-import { beforeEach, afterEach, expect, test } from 'bun:test'
+import { beforeEach, afterEach, expect, spyOn, test } from 'bun:test'
 import * as React from 'react'
 import { create, act } from 'react-test-renderer'
 import { usePrWatch, type PrWatch } from '../usePrWatch'
@@ -201,4 +201,37 @@ test('twenty sidebar rows and one open chat trigger only one foreground reconcil
   expect(refreshes).toBe(1)
   await act(async () => { window.dispatchEvent(new Event('focus')) })
   expect(refreshes).toBe(2)
+})
+
+test('open PR details reload on pushes without repeated idle reads', async () => {
+  const idleTicks: Array<() => void> = []
+  const timer = spyOn(globalThis, 'setInterval').mockImplementation(callback => {
+    idleTicks.push(callback as () => void)
+    return 0 as unknown as ReturnType<typeof setInterval>
+  })
+  let detailReads = 0
+  ;(window as any).electronAPI.prWatchGetDetails = async () => { detailReads++; return null }
+  try {
+    await mount('push-details')
+    await resolve(0, ready(entry(151)))
+    expect(detailReads).toBe(0)
+    await act(async () => { result!.onCardOpenChange(true) })
+    expect(detailReads).toBe(1)
+    await act(async () => {
+      for (let tick = 0; tick < 4; tick++) for (const callback of idleTicks) callback()
+    })
+    expect(detailReads).toBe(1)
+
+    const updated = entry(151)
+    updated.summary.fetchedAt++
+    updated.summary.checks = 'failure'
+    await push('push-details', ready(updated))
+    expect(detailReads).toBe(2)
+    await act(async () => { result!.onCardOpenChange(false) })
+    updated.summary.fetchedAt++
+    await push('push-details', ready(updated))
+    expect(detailReads).toBe(2)
+  } finally {
+    timer.mockRestore()
+  }
 })

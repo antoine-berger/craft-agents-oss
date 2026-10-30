@@ -31,11 +31,13 @@ describe('targeted GitHub webhook reconciliation', () => {
     try {
       t.registry.configureWebhookRepositories(['acme/*'])
       await t.registry.subscribe({ ...sub(), foreground: true }); await t.flush()
-      expect(t.nextDelay()).toBe(POLL.background)
+      expect(t.nextDelay()).toBe(POLL.webhookReconcile)
       const calls = t.calls.length
       await t.advance(POLL.foreground)
       expect(t.calls).toHaveLength(calls)
       await t.advance(POLL.background)
+      expect(t.calls).toHaveLength(calls)
+      await t.advance(POLL.webhookReconcile)
       expect(t.calls.length).toBeGreaterThan(calls)
       t.registry.configureWebhookRepositories(['other/*'])
       expect(t.nextDelay()).toBe(POLL.foreground)
@@ -60,7 +62,7 @@ describe('targeted GitHub webhook reconciliation', () => {
     try {
       await t.registry.subscribe({ ...sub(), foreground: true }); await t.flush()
       const calls = t.calls.length
-      expect(await t.registry.invalidateFromWebhook(event)).toBeGreaterThanOrEqual(360_000)
+      expect((await t.registry.invalidateFromWebhook(event))?.retryAfterMs).toBeGreaterThanOrEqual(360_000)
       expect(t.calls).toHaveLength(calls)
       expect(firstPr(t.registry.cachedSessionState('s1')!)?.summary.attentionStale).toBe(true)
     } finally { t.registry.dispose() }
@@ -71,9 +73,9 @@ describe('targeted GitHub webhook reconciliation', () => {
     try {
       await t.registry.subscribe({ ...sub(), foreground: true }); await t.flush()
       t.failNextWith(new GitHubRateLimitError(429, 120_000))
-      expect(await t.registry.invalidateFromWebhook(event)).toBeGreaterThanOrEqual(120_000)
+      expect((await t.registry.invalidateFromWebhook(event))?.retryAfterMs).toBeGreaterThanOrEqual(120_000)
       const calls = t.calls.length
-      expect(await t.registry.invalidateFromWebhook(event)).toBeGreaterThanOrEqual(120_000)
+      expect((await t.registry.invalidateFromWebhook(event))?.retryAfterMs).toBeGreaterThanOrEqual(120_000)
       expect(t.calls).toHaveLength(calls)
       await t.advance(120_000)
       expect(await t.registry.invalidateFromWebhook(event)).toBeNull()
@@ -87,6 +89,120 @@ describe('targeted GitHub webhook reconciliation', () => {
       const calls = t.calls.length
       await t.registry.invalidateFromWebhook({ ...event, numbers: [99], baseRefs: ['main'] })
       expect(t.calls.length).toBe(calls + 1)
+    } finally { t.registry.dispose() }
+  })
+
+  it('does not search unresolved branches for an unrelated PR, base push or merge-group event', async () => {
+    const t = setup({ prs: [], repos: { '/work/other': { ...REPO, root: '/work/other', remoteBranch: 'feat/other' } } })
+    try {
+      await t.registry.subscribe(sub()); await t.registry.subscribe(sub('s2', 'c2', '/work/other')); await t.flush()
+      const before = t.calls.length
+      await t.registry.invalidateFromWebhook(event)
+      await t.registry.invalidateFromWebhook({ ...event, numbers: [], baseRefs: ['main'] })
+      await t.registry.invalidateFromWebhook({ ...event, numbers: [], all: true })
+      expect(t.calls).toHaveLength(before)
+      await t.registry.invalidateFromWebhook({ ...event, headRefs: ['feat/x'] })
+      expect(t.calls.slice(before).map(c => c.variables.branch)).toEqual(['feat/x'])
+    } finally { t.registry.dispose() }
+  })
+
+  it('does not refresh historical merged PRs for broad base or merge-group events', async () => {
+    const t = setup({ prs: [{ ...PR, state: 'MERGED' }] })
+    try {
+      await t.registry.subscribe(sub()); await t.flush()
+      const before = t.calls.length
+      await t.registry.invalidateFromWebhook({ ...event, numbers: [], baseRefs: ['main'], all: true })
+      expect(t.calls).toHaveLength(before)
+      await t.registry.invalidateFromWebhook(event)
+      expect(t.calls.length).toBeGreaterThan(before)
+    } finally { t.registry.dispose() }
+  })
+
+  it('shares one remote read for a branch and the same pinned PR', async () => {
+    const t = setup()
+    try {
+      await t.registry.subscribe({ ...sub(), boundPrs: [bound(7, 'ACME', 'APP')] }); await t.flush()
+      const before = t.calls.length
+      await t.registry.invalidateFromWebhook(event)
+      expect(t.calls.slice(before).map(c => c.variables.number)).toEqual([7])
+      expect(firstPr(t.registry.cachedSessionState('s1')!)?.origin).toBe('branch')
+    } finally { t.registry.dispose() }
+  })
+
+  it('persists only failed PR selectors instead of replaying a successful PR on retry', async () => {
+    const t = setup({ byNumber: { 8: { ...PR, number: 8, id: 'PR_8' } } })
+    try {
+      await t.registry.subscribe({ ...sub(), boundPrs: [bound(8, 'acme', 'app')] }); await t.flush()
+      t.failNextWith(new GitHubRequestError('temporary network failure'))
+      const firstAttempt = t.calls.length
+      const retry = await t.registry.invalidateFromWebhook({ ...event, numbers: [7, 8], baseRefs: ['main'] })
+      const failedNumber = t.calls[firstAttempt]!.variables.number as number
+      expect(retry?.change).toEqual({ ...event, numbers: [failedNumber], baseRefs: [] })
+      const before = t.calls.length
+      await t.advance(30_000)
+      expect(await t.registry.invalidateFromWebhook(retry!.change)).toBeNull()
+      expect(t.calls.slice(before).every(c => c.variables.number === failedNumber)).toBe(true)
+    } finally { t.registry.dispose() }
+  })
+
+  it('does not rediscover known branches when unrelated PR changes are coalesced', async () => {
+    const t = setup({ byNumber: { 8: { ...PR, number: 8, id: 'PR_8' } } })
+    try {
+      await t.registry.subscribe({ ...sub(), boundPrs: [bound(8, 'acme', 'app')] }); await t.flush()
+      const before = t.calls.length
+      await t.registry.invalidateFromWebhook({ ...event, numbers: [7, 8], headRefs: ['feat/x', 'feat/y'] })
+      expect(t.calls.slice(before).map(c => c.variables.number).sort()).toEqual([7, 8])
+      expect(t.calls.slice(before).every(c => c.variables.branch === undefined)).toBe(true)
+    } finally { t.registry.dispose() }
+  })
+
+  it('does not share remote reads between workspaces with different credentials', async () => {
+    const t = setup()
+    try {
+      await t.registry.subscribe({ ...sub(), boundPrs: [bound(7, 'acme', 'app')] }); await t.flush()
+      await t.registry.subscribe({ ...sub('s2', 'c2'), workspaceRootPath: '/different-workspace', boundPrs: [bound(7, 'acme', 'app')] }); await t.flush()
+      const before = t.calls.length
+      await t.registry.invalidateFromWebhook(event)
+      expect(t.calls.slice(before).map(c => c.variables.number)).toEqual([7, 7])
+    } finally { t.registry.dispose() }
+  })
+
+  it('shares the remote PR across worktrees but keeps their local checkout state separate', async () => {
+    const t = setup({ repos: { '/work/other': { ...REPO, root: '/work/other', gitDir: '/work/other/.git' } },
+      localByDir: { '/work/app': { localAhead: 0, localDirty: false }, '/work/other': { localAhead: 2, localDirty: true } } })
+    try {
+      await t.registry.subscribe(sub()); await t.registry.subscribe(sub('s2', 'c2', '/work/other')); await t.flush()
+      const before = t.calls.length
+      await t.registry.invalidateFromWebhook(event)
+      expect(t.calls.slice(before).map(c => c.variables.number)).toEqual([7])
+      expect(firstPr(t.registry.cachedSessionState('s1')!)?.summary).toMatchObject({ localAhead: 0, localDirty: false })
+      expect(firstPr(t.registry.cachedSessionState('s2')!)?.summary).toMatchObject({ localAhead: 2, localDirty: true })
+    } finally { t.registry.dispose() }
+  })
+
+  it('allows explicit refresh to discover a replacement for a terminal PR', async () => {
+    const old = { ...PR, state: 'CLOSED' as const }
+    const t = setup({ prs: [old], byNumber: { 7: old } })
+    try {
+      await t.registry.subscribe(sub()); await t.flush()
+      t.setPrs([{ ...PR, number: 8, id: 'PR_8' }])
+      await t.registry.nudge('s1')
+      expect(firstPr(t.registry.cachedSessionState('s1')!)?.summary.number).toBe(8)
+    } finally { t.registry.dispose() }
+  })
+
+  it('retains the exact fork branch when the failed read belongs to an upstream PR', async () => {
+    const fork = { ...REPO, repo: { ...REPO.repo!, owner: 'fork' }, upstreamRepo: REPO.repo }
+    const saved = associatePr(REPO.repo!, { ...PR, headRef: 'feat/x', baseRef: 'main', state: 'open', fetchedAt: 1, via: 'gh' } as any)
+    const t = setup({ repos: { '/work/app': fork }, prs: [{ ...PR, headRepositoryOwner: { login: 'fork' } }],
+      associations: { load: () => saved, save: () => {} } })
+    try {
+      await t.registry.subscribe(sub()); await t.flush()
+      t.failNextWith(new GitHubRequestError('temporary network failure'))
+      const pushed = { ...event, repo: fork.repo!, numbers: [], headRefs: ['feat/x'] }
+      const retry = await t.registry.invalidateFromWebhook(pushed)
+      expect(retry?.change).toEqual(pushed)
+      expect(retry?.retryAfterMs).toBeGreaterThanOrEqual(30_000)
     } finally { t.registry.dispose() }
   })
 })
@@ -246,7 +362,7 @@ describe('durable PR associations across cold starts', () => {
   })
 })
 
-function setup(options: { associations?: PrAssociationStore; repos?: Record<string, RepoInfo | null>; prs?: GqlPullRequestSummary[]; byNumber?: Record<number, GqlPullRequestSummary>; local?: LocalStatus; rateLimit?: { remaining: number; resetAt: string } } = {}) {
+function setup(options: { associations?: PrAssociationStore; repos?: Record<string, RepoInfo | null>; prs?: GqlPullRequestSummary[]; byNumber?: Record<number, GqlPullRequestSummary>; local?: LocalStatus; localByDir?: Record<string, LocalStatus>; rateLimit?: { remaining: number; resetAt: string } } = {}) {
   let now = 1_000_000
   let nextTimer = 1
   const timers = new Map<number, { at: number; fn: () => void }>()
@@ -319,7 +435,7 @@ function setup(options: { associations?: PrAssociationStore; repos?: Record<stri
     candidates: async () => [{ id: 'gh', label: 'gh', getToken: async () => 'token' }],
     push: (clientId, sessionId, state) => pushes.push({ clientId, sessionId, state }),
     resolveRepo: async dir => repos[dir] ?? null,
-    localStatus: async () => local,
+    localStatus: async dir => options.localByDir?.[dir] ?? local,
     watchRefs: (repo, onChange) => {
       refWatchers.set(repo.root, onChange)
       return () => { stoppedRefWatchers++ }

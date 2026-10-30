@@ -12,6 +12,8 @@ export const POLL = {
   foreground: 5_000,
   /** Sidebar/attention watchers share the budget with the displayed chat. */
   background: 5 * 60_000,
+  /** Signed webhook updates are primary; reconcile once an hour for missed deliveries. */
+  webhookReconcile: 60 * 60_000,
   /** First retry after an error; doubles per consecutive error */
   errorBase: 30_000,
   errorMax: 10 * 60_000,

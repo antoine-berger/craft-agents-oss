@@ -82,6 +82,13 @@ describe('GitHub attention evidence', () => {
     expect(githubAttention(ready(entry({ headMatchesLocal: null })), 1000)).toBeNull()
     expect(githubAttention(ready(entry()), 1000 + 11 * 60_000)).toBeNull()
   })
+  it('keeps event-driven attention current until reconciliation, but never overrides a known failure', () => {
+    const p = entry({ checks: 'failure', freshUntil: 1000 + 61 * 60_000 })
+    expect(githubAttention(ready(p), 1000 + 30 * 60_000)).toHaveLength(1)
+    expect(githubAttention(ready(p), 1000 + 62 * 60_000)).toBeNull()
+    p.summary.attentionStale = true
+    expect(githubAttention(ready(p), 1000 + 30 * 60_000)).toBeNull()
+  })
   it('suppresses only the specific active auto-fix PR; ordinary work or enabled toggle alone is insufficient', () => {
     const p = entry({ checks: 'failure' }, { autoFix: true })
     expect(githubAttention(ready(p), 1000, p.id)).toEqual([])

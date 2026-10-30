@@ -10,7 +10,7 @@ export function githubAttention(state: PrWatchSessionState, now: number, activeA
   for (const entry of state.prs) {
     const p = entry.summary
     if (p.attentionStale || (entry.origin === 'branch' && p.headMatchesLocal === null)) return null
-    if (now - p.fetchedAt > 10 * 60_000) return null
+    if (now > (p.freshUntil ?? p.fetchedAt + 10 * 60_000)) return null
     if (p.state !== 'open' && p.state !== 'draft') continue
     // A local commit newer/different from the remote head needs a push, not old review/CI feedback.
     if (p.headMatchesLocal === false || (entry.origin === 'branch' && p.localAhead > 0)) continue

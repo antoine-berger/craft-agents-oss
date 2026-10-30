@@ -15,8 +15,6 @@ import * as React from 'react'
 import { PrWatchSnapshots } from './pr-watch-snapshots'
 import type { PrDetails, PrEntry, PrMergeMethod, PrSummary, PrWatchSessionState, PrWatchState } from '@craft-agent/shared/protocol'
 
-/** While the card is open, its details are re-read this often (the server caches them for 10 s). */
-const DETAILS_REFRESH_MS = 15_000
 /** A Refresh that gets no push back (nothing changed) stops spinning after this long. */
 const REFRESH_SPINNER_MAX_MS = 10_000
 
@@ -203,19 +201,14 @@ export function usePrWatch(sessionId: string, enabled: boolean, workingDirectory
     const api = window.electronAPI
     if (!active || !cardOpen || !detailsKey || !api?.prWatchGetDetails) return
     let cancelled = false
-    const load = () => {
-      api.prWatchGetDetails(sessionId, detailsKey).then(
-        (value) => {
-          if (!cancelled && value) setDetails({ key: detailsKey, value })
-        },
-        () => {},
-      )
-    }
-    load()
-    const timer = setInterval(load, DETAILS_REFRESH_MS)
+    api.prWatchGetDetails(sessionId, detailsKey).then(
+      (value) => {
+        if (!cancelled && value) setDetails({ key: detailsKey, value })
+      },
+      () => {},
+    )
     return () => {
       cancelled = true
-      clearInterval(timer)
     }
   }, [active, cardOpen, detailsKey, pushedAt, sessionId])
 

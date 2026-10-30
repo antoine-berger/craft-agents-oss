@@ -2,7 +2,7 @@ import { createHmac, timingSafeEqual } from 'node:crypto'
 import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { dirname } from 'node:path'
-import { combineWebhookChanges, GITHUB_WEBHOOK_PATH, githubWebhookChange, webhookCoversRepo, type GithubWebhookChange, type GithubWebhookConfig } from './events'
+import { combineWebhookChanges, GITHUB_WEBHOOK_PATH, githubWebhookChange, webhookCoversRepo, type GithubWebhookChange, type GithubWebhookConfig, type GithubWebhookRetry } from './events'
 
 const MAX_PENDING = 512
 const MAX_SEEN = 4096
@@ -27,8 +27,8 @@ function validStoredChange(change: GithubWebhookChange): boolean {
 interface ReceiverOptions {
   config: GithubWebhookConfig
   statePath: string
-  /** null = reconciled; milliseconds = retry after quota/network backoff. */
-  onChange: (change: GithubWebhookChange) => Promise<number | null>
+  /** null = reconciled; otherwise persist only the remaining targets and their backoff. */
+  onChange: (change: GithubWebhookChange) => Promise<GithubWebhookRetry | null>
   log?: (message: string) => void
 }
 
@@ -127,16 +127,27 @@ export class GithubWebhookReceiver {
     for (const group of groups.values()) {
       if (this.disposed) return
       const ids = new Set(group.map(item => item.id))
-      let retry: number | null = 30_000
+      const change = combineWebhookChanges(group.map(item => item.change))
+      let retry: GithubWebhookRetry | null = { retryAfterMs: 30_000, change }
       try {
-        const change = combineWebhookChanges(group.map(item => item.change))
-        retry = webhookCoversRepo(change.repo, this.config.repositories) ? await this.options.onChange(change) : null
+        const result = webhookCoversRepo(change.repo, this.config.repositories) ? await this.options.onChange(change) : null
+        if (result !== null && (!Number.isFinite(result.retryAfterMs) || result.retryAfterMs < 0
+          || !Number.isFinite(Date.now() + result.retryAfterMs) || !validStoredChange(result.change)
+          || result.change.repo.owner.toLowerCase() !== change.repo.owner.toLowerCase()
+          || result.change.repo.repo.toLowerCase() !== change.repo.repo.toLowerCase())) {
+          throw new Error('Invalid GitHub webhook retry')
+        }
+        retry = result
       }
       catch (error) { this.log(`refresh failed: ${error instanceof Error ? error.message : String(error)}`) }
-      const retryAt = Date.now() + Math.max(1000, retry ?? 0)
-      const pending = this.inbox.pending.flatMap(item => !ids.has(item.id) ? [item] : retry === null ? [] : [{ ...item, retryAt }])
+      const retryAt = Date.now() + Math.max(1000, retry?.retryAfterMs ?? 0)
+      // Keep the remaining union once; the other delivery IDs are covered by this durable entry.
+      const retainedId = retry === null ? null : group[0]!.id
+      const pending = this.inbox.pending.flatMap(item => !ids.has(item.id) ? [item]
+        : retry !== null && item.id === retainedId ? [{ ...item, change: retry.change, retryAt }] : [])
+      const completedIds = [...ids].filter(id => id !== retainedId)
       try {
-        this.save({ pending, seen: retry === null ? [...this.inbox.seen, ...ids].slice(-MAX_SEEN) : this.inbox.seen })
+        this.save({ pending, seen: [...this.inbox.seen, ...completedIds].slice(-MAX_SEEN) })
         this.log(`${retry === null ? 'processed' : 'deferred'} ${group.length} delivery(s) ${group[0]!.change.repo.owner}/${group[0]!.change.repo.repo}`)
       } catch (error) {
         // Keep accepted work in memory and on disk; avoid a busy retry loop on disk errors.

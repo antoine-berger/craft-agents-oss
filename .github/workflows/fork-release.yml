@@ -54,6 +54,7 @@ jobs:
           python3 -m unittest discover -s scripts/fork-update -p 'test_*.py'
       - name: Deployed-feature regressions
         run: |
+          bun test packages/server-core/src/services/github-webhooks packages/server-core/src/services/session-attention/attention.test.ts
           bun test packages/server-core/src/services/pr-watch packages/server-core/src/services/session-attention/service.test.ts packages/server-core/src/sessions/session-runtime-recovery.test.ts packages/server-core/src/sessions/native-continuations.test.ts packages/server-core/src/services/repositories/owned-worktree.test.ts packages/server-core/src/services/checkpoints/session-checkpoints.test.ts
           bun test apps/electron/src/renderer/atoms/__tests__/session-runtime-recovery.test.ts apps/electron/src/renderer/event-processor/handlers/__tests__/text-message-id-sync.test.ts
           bun test apps/electron/src/renderer/hooks/__tests__/usePrWatch.test.ts

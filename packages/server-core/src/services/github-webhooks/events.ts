@@ -18,6 +18,12 @@ export interface GithubWebhookChange {
   all: boolean
 }
 
+/** Only the targets still waiting for a successful refresh need another attempt. */
+export interface GithubWebhookRetry {
+  retryAfterMs: number
+  change: GithubWebhookChange
+}
+
 const REPOSITORY = /^[a-z0-9][a-z0-9-]*\/[a-z0-9_.-]+$/i
 const SCOPE = /^[a-z0-9][a-z0-9-]*\/(?:[a-z0-9_.-]+|\*)$/i
 const EVENTS = new Set(['pull_request', 'pull_request_review', 'pull_request_review_comment',

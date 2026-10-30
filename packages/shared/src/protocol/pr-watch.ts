@@ -61,6 +61,8 @@ export interface PrSummary {
   headOid?: string
   headMatchesLocal?: boolean | null
   attentionStale?: boolean
+  /** Freshness deadline when signed events replace frequent polling. Errors still mark stale immediately. */
+  freshUntil?: number
   attentionFeedback?: Array<{ id: string; author: string; title: string; url: string }>
   number: number
   title: string

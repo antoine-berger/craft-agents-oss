@@ -113,7 +113,7 @@ export function registerPrWatchHandlers(server: RpcServer, deps: HandlerDeps): v
 
   // A finished turn is when pushes and `gh pr create` happen: refetch then
   deps.sessionManager.onTurnComplete?.(sessionId => {
-    void current.nudge(sessionId)
+    void current.nudge(sessionId, undefined, true)
   })
 
   // Auto-fix survives restarts: re-arm every session that has it on once sessions are loaded
