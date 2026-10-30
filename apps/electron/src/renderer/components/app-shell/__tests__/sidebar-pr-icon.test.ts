@@ -1,59 +1,46 @@
 import { describe, expect, it } from 'bun:test'
-import { prIconState, sidebarPrTone, type PrSummary } from '../chat-header/pr-watch/pr-watch-state'
+import { prIconState, type PrSummary } from '../chat-header/pr-watch/pr-watch-state'
+import { sessionRunState } from '../session-run-state'
+import type { SessionMeta } from '@/atoms/sessions'
+import type { SessionAttention, AttentionKind } from '@craft-agent/shared/protocol'
+import reference from './fixtures/conductor-status-icons.json'
 
-const ready: PrSummary = {
-  number: 1, title: 'Ready', url: 'https://github.com/example/repo/pull/1',
-  state: 'open', headRef: 'feature', baseRef: 'main', checks: 'success',
-  reviewDecision: 'approved', mergeState: 'clean', unresolvedThreads: 0,
-  localAhead: 0, localDirty: false, fetchedAt: 1, via: 'gh',
+const item = { id: 'session' } as SessionMeta
+function attention(...kinds: AttentionKind[]): SessionAttention {
+  return { sessionId: 'session', status: 'needs-human', githubStale: false, updatedAt: 1,
+    reasons: kinds.map((kind, index) => ({ id: String(index), source: 'agent', kind, title: kind, createdAt: 1, action: { type: 'session' } })) }
 }
-const queued: PrSummary = { ...ready, quickActions: {
-  canMerge: true, methods: ['squash'], defaultMethod: 'squash', mergeQueue: true,
-  queued: { state: 'QUEUED', position: 2 },
-} }
 
-describe('PR status icon', () => {
-  it('follows Conductor: merge queue before draft before conflict', () => {
-    const conflicting = { ...ready, mergeState: 'conflicting' as const, checks: 'pending' as const }
-    expect(prIconState(conflicting)).toBe('conflicting')
-    expect(sidebarPrTone(conflicting)).toBe('warning')
-    expect(prIconState({ ...conflicting, state: 'draft' })).toBe('draft')
-    expect(sidebarPrTone({ ...conflicting, state: 'draft' })).toBe('neutral')
-    for (const state of ['open', 'draft'] as const) {
-      const inQueue = { ...conflicting, state, quickActions: queued.quickActions }
-      expect(prIconState(inQueue)).toBe('queued')
-      expect(sidebarPrTone(inQueue)).toBe('neutral')
+describe('Conductor classic PR priorities', () => {
+  for (const vector of reference.cases) {
+    it(vector.name, () => expect(prIconState(vector.summary as PrSummary) as string).toBe(vector.expected))
+  }
+  it('retains the freshness guard without claiming an old queue or ready state', () => {
+    for (const vector of reference.cases.filter(value => !['merged', 'closed'].includes(value.summary.state))) {
+      expect(prIconState({ ...vector.summary, attentionStale: true } as PrSummary) as string).toBe(vector.summary.state)
     }
   })
+})
 
-  it('does not show conflicts on terminal PRs or from stale attention data', () => {
-    for (const state of ['merged', 'closed'] as const) {
-      expect(prIconState({ ...ready, state, mergeState: 'conflicting' })).toBe(state)
-    }
-    for (const state of ['open', 'draft'] as const) {
-      const stale = { ...ready, state, mergeState: 'conflicting' as const, attentionStale: true }
-      expect(prIconState(stale)).toBe(state)
-      expect(sidebarPrTone(stale)).toBe('neutral')
-    }
+describe('session attention and activity', () => {
+  it('puts plan, permission and question before working, in that order', () => {
+    expect(sessionRunState(item, attention('question', 'plan', 'permission'), true, true, false)).toBe('plan')
+    expect(sessionRunState(item, attention('question'), true, true, false)).toBe('permission')
+    expect(sessionRunState(item, attention('question'), false, true, false)).toBe('question')
   })
-
-  it('distinguishes a required rebase and an actual merge queue entry', () => {
-    expect(prIconState({ ...ready, mergeState: 'behind' })).toBe('behind')
-    expect(prIconState(queued)).toBe('queued')
-    expect(prIconState({ ...queued, mergeState: 'behind' })).toBe('queued')
+  it('keeps the requested yellow-hand attention for GitHub feedback', () => {
+    expect(sessionRunState(item, attention('review'), false, true, false)).toBe('question')
   })
-
-  it('does not confuse queue support or auto-merge with queue membership', () => {
-    expect(prIconState({ ...queued, quickActions: { ...queued.quickActions!, queued: undefined } })).toBe('open')
-    expect(prIconState({ ...ready, autoMerge: { enabled: true } })).toBe('open')
+  it('uses actual activity and failed-request metadata, without inventing setup/cancelling', () => {
+    const failed = { ...item, recovery: { status: 'failed', at: 1 } } as SessionMeta
+    expect(sessionRunState(failed, undefined, false, true, false)).toBe('working')
+    expect(sessionRunState(failed, undefined, false, true, true)).toBe('waiting')
+    expect(sessionRunState(failed, undefined, false, false, false)).toBe('failed')
+    expect(sessionRunState(item, undefined, false, false, false)).toBeNull()
   })
-
-  it('preserves terminal and draft states and avoids stale queue claims', () => {
-    for (const state of ['merged', 'closed'] as const) {
-      expect(prIconState({ ...queued, state, mergeState: 'behind' })).toBe(state)
-    }
-    expect(prIconState({ ...ready, state: 'draft', mergeState: 'behind' })).toBe('draft')
-    expect(prIconState({ ...queued, attentionStale: true })).toBe('open')
-    expect(prIconState({ ...ready, mergeState: 'behind', attentionStale: true })).toBe('open')
+  it('does not mistake the real server error-attention event for a question', () => {
+    expect(sessionRunState(item, attention('error'), false, false, false)).toBe('failed')
+    expect(sessionRunState(item, attention('error'), false, true, false)).toBe('working')
+    expect(sessionRunState(item, attention('error', 'question'), false, true, false)).toBe('question')
   })
 })

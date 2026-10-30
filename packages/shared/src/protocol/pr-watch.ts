@@ -71,6 +71,10 @@ export interface PrSummary {
   checks: ChecksRollup
   reviewDecision: ReviewDecision
   mergeState: MergeState
+  /** Uncollapsed GitHub status, used for Conductor's exact readiness priority. */
+  mergeStateStatus?: string
+  /** Repository permission, unknown when GitHub did not provide it. */
+  viewerCanMerge?: boolean
   /** Review threads not marked resolved */
   unresolvedThreads: number
   /** Local commits on the branch that the PR head doesn't have yet (local git, no GitHub call) */

@@ -197,6 +197,10 @@ export function mapSummary(node: GqlPullRequestSummary, local: LocalStatus, meta
     checks: mapChecksRollup(node.commits.nodes[0]?.commit.statusCheckRollup),
     reviewDecision: mapReviewDecision(node.reviewDecision),
     mergeState: mapMergeState(node),
+    mergeStateStatus: node.mergeStateStatus,
+    ...(node.baseRepository?.viewerPermission !== undefined ? {
+      viewerCanMerge: ['ADMIN', 'MAINTAIN', 'WRITE'].includes(node.baseRepository.viewerPermission),
+    } : {}),
     unresolvedThreads: node.reviewThreads.nodes.filter(thread => !thread.isResolved && !thread.isOutdated).length,
     ...(local.headMatchesLocal !== undefined ? { headMatchesLocal: local.headMatchesLocal } : {}),
     localAhead: local.localAhead,

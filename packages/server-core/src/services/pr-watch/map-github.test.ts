@@ -62,6 +62,16 @@ const PR_479_DETAILS: GqlPullRequestDetails = {
 const pr = (overrides: Partial<GqlPullRequestSummary>): GqlPullRequestSummary => ({ ...PR_479, ...overrides })
 
 describe('mapSummary', () => {
+  it('keeps raw merge state and known/unknown viewer permission for exact status icons', () => {
+    const meta = { fetchedAt: 1, via: 'gh' }
+    const local = { localAhead: 0, localDirty: false }
+    expect(mapSummary(pr({ mergeStateStatus: 'HAS_HOOKS' }), local, meta).mergeStateStatus).toBe('HAS_HOOKS')
+    for (const viewerPermission of ['ADMIN', 'MAINTAIN', 'WRITE', 'READ', 'TRIAGE']) {
+      const node = pr({ baseRepository: { ...PR_479.baseRepository!, viewerPermission } })
+      expect(mapSummary(node, local, meta).viewerCanMerge).toBe(['ADMIN', 'MAINTAIN', 'WRITE'].includes(viewerPermission))
+    }
+    expect(mapSummary(pr({ baseRepository: null }), local, meta).viewerCanMerge).toBeUndefined()
+  })
   it('maps the live #479 response', () => {
     expect(mapSummary(PR_479, { localAhead: 2, localDirty: true }, { fetchedAt: 1000, via: 'gh' })).toEqual({
       quickActions: { canMerge: false, methods: ['merge', 'rebase'], defaultMethod: 'merge', mergeQueue: false },
@@ -76,6 +86,7 @@ describe('mapSummary', () => {
       checks: 'success',
       reviewDecision: 'none',
       mergeState: 'clean',
+      mergeStateStatus: 'CLEAN',
       unresolvedThreads: 0,
       localAhead: 2,
       localDirty: true,

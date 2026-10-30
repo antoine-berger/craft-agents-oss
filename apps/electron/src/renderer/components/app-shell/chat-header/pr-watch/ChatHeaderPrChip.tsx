@@ -3,8 +3,8 @@ import { useTranslation } from 'react-i18next'
 import { useAppShellContext } from '@/context/AppShellContext'
 import { cn } from '@/lib/utils'
 import type { PrWatchNav } from '@/hooks/usePrWatch'
-import { mostUrgentStatus, prChipStatus, prIconState, sidebarPrTone, type PrChipStatus, type PrSummary, type PrWatchState } from './pr-watch-state'
-import { PR_STATUS_ICON, TONE_TEXT } from './pr-watch-visuals'
+import { mostUrgentStatus, prChipStatus, prIconState, type PrChipStatus, type PrSummary, type PrWatchState } from './pr-watch-state'
+import { PR_STATUS_ICON, PR_STATUS_COLOR } from './pr-watch-visuals'
 
 export const PR_CHIP_RESERVE_PAD = 12
 
@@ -29,7 +29,8 @@ export function ChatHeaderPrChip({ state, nav, onReserveElChange }: ChatHeaderPr
   const iconState = prIconState(summary)
   const StateIcon = PR_STATUS_ICON[iconState]
   const stateLabel = iconState === 'conflicting' ? t('chat.prWatch.merge.conflicting')
-    : iconState === 'behind' ? t('chat.prWatch.merge.behind')
+    : iconState === 'ready' ? t('chat.prWatch.merge.clean')
+    : iconState === 'checks-failing' ? t('chat.prWatch.checks.failure')
     : iconState === 'queued' ? t('chat.queuedBadge')
     : t(`chat.prWatch.state.${summary.state}`)
 
@@ -56,7 +57,7 @@ export function ChatHeaderPrChip({ state, nav, onReserveElChange }: ChatHeaderPr
         )}
       >
         <span className="inline-flex shrink-0 items-center gap-1">
-          <StateIcon className={cn('size-3.5 shrink-0', TONE_TEXT[sidebarPrTone(summary)])} aria-hidden />
+          <StateIcon className={cn('size-3.5 shrink-0', PR_STATUS_COLOR[iconState])} aria-hidden />
           <span className="font-medium tabular-nums text-secondary">#{summary.number}</span>
           {multi && <span className="inline-flex items-center gap-0.5 text-caption tabular-nums text-tertiary">+{nav.count - 1}</span>}
         </span>

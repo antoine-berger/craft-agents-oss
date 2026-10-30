@@ -17,8 +17,8 @@ import type { PrNavEntry } from '@/hooks/usePrWatch'
 import { cn } from '@/lib/utils'
 import { fitLabelCount } from '../../fit-labels'
 import { visibleLabelIndexes } from '../label-strip-layout'
-import { mostUrgentStatus, prChipStatus, prStateTone, type PrSummary } from './pr-watch-state'
-import { PR_STATE_ICON, PrStatusGlyph, TONE_TEXT } from './pr-watch-visuals'
+import { mostUrgentStatus, prChipStatus, prIconState, type PrSummary } from './pr-watch-state'
+import { PR_STATUS_ICON, PR_STATUS_COLOR, PrStatusGlyph, TONE_TEXT } from './pr-watch-visuals'
 
 const HIDDEN: React.CSSProperties = { position: 'absolute', visibility: 'hidden', pointerEvents: 'none' }
 const TAB_GAP = 4
@@ -130,10 +130,11 @@ function MorePrs({ entries, hidden, onSelect, onOpen }: {
       <StyledDropdownMenuContent align="end" sideOffset={6} className="w-[300px] max-w-[calc(100vw-24px)]">
         {hidden.map((index) => {
           const { id, summary } = entries[index]!
-          const StateIcon = PR_STATE_ICON[summary.state]
+          const iconState = prIconState(summary)
+          const StateIcon = PR_STATUS_ICON[iconState]
           return (
             <StyledDropdownMenuItem key={id} onSelect={() => onSelect(index)}>
-              <StateIcon className={cn('size-4 shrink-0', TONE_TEXT[prStateTone(summary.state)])} aria-hidden />
+              <StateIcon className={cn('size-4 shrink-0', PR_STATUS_COLOR[iconState])} aria-hidden />
               <span className="min-w-0 flex-1 truncate" title={summary.title}>
                 <span className="font-medium tabular-nums">#{summary.number}</span> {summary.title}
               </span>

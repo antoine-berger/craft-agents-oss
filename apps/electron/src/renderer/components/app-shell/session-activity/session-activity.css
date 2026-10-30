@@ -2,7 +2,7 @@
   display: block;
   width: 1em;
   height: 1em;
-  font-size: 16px;
+  font-size: 14px;
   background: currentColor;
   mask-repeat: no-repeat;
   mask-size: calc(var(--activity-frames) * 100%) 100%;

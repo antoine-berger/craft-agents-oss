@@ -50,16 +50,19 @@ export {
 } from '@craft-agent/shared/pr-watch'
 
 /** Semantic tone; the components map it to role tokens (`merged` to GitHub's fixed purple). */
-export type PrTone = 'success' | 'merged' | 'destructive' | 'warning' | 'info' | 'neutral'
+export type PrTone = 'success' | 'merged' | 'destructive' | 'info' | 'neutral'
 
-export type PrIconState = PrState | 'conflicting' | 'behind' | 'queued'
+export type PrIconState = PrState | 'conflicting' | 'queued' | 'ready' | 'checks-failing'
 
 export function prIconState(summary: PrSummary): PrIconState {
   if (summary.state === 'merged' || summary.state === 'closed' || summary.attentionStale) return summary.state
   if (summary.quickActions?.queued) return 'queued'
+  // Conductor's default treats optional checks as non-blocking; this is display only.
+  if (summary.state === 'open' && summary.viewerCanMerge !== false
+    && (summary.mergeStateStatus === 'CLEAN' || summary.mergeStateStatus === 'UNSTABLE')) return 'ready'
   if (summary.state === 'draft') return 'draft'
-  if (summary.mergeState === 'conflicting') return 'conflicting'
-  if (summary.mergeState === 'behind') return 'behind'
+  if (summary.mergeStateStatus === 'DIRTY') return 'conflicting'
+  if (summary.mergeStateStatus !== 'CLEAN' && summary.checks === 'failure') return 'checks-failing'
   return summary.state
 }
 
@@ -79,18 +82,6 @@ export function prStateTone(state: PrState): PrTone {
     case 'closed':
     case 'draft': return 'neutral'
   }
-}
-
-/** The sidebar uses green only when the branch PR is ready to merge. */
-export function sidebarPrTone(summary: PrSummary): PrTone {
-  if (prIconState(summary) === 'conflicting') return 'warning'
-  if (summary.state !== 'open') return prStateTone(summary.state)
-  return summary.mergeState === 'clean'
-    && (summary.reviewDecision === 'approved' || summary.reviewDecision === 'none')
-    && prChipStatus(summary) === 'ok'
-    && !summary.attentionStale
-    && summary.headMatchesLocal !== false
-    ? 'success' : 'neutral'
 }
 
 export function checksTone(rollup: ChecksRollup): PrTone {

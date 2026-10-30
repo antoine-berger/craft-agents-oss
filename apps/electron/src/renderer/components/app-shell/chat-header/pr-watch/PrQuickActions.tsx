@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { ArrowDown, ArrowUp, Archive, ChevronDown, FlaskConical, GitMerge, GitPullRequestArrow, GitPullRequestDraft, GitPullRequestCreateArrow, LoaderCircle, RotateCw, Wrench } from 'lucide-react'
+import { ArrowDown, ArrowUp, Archive, ChevronDown, FlaskConical, GitMerge, GitPullRequestArrow, GitPullRequestDraft, GitPullRequestCreateArrow, ListOrdered, LoaderCircle, RotateCw, Wrench } from 'lucide-react'
 import { toast } from 'sonner'
 import type { PrEntry, PrMergeMethod, PrQuickOperation, PrWatchState } from '@craft-agent/shared/protocol'
 import { useAppShellContext } from '@/context/AppShellContext'
@@ -7,7 +7,6 @@ import { DropdownMenu, DropdownMenuTrigger, StyledDropdownMenuContent, StyledDro
 import { cn } from '@/lib/utils'
 import type { PrAutoMergeChange } from '@/hooks/usePrWatch'
 import { canRerunPrChecks, nextPrQuickAction, prQuickActionMessage, type PrQuickAction } from './pr-quick-actions'
-import { PR_STATUS_ICON } from './pr-watch-visuals'
 
 const LABELS: Record<PrQuickAction, string> = {
   create: 'Create PR', 'commit-push': 'Commit and push', push: 'Push', pull: 'Pull', rebase: 'Rebase',
@@ -17,7 +16,7 @@ const LABELS: Record<PrQuickAction, string> = {
 const ICONS = {
   create: GitPullRequestCreateArrow, 'commit-push': ArrowUp, push: ArrowUp, pull: ArrowDown, rebase: GitPullRequestArrow,
   resolve: GitMerge, fix: Wrench, 'fix-ci': FlaskConical, ready: GitPullRequestDraft, rerun: RotateCw,
-  'auto-merge': GitMerge, 'disable-auto-merge': GitMerge, merge: GitMerge, queued: PR_STATUS_ICON.queued, archive: Archive,
+  'auto-merge': GitMerge, 'disable-auto-merge': GitMerge, merge: GitMerge, queued: ListOrdered, archive: Archive,
 }
 const METHODS: Record<PrMergeMethod, string> = { merge: 'Merge commit', squash: 'Squash and merge', rebase: 'Rebase and merge' }
 
@@ -62,7 +61,7 @@ export function PrQuickActions({ sessionId, state, origin, onRefresh, onSetAutoM
     }
   }
   if (!primary) return null
-  const Icon = primary === 'merge' && pr?.quickActions?.mergeQueue ? PR_STATUS_ICON.queued : ICONS[primary]
+  const Icon = primary === 'merge' && pr?.quickActions?.mergeQueue ? ListOrdered : ICONS[primary]
   const queued = primary === 'queued'
   const merging = primary === 'merge'
   const label = merging && pr?.quickActions?.mergeQueue ? 'Add to queue' : LABELS[primary]

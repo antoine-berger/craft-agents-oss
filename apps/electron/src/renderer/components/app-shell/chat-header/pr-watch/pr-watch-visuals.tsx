@@ -1,6 +1,5 @@
 /**
- * Glyphs and tone classes shared by the PR chip and its card. The conflict glyph and highlight
- * color match Conductor; the other tones use the app's role colors.
+ * Shared PR glyphs; classic status indicators come from the verified Conductor definitions.
  */
 
 import * as React from 'react'
@@ -8,52 +7,25 @@ import {
   AlertTriangle,
   CircleCheck,
   CircleX,
-  GitMerge,
-  GitPullRequest,
-  GitPullRequestArrow,
-  GitPullRequestClosed,
-  GitPullRequestDraft,
   MessageSquareWarning,
-  ListOrdered,
   MinusCircle,
-  createLucideIcon,
   type LucideIcon,
 } from 'lucide-react'
 import { Spinner } from '@craft-agent/ui'
 import { cn } from '@/lib/utils'
-import type { CheckStatus, PrChipStatus, PrIconState, PrState, PrTone } from './pr-watch-state'
+import type { CheckStatus, PrChipStatus, PrTone } from './pr-watch-state'
 
 export const TONE_TEXT: Record<PrTone, string> = {
   success: 'text-success',
   merged: 'text-merged',
   destructive: 'text-destructive',
-  warning: 'text-[#cca694] dark:text-[#ddc1b1]',
   info: 'text-info',
   neutral: 'text-tertiary',
 }
 
-export const PR_STATE_ICON: Record<PrState, LucideIcon> = {
-  open: GitPullRequest,
-  draft: GitPullRequestDraft,
-  merged: GitMerge,
-  closed: GitPullRequestClosed,
-}
-
-// Conductor's conflict glyph crosses the left branch; this differs from Lucide's closed-PR icon.
-const MergeConflictIcon = createLucideIcon('git-pull-request-conflict', [
-  ['path', { d: 'M12 6h4a2 2 0 0 1 2 2v7', key: 'right-branch' }],
-  ['path', { d: 'M6 12v9', key: 'left-branch' }],
-  ['path', { d: 'M9 3 3 9', key: 'cross-down' }],
-  ['path', { d: 'M9 9 3 3', key: 'cross-up' }],
-  ['circle', { cx: '18', cy: '18', r: '3', key: 'right-node' }],
-])
-
-export const PR_STATUS_ICON: Record<PrIconState, LucideIcon> = {
-  ...PR_STATE_ICON,
-  conflicting: MergeConflictIcon,
-  behind: GitPullRequestArrow,
-  queued: ListOrdered,
-}
+export { PR_STATUS_ICON, PR_STATUS_COLOR } from '../../conductor-status-icons'
+import { PR_STATUS_ICON } from '../../conductor-status-icons'
+export const PR_STATE_ICON = { open: PR_STATUS_ICON.open, draft: PR_STATUS_ICON.draft, merged: PR_STATUS_ICON.merged, closed: PR_STATUS_ICON.closed }
 
 const STATUS_GLYPH: Record<Exclude<PrChipStatus, 'pending'>, { icon: LucideIcon; tone: string }> = {
   resolve: { icon: AlertTriangle, tone: 'text-destructive' },

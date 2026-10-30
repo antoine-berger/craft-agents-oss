@@ -9,6 +9,7 @@ import { SessionMenu } from "./SessionMenu"
 import { BatchSessionMenu } from "./BatchSessionMenu"
 import { CompactSessionMenu } from "./CompactSessionMenu"
 import { SessionStatusIcon } from "./SessionStatusIcon"
+import { sessionRunState } from "./session-run-state"
 import { RepositoryAvatar, sessionRepositoryIdentity } from "./input/RepositoryAvatar"
 import { hasPendingBackgroundWork, hasPendingSubagentWork } from "./background-task-chip-state"
 import { SessionProjectColorWrapper } from "./SessionProjectColorWrapper"
@@ -69,7 +70,6 @@ export function SessionItem({
   const chatMatchCount = isActiveSession ? activeMatch!.count : ripgrepMatchCount
   const hasMatch = chatMatchCount != null && chatMatchCount > 0
   const attention = ctx.attention?.[item.id]
-  const hasServerAttention = attention?.status === 'needs-human'
   const hasPendingPrompt = ctx.hasPendingPrompt?.(item.id) ?? false
   const isUnread = hasUnreadMeta(item)
   const backgroundTasks = useAtomValue(backgroundTasksAtomFamily(item.id))
@@ -80,17 +80,9 @@ export function SessionItem({
   const sessionBindings = messagingBindingsBySession.get(item.id) ?? []
   const hasMessagingBinding = sessionBindings.length > 0
 
-  // Activity wins while background tasks run; retain attention for when they finish.
-  const runState: 'needs-you' | 'working' | 'failed' | 'plan' | null = isWorking
-    ? 'working'
-    : (hasPendingPrompt || hasServerAttention)
-      ? 'needs-you'
-      : item.lastMessageRole === 'error'
-        ? 'failed'
-        : item.lastMessageRole === 'plan'
-          ? 'plan'
-          : null
-  const needsAttention = runState === 'needs-you' || runState === 'failed' || runState === 'plan'
+  const runState = sessionRunState(item, attention, hasPendingPrompt, isWorking, hasPendingSubagents && !item.isProcessing)
+  const needsAttention = runState === 'plan' || runState === 'permission' || runState === 'question' || runState === 'failed'
+  const hasActivity = runState === 'working' || runState === 'waiting'
 
   // Resolve the bound project so the row can show a project-themed stripe /
   // tint and reveal the project name on hover. Treatment is a user preference
@@ -204,10 +196,10 @@ export function SessionItem({
         />
       )}
       icon={<>
-        {(!isPilot || (!needsAttention && runState !== 'working')) &&
+        {(!isPilot || (!needsAttention && !hasActivity)) &&
           <RepositoryAvatar nameWithOwner={sessionRepositoryIdentity(item)} repositoryPath={item.worktree?.repositoryPath ?? item.workingDirectory} />}
-        {(!isPilot || needsAttention || runState === 'working') &&
-          <SessionStatusIcon item={item} needsAttention={needsAttention} isWorking={runState === 'working'} isWaitingForSubagents={hasPendingSubagents && !item.isProcessing} attentionDescription={attention?.reasons.map(reason => reason.title).join("; ")} />}
+        {(!isPilot || needsAttention || hasActivity) &&
+          <SessionStatusIcon item={item} runState={runState} attentionDescription={attention?.reasons.map(reason => reason.title).join("; ")} />}
       </>}
       title={ctx.searchQuery ? highlightMatch(title, ctx.searchQuery) : title}
       titleClassName={cn("truncate line-clamp-none", isUnread && !isWorking && "font-semibold")}
