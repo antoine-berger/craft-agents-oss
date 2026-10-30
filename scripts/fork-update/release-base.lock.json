@@ -93,7 +93,8 @@
     "packages/server-core/src/services/index.ts": "1d3b28e857875d5cc910afeef609e1649f8fd3f507ca00ab079e91008dd8618d",
     "packages/server-core/src/services/github-webhooks/events.ts": "7b99e77e5ebbd7dce474aacce17e353dd1c71572c7fedd00e03b8a4ba3ec8b48",
     "packages/server-core/src/services/github-webhooks/receiver.ts": "cb93972c0b6bbe595ca35cf6e0bffa769ac8f725eb72a3141fd3601f288d2e38",
-    "docs/github-webhooks.md": "bffad212f8b123f0f6b7a48b457e8dba0a6e3f1d8a95a8fcd4ad102c68fa36a6"
+    "docs/github-webhooks.md": "bffad212f8b123f0f6b7a48b457e8dba0a6e3f1d8a95a8fcd4ad102c68fa36a6",
+    "packages/shared/src/sessions/jsonl.ts": "a3e915da30ee25d594d90f81f29e4b3bb89d4c1c54cf93bcaa7bc6d1105e93a8"
   },
   "compiledClientFiles": {
     "apps/electron/src/renderer/hooks/usePrWatch.ts": "67272de71a3d83c45caad6820f3d3fe45ef46f97d31d578780c656fa67733cc0",

@@ -80,16 +80,27 @@ function normalizeHeaderPermissionModes<T extends SessionHeader>(header: T): T {
 export function readSessionHeader(sessionFile: string): SessionHeader | null {
   try {
     const fd = openSync(sessionFile, 'r');
-    const buffer = Buffer.alloc(8192); // 8KB is plenty for metadata header
-    const bytesRead = readSync(fd, buffer, 0, 8192, 0);
-    closeSync(fd);
-
-    const content = buffer.toString('utf-8', 0, bytesRead);
-    const firstNewline = content.indexOf('\n');
-    const firstLine = firstNewline > 0 ? content.slice(0, firstNewline) : content;
-
-    const parsed = safeJsonParse(expandSessionPath(firstLine, dirname(sessionFile))) as SessionHeader;
-    return normalizeHeaderPermissionModes(parsed);
+    try {
+      const buffer = Buffer.alloc(8192);
+      const chunks: Buffer[] = [];
+      let position = 0;
+      // Headers can contain a restored-context summary. Stop at LF, not at a fixed byte limit.
+      while (true) {
+        const bytesRead = readSync(fd, buffer, 0, buffer.length, position);
+        if (bytesRead === 0) break;
+        const chunk = buffer.subarray(0, bytesRead);
+        const newline = chunk.indexOf(10);
+        chunks.push(Buffer.from(newline < 0 ? chunk : chunk.subarray(0, newline)));
+        if (newline >= 0) break;
+        position += bytesRead;
+      }
+      // Decode only after joining, so a multibyte character split between reads stays intact.
+      const firstLine = Buffer.concat(chunks).toString('utf-8');
+      const parsed = safeJsonParse(expandSessionPath(firstLine, dirname(sessionFile))) as SessionHeader;
+      return normalizeHeaderPermissionModes(parsed);
+    } finally {
+      closeSync(fd);
+    }
   } catch (error) {
     debug('[jsonl] Failed to read session header:', sessionFile, error);
     return null;
@@ -246,10 +257,18 @@ export async function readSessionHeaderAsync(sessionFile: string): Promise<Sessi
     const handle = await open(sessionFile, 'r');
     try {
       const buffer = Buffer.alloc(8192);
-      const { bytesRead } = await handle.read(buffer, 0, 8192, 0);
-      const content = buffer.toString('utf-8', 0, bytesRead);
-      const firstNewline = content.indexOf('\n');
-      const firstLine = firstNewline > 0 ? content.slice(0, firstNewline) : content;
+      const chunks: Buffer[] = [];
+      let position = 0;
+      while (true) {
+        const { bytesRead } = await handle.read(buffer, 0, buffer.length, position);
+        if (bytesRead === 0) break;
+        const chunk = buffer.subarray(0, bytesRead);
+        const newline = chunk.indexOf(10);
+        chunks.push(Buffer.from(newline < 0 ? chunk : chunk.subarray(0, newline)));
+        if (newline >= 0) break;
+        position += bytesRead;
+      }
+      const firstLine = Buffer.concat(chunks).toString('utf-8');
       const parsed = safeJsonParse(expandSessionPath(firstLine, dirname(sessionFile))) as SessionHeader;
       return normalizeHeaderPermissionModes(parsed);
     } finally {
