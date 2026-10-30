@@ -33,7 +33,7 @@
     "packages/shared/src/config/theme.ts": "93a3550291250e945a3d6f5f51dad6340438211ff462d3e59d80fad93911fe5d",
     "apps/electron/src/transport/channel-map.ts": "3382e6404071641adbd3485be514c095064159ae5e54ce5474237035ad5fb634",
     "packages/shared/src/agent/options.ts": "2bcf0dc6df28fed3fda79d11d1b853e09b5516c2b1d1f01da999a3acafd16a9b",
-    "apps/electron/resources/portable-config/skills/ship/SKILL.md": "9ad2b07107d5f0d7c0d6f8f9ec02e5b852161c8d32136612f95b1129d64b316f",
+    "apps/electron/resources/portable-config/skills/ship/SKILL.md": "374928f07ac19204c80d86211c08c77d6fa2f6e38fcfd85953c0e3a5812cfdfd",
     "apps/electron/resources/portable-config/skills/ship-plan/SKILL.md": "31b9bd4e136e38a6e9ebb65efaeb24c1da7b7ed1b980208b5e648ef00eb6a638",
     "scripts/fork-update/prepare-linux-tools.py": "8e72fcaff543ac46def110d60e18f734c8dc0b7b5d719e2257a2983ab1be2bc0",
     "packages/server-core/src/services/pr-watch/association-store.ts": "8580b63d1b35cf33bdac0290941f27158413cfc43f29f77cc5ab80ac381fd9f8",

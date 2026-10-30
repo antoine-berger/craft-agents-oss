@@ -24,6 +24,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Bug Fixes
 
+- **Fewer Ship commits** — Group known corrections from the same review, E2E or bot/CI round into coherent batches before committing and pushing. Preserve every required review and test, per-thread replies and existing published history.
+
 - **Chat input stays visible** — Switch the active composer immediately instead of retaining fading forms. An interrupted transition can no longer hide the new input outside the card; height animation and draft handling are preserved.
 
 - **Native linear PR stacks** — Monitor, Ship Plan and Ship preserve the selected parent branch, require native GitHub stack membership and append only to the current top. Dependent tickets form one chain, while unrelated chains can still run in parallel; description-only links and sibling PRs no longer count as stacking.
