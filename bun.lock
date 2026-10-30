@@ -115,7 +115,7 @@
         "@img/sharp-linux-arm64": "0.34.5",
         "@img/sharp-linux-x64": "0.34.5"
       },
-      "version": "0.15.29"
+      "version": "0.15.30"
     },
     "apps/cli": {
       "name": "@craft-agent/cli",
@@ -135,7 +135,7 @@
     },
     "apps/electron": {
       "name": "@craft-agent/electron",
-      "version": "0.15.29",
+      "version": "0.15.30",
       "dependencies": {
         "@craft-agent/core": "workspace:*",
         "@craft-agent/messaging-gateway": "workspace:*",
@@ -352,7 +352,7 @@
     },
     "packages/shared": {
       "name": "@craft-agent/shared",
-      "version": "0.15.29",
+      "version": "0.15.30",
       "dependencies": {
         "@craft-agent/core": "workspace:*",
         "@craft-agent/session-tools-core": "workspace:*",

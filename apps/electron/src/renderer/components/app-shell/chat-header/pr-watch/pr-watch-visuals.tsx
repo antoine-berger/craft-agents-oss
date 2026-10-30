@@ -1,6 +1,6 @@
 /**
- * Glyphs and tone classes shared by the PR chip and its card. Tones map onto the contrast-solved
- * role colors, never palette colors.
+ * Glyphs and tone classes shared by the PR chip and its card. The conflict glyph and highlight
+ * color match Conductor; the other tones use the app's role colors.
  */
 
 import * as React from 'react'
@@ -16,6 +16,7 @@ import {
   MessageSquareWarning,
   ListOrdered,
   MinusCircle,
+  createLucideIcon,
   type LucideIcon,
 } from 'lucide-react'
 import { Spinner } from '@craft-agent/ui'
@@ -26,6 +27,7 @@ export const TONE_TEXT: Record<PrTone, string> = {
   success: 'text-success',
   merged: 'text-merged',
   destructive: 'text-destructive',
+  warning: 'text-[#cca694] dark:text-[#ddc1b1]',
   info: 'text-info',
   neutral: 'text-tertiary',
 }
@@ -37,9 +39,18 @@ export const PR_STATE_ICON: Record<PrState, LucideIcon> = {
   closed: GitPullRequestClosed,
 }
 
+// Conductor's conflict glyph crosses the left branch; this differs from Lucide's closed-PR icon.
+const MergeConflictIcon = createLucideIcon('git-pull-request-conflict', [
+  ['path', { d: 'M12 6h4a2 2 0 0 1 2 2v7', key: 'right-branch' }],
+  ['path', { d: 'M6 12v9', key: 'left-branch' }],
+  ['path', { d: 'M9 3 3 9', key: 'cross-down' }],
+  ['path', { d: 'M9 9 3 3', key: 'cross-up' }],
+  ['circle', { cx: '18', cy: '18', r: '3', key: 'right-node' }],
+])
+
 export const PR_STATUS_ICON: Record<PrIconState, LucideIcon> = {
   ...PR_STATE_ICON,
-  conflicting: AlertTriangle,
+  conflicting: MergeConflictIcon,
   behind: GitPullRequestArrow,
   queued: ListOrdered,
 }

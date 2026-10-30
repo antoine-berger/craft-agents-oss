@@ -40,7 +40,7 @@ export function SessionStatusIcon({ item, needsAttention = false, isWorking = fa
       className={cn(
         "flex size-4 shrink-0 items-center justify-center [&>svg]:size-4",
         needsAttention ? "text-yellow-600 dark:text-yellow-400"
-          : isWorking || !pr ? "text-secondary"
+          : isWorking || isWaitingForSubagents || !pr ? "text-secondary"
           : pr.state === 'closed' ? "text-destructive" : TONE_TEXT[sidebarPrTone(pr)],
       )}
     >

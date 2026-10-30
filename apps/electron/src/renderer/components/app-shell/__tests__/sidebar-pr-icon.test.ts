@@ -13,11 +13,16 @@ const queued: PrSummary = { ...ready, quickActions: {
 } }
 
 describe('PR status icon', () => {
-  it('shows conflicts in red for open and draft PRs, including an outdated queue entry', () => {
+  it('follows Conductor: merge queue before draft before conflict', () => {
+    const conflicting = { ...ready, mergeState: 'conflicting' as const, checks: 'pending' as const }
+    expect(prIconState(conflicting)).toBe('conflicting')
+    expect(sidebarPrTone(conflicting)).toBe('warning')
+    expect(prIconState({ ...conflicting, state: 'draft' })).toBe('draft')
+    expect(sidebarPrTone({ ...conflicting, state: 'draft' })).toBe('neutral')
     for (const state of ['open', 'draft'] as const) {
-      const conflicting = { ...queued, state, mergeState: 'conflicting' as const, checks: 'pending' as const }
-      expect(prIconState(conflicting)).toBe('conflicting')
-      expect(sidebarPrTone(conflicting)).toBe('destructive')
+      const inQueue = { ...conflicting, state, quickActions: queued.quickActions }
+      expect(prIconState(inQueue)).toBe('queued')
+      expect(sidebarPrTone(inQueue)).toBe('neutral')
     }
   })
 
@@ -44,9 +49,10 @@ describe('PR status icon', () => {
   })
 
   it('preserves terminal and draft states and avoids stale queue claims', () => {
-    for (const state of ['merged', 'closed', 'draft'] as const) {
+    for (const state of ['merged', 'closed'] as const) {
       expect(prIconState({ ...queued, state, mergeState: 'behind' })).toBe(state)
     }
+    expect(prIconState({ ...ready, state: 'draft', mergeState: 'behind' })).toBe('draft')
     expect(prIconState({ ...queued, attentionStale: true })).toBe('open')
     expect(prIconState({ ...ready, mergeState: 'behind', attentionStale: true })).toBe('open')
   })
