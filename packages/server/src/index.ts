@@ -161,7 +161,7 @@ const webhookConfig = parseGithubWebhookConfig(process.env)
 const webhookReceiver = webhookConfig ? new GithubWebhookReceiver({
   config: webhookConfig,
   statePath: join(CONFIG_DIR, 'github-webhooks', 'inbox.json'),
-  onChange: change => getPrWatchRegistry()?.invalidateFromWebhook(change) ?? Promise.resolve(30_000),
+  onChange: change => getPrWatchRegistry()?.invalidateFromWebhook(change) ?? Promise.resolve({ retryAfterMs: 30_000, change }),
   log: console.log,
 }) : null
 const httpHandler = webhookReceiver ? createGithubWebhookHttpHandler(webhookReceiver, webuiNodeHandler) : webuiNodeHandler

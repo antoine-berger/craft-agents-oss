@@ -89,7 +89,7 @@
     "packages/shared/src/protocol/pr-watch.ts": "c5e2f38129daa43c3ab50433aa38c38e375470d10a97ad5cf4340338faa4ca62",
     "apps/electron/src/renderer/components/app-shell/session-activity/session-activity.css": "3ca5f10bd6f2e9c0d5215a937539572e63460510ecf6d1c63bb2e2d2d9818a82",
     "apps/electron/src/renderer/components/app-shell/chat-header/pr-watch/pr-watch-visuals.tsx": "6db7f3800107f3fffde6a979e9dbfb65f7392e96d30bc31f389417107d80aed9",
-    "packages/server/src/index.ts": "141f3054201591ed52df98d4ac6a209e593fff7dc77a5f4e51b3ce957aff79e1",
+    "packages/server/src/index.ts": "a342d880ea7ae0c0716f4201acf6cc12f457eeee535074324eef0eca79d3a060",
     "packages/server-core/src/services/index.ts": "1d3b28e857875d5cc910afeef609e1649f8fd3f507ca00ab079e91008dd8618d",
     "packages/server-core/src/services/github-webhooks/events.ts": "30eaa4cb9b774f24172e50a1ad5c3c7797f7311b03a8f13b19675f0c6b7e2a44",
     "packages/server-core/src/services/github-webhooks/receiver.ts": "ccb3f0614d86ba68634a53dafe6873ba3373b791bb3ec0228966bcc7a89ebb11",
