@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { motion, AnimatePresence, useMotionValue, useMotionValueEvent, animate } from 'motion/react'
+import { motion, useMotionValue, useMotionValueEvent, animate } from 'motion/react'
 import { DURATION, EASE, prefersReducedMotion } from '@craft-agent/ui/motion'
 import { cn } from '@/lib/utils'
 import { FreeFormInput, type FreeFormInputProps } from './FreeFormInput'
@@ -24,7 +24,7 @@ interface InputContainerProps extends Omit<FreeFormInputProps, 'inputRef' | 'max
   onAnimatedHeightChange?: (delta: number) => void
 }
 
-// Animation timing - synced across height and opacity (motion tokens: component swap, on-screen move)
+// Animation timing for composer height changes.
 const TRANSITION_DURATION = DURATION.base
 const TRANSITION_EASE = EASE.standard
 
@@ -43,8 +43,7 @@ const FALLBACK_HEIGHTS: Record<InputMode | string, number> = {
  * Animation approach:
  * - Uses a hidden measuring div to get the natural height of content
  * - Container animates to measured height
- * - Content crossfades inside using AnimatePresence mode="sync"
- * - All visible children use absolute positioning to stack during transition
+ * - Content switches immediately; only one input is mounted inside the card
  */
 export function InputContainer({
   structuredInput,
@@ -188,7 +187,7 @@ export function InputContainer({
   React.useEffect(() => {
     if (shouldAnimateHeight) {
       const animation = animate(heightMotionValue, targetHeight, {
-        // Reduced motion: the size change lands at once (the content crossfade still plays)
+        // Reduced motion: the size change lands at once.
         duration: prefersReducedMotion() ? 0 : TRANSITION_DURATION,
         ease: TRANSITION_EASE
       })
@@ -266,19 +265,14 @@ export function InputContainer({
           maxHeight,
         }}
       >
-        {/* Crossfading content - freeform anchored to bottom (for auto-grow), others fill */}
-        <AnimatePresence mode="sync" initial={false}>
-          <motion.div
-            key={contentKey}
-            className={mode === 'freeform' ? "absolute bottom-0 left-0 right-0" : "absolute inset-0"}
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: TRANSITION_DURATION, ease: TRANSITION_EASE }}
-          >
-            {renderContent(false)}
-          </motion.div>
-        </AnimatePresence>
+        {/* Keep the active input visible during chat/mode switches. An interrupted
+            exit must not retain an old form or leave the new one transparent. */}
+        <div
+          key={contentKey}
+          className={mode === 'freeform' ? "absolute bottom-0 left-0 right-0" : "absolute inset-0"}
+        >
+          {renderContent(false)}
+        </div>
       </motion.div>
 
       {/* Background-completion chip — floats just above the input box, right-aligned, so it

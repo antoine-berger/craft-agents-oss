@@ -24,6 +24,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Bug Fixes
 
+- **Chat input stays visible** — Switch the active composer immediately instead of retaining fading forms. An interrupted transition can no longer hide the new input outside the card; height animation and draft handling are preserved.
+
 - **Native linear PR stacks** — Monitor, Ship Plan and Ship preserve the selected parent branch, require native GitHub stack membership and append only to the current top. Dependent tickets form one chain, while unrelated chains can still run in parallel; description-only links and sibling PRs no longer count as stacking.
 
 - **Connectors recover in existing chats** — Refresh the live Claude SDK tool catalog between messages without replacing its process, retain healthy discovery results while retrying failures after five seconds, and pass pilot branch references through `repository.start`. Existing histories and background agents remain attached. (f26c1103)
