@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { prIconState, type PrSummary } from '../chat-header/pr-watch/pr-watch-state'
+import { prIconState, sidebarPrTone, type PrSummary } from '../chat-header/pr-watch/pr-watch-state'
 
 const ready: PrSummary = {
   number: 1, title: 'Ready', url: 'https://github.com/example/repo/pull/1',
@@ -13,6 +13,25 @@ const queued: PrSummary = { ...ready, quickActions: {
 } }
 
 describe('PR status icon', () => {
+  it('shows conflicts in red for open and draft PRs, including an outdated queue entry', () => {
+    for (const state of ['open', 'draft'] as const) {
+      const conflicting = { ...queued, state, mergeState: 'conflicting' as const, checks: 'pending' as const }
+      expect(prIconState(conflicting)).toBe('conflicting')
+      expect(sidebarPrTone(conflicting)).toBe('destructive')
+    }
+  })
+
+  it('does not show conflicts on terminal PRs or from stale attention data', () => {
+    for (const state of ['merged', 'closed'] as const) {
+      expect(prIconState({ ...ready, state, mergeState: 'conflicting' })).toBe(state)
+    }
+    for (const state of ['open', 'draft'] as const) {
+      const stale = { ...ready, state, mergeState: 'conflicting' as const, attentionStale: true }
+      expect(prIconState(stale)).toBe(state)
+      expect(sidebarPrTone(stale)).toBe('neutral')
+    }
+  })
+
   it('distinguishes a required rebase and an actual merge queue entry', () => {
     expect(prIconState({ ...ready, mergeState: 'behind' })).toBe('behind')
     expect(prIconState(queued)).toBe('queued')

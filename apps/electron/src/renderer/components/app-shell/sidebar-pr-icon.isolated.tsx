@@ -45,3 +45,28 @@ test('the actual sidebar row subscribes at background priority', () => {
   renderToStaticMarkup(<SessionStatusIcon item={item} />)
   expect(priorities).toEqual([false])
 })
+
+test('sidebar and header show a red conflict icon and label when Resolve is needed', () => {
+  for (const state of ['open', 'draft'] as const) {
+    summary = { ...summary, state, mergeState: 'conflicting', attentionStale: false }
+    for (const element of [
+      <SessionStatusIcon item={item} />,
+      <ChatHeaderPrChip state={{ kind: 'pr', summary }} />,
+    ]) {
+      const html = renderToStaticMarkup(element)
+      expect(html).toContain('lucide-triangle-alert')
+      expect(html).toContain('text-destructive')
+      expect(html).toContain('chat.prWatch.merge.conflicting')
+    }
+  }
+})
+
+test('conflicts preserve owner-attention and running-agent indicators', () => {
+  summary = { ...summary, state: 'open', mergeState: 'conflicting', attentionStale: false }
+  const attention = renderToStaticMarkup(<SessionStatusIcon item={item} needsAttention />)
+  expect(attention).toContain('lucide-hand')
+  expect(attention).not.toContain('lucide-triangle-alert')
+  const working = renderToStaticMarkup(<SessionStatusIcon item={item} isWorking />)
+  expect(working).toContain('session.runState.working')
+  expect(working).not.toContain('lucide-triangle-alert')
+})

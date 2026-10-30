@@ -39,6 +39,7 @@ export const PR_STATE_ICON: Record<PrState, LucideIcon> = {
 
 export const PR_STATUS_ICON: Record<PrIconState, LucideIcon> = {
   ...PR_STATE_ICON,
+  conflicting: AlertTriangle,
   behind: GitPullRequestArrow,
   queued: ListOrdered,
 }

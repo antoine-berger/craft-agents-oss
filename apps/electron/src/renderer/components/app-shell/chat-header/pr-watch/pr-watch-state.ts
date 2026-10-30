@@ -52,9 +52,10 @@ export {
 /** Semantic tone; the components map it to role tokens (`merged` to GitHub's fixed purple). */
 export type PrTone = 'success' | 'merged' | 'destructive' | 'info' | 'neutral'
 
-export type PrIconState = PrState | 'behind' | 'queued'
+export type PrIconState = PrState | 'conflicting' | 'behind' | 'queued'
 
 export function prIconState(summary: PrSummary): PrIconState {
+  if (!summary.attentionStale && (summary.state === 'open' || summary.state === 'draft') && summary.mergeState === 'conflicting') return 'conflicting'
   if (summary.state !== 'open' || summary.attentionStale) return summary.state
   if (summary.quickActions?.queued) return 'queued'
   if (summary.mergeState === 'behind') return 'behind'
@@ -81,6 +82,7 @@ export function prStateTone(state: PrState): PrTone {
 
 /** The sidebar uses green only when the branch PR is ready to merge. */
 export function sidebarPrTone(summary: PrSummary): PrTone {
+  if (prIconState(summary) === 'conflicting') return 'destructive'
   if (summary.state !== 'open') return prStateTone(summary.state)
   return summary.mergeState === 'clean'
     && (summary.reviewDecision === 'approved' || summary.reviewDecision === 'none')

@@ -22,7 +22,8 @@ export function SessionStatusIcon({ item, needsAttention = false, isWorking = fa
   const pr = state.kind === 'pr' ? state.summary : undefined
   const iconState = pr ? prIconState(pr) : undefined
   const Icon = iconState ? PR_STATUS_ICON[iconState] : GitBranch
-  const prStateLabel = iconState === 'behind' ? t('chat.prWatch.merge.behind')
+  const prStateLabel = iconState === 'conflicting' ? t('chat.prWatch.merge.conflicting')
+    : iconState === 'behind' ? t('chat.prWatch.merge.behind')
     : iconState === 'queued' ? t('chat.queuedBadge')
     : pr ? t(`chat.prWatch.state.${pr.state}`) : ''
   const label = needsAttention ? attentionDescription || t("attention.needsYou")

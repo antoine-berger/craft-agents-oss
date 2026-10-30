@@ -28,7 +28,8 @@ export function ChatHeaderPrChip({ state, nav, onReserveElChange }: ChatHeaderPr
   const othersStatusSummary = othersStatus ? others.find(other => prChipStatus(other) === othersStatus) : undefined
   const iconState = prIconState(summary)
   const StateIcon = PR_STATUS_ICON[iconState]
-  const stateLabel = iconState === 'behind' ? t('chat.prWatch.merge.behind')
+  const stateLabel = iconState === 'conflicting' ? t('chat.prWatch.merge.conflicting')
+    : iconState === 'behind' ? t('chat.prWatch.merge.behind')
     : iconState === 'queued' ? t('chat.queuedBadge')
     : t(`chat.prWatch.state.${summary.state}`)
 
