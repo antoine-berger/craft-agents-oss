@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "description": "Verified fork-v0.15.30 plus the complete available classic Conductor status glyphs, colors and priorities; requested yellow hand preserved, input before activity, truthful raw GitHub readiness metadata. Targeted webhook reconciliation, narrowed durable retries, shared PR reads and hourly fallback preserve these deployed features.",
+  "description": "Verified fork-v0.15.30 plus the complete available classic Conductor status glyphs, colors and priorities; requested yellow hand preserved, input before activity, truthful raw GitHub readiness metadata. Targeted webhook reconciliation, narrowed durable retries, shared PR reads and hourly fallback preserve these deployed features. Silent background tasks retain server-confirmed status without an age-based timeout.",
   "sourceFiles": {
     "packages/server-core/src/services/pr-watch/github-queries.ts": "e7f8aa04b211075ab11a6a782b71ef739046443647d332635ed9f12bdf20e7a9",
     "packages/server-core/src/services/pr-watch/map-github.ts": "58c55b6323050d05f1c70e24f19cb29391fc9a4a7f6f2e509ece103e6efb20d5",
@@ -12,7 +12,7 @@
     "packages/server-core/src/services/pr-watch/token-chain.ts": "e0b1771a304402d5a2e6dd9eba0d1db8c1e583d13833537aebce8ac3ab3aa8f0",
     "apps/electron/src/renderer/hooks/usePrWatch.ts": "91a994442ba68a3e2db48865320e0d03da7feb1d2f095d752b8d29ebc5e608f3",
     "apps/electron/src/renderer/hooks/pr-watch-snapshots.ts": "e4b6c4480bb60e3a8f40a673f4371959794ce7bfccf20937c404c5aa3022d67c",
-    "apps/electron/src/renderer/atoms/sessions.ts": "ce0c447ea7e026282eebcecd06a5506b4151e899c487e992ac7b1e06bd382646",
+    "apps/electron/src/renderer/atoms/sessions.ts": "bc7a7d4d6921365e5d7d7a7f4e9a4543c83e4ee6f33ff5f4c802bd7d992db1a3",
     "apps/electron/src/renderer/event-processor/handlers/text.ts": "e46a290e9ebb28b647d31799da3cc207e1e4d510a5cc1ddf6ce75f2567b104ca",
     "packages/server-core/src/sessions/SessionManager.ts": "6da15e38b44244e9f7f324c96e1146bd3126c9f154b2069ca425515930d95abb",
     "packages/shared/src/protocol/dto.ts": "089d26780b8c11b7b99e148467446f9a9264d20c4b7fb547bc4fc86d3a069489",
@@ -46,7 +46,7 @@
     "packages/server-core/src/pr-watch/operations.ts": "d5e22df7e2bfd075944f8e68abd808d15e83918eaa879221ed85e25313d0cb35",
     "packages/server-core/src/services/cli-proxy/connectors.ts": "948b9f57ff385324a33aa72e76ad8baa80e4b6f1f1619029c446cf3cd4c4b48b",
     "apps/electron/resources/portable-config/skills/monitor/SKILL.md": "abcd265d5c9447b0cf6717b3e8179dd9214c7f81b1545bed93a093c684f4a609",
-    "apps/electron/src/renderer/App.tsx": "d2d0fc70589a59b8f639e41244462673dc52c24341ee9dc470a482096a7794bc",
+    "apps/electron/src/renderer/App.tsx": "ecc4bf248c7bd93947caaf92632682563cfa2922c845e87d943c47a986169e22",
     "apps/electron/src/renderer/components/app-shell/AppShell.tsx": "6876e409acda20e9b20bfee91e2a63c57b1011ec88950e2fceeda22edfab37c6",
     "apps/electron/src/renderer/components/app-shell/ChatDisplay.tsx": "cbd39288ce3458286a439d52ccf7d4860b1c785c7e3fa529d8531f02868d15f0",
     "apps/electron/src/renderer/components/app-shell/SessionList.tsx": "73b79e4b6cec06a366b04e6542c5cb3cb3bc9bb81c56a24c032245dbe85a124e",
@@ -94,19 +94,22 @@
     "packages/server-core/src/services/github-webhooks/events.ts": "30eaa4cb9b774f24172e50a1ad5c3c7797f7311b03a8f13b19675f0c6b7e2a44",
     "packages/server-core/src/services/github-webhooks/receiver.ts": "ccb3f0614d86ba68634a53dafe6873ba3373b791bb3ec0228966bcc7a89ebb11",
     "docs/github-webhooks.md": "cc972288090ca346b39c1048d09e974bf1ec3e5edd38b95aa93f3a0fa370f233",
-    "packages/shared/src/sessions/jsonl.ts": "a3e915da30ee25d594d90f81f29e4b3bb89d4c1c54cf93bcaa7bc6d1105e93a8"
+    "packages/shared/src/sessions/jsonl.ts": "a3e915da30ee25d594d90f81f29e4b3bb89d4c1c54cf93bcaa7bc6d1105e93a8",
+    "apps/electron/src/renderer/components/app-shell/background-task-chip-state.ts": "d6278f054685744980a6986a0f538e238a82cfde5887641aa1134ac63da10e03",
+    "apps/electron/src/renderer/components/app-shell/BackgroundTaskChip.tsx": "73fcee49633cedcf2ac0f5e8171fd09f1e3ee7f13100ff31e176ac8f96b2d884",
+    "apps/electron/src/renderer/components/app-shell/ActiveTasksBar.tsx": "a4175b19a2db02ca4ea25444bd5d91b9ef4f82d473fcdff3fb929a7a987049b5"
   },
   "compiledClientFiles": {
     "apps/electron/src/renderer/hooks/usePrWatch.ts": "91a994442ba68a3e2db48865320e0d03da7feb1d2f095d752b8d29ebc5e608f3",
     "apps/electron/src/renderer/hooks/pr-watch-snapshots.ts": "e4b6c4480bb60e3a8f40a673f4371959794ce7bfccf20937c404c5aa3022d67c",
-    "apps/electron/src/renderer/atoms/sessions.ts": "ce0c447ea7e026282eebcecd06a5506b4151e899c487e992ac7b1e06bd382646",
+    "apps/electron/src/renderer/atoms/sessions.ts": "bc7a7d4d6921365e5d7d7a7f4e9a4543c83e4ee6f33ff5f4c802bd7d992db1a3",
     "apps/electron/src/renderer/event-processor/handlers/text.ts": "e46a290e9ebb28b647d31799da3cc207e1e4d510a5cc1ddf6ce75f2567b104ca",
     "apps/electron/src/renderer/components/app-shell/chat-header/pr-watch/ChatHeaderPrChip.tsx": "8b5d5c6ea2dfd16953c3206e34f6058c22dafd8a471969ff36be59c787432a03",
     "apps/electron/src/renderer/components/app-shell/chat-header/pr-watch/pr-quick-actions.ts": "1d9d4b6af5c61ee60e250f2a0431a797c56377fcd3a5cbf4c16ed4c5560f0762",
     "apps/electron/src/renderer/components/app-shell/chat-header/pr-watch/PrQuickActions.tsx": "cff425566d4fe7eda3bafea9eb93323020565b8d287310324a2c522c7f3fae30",
     "apps/electron/src/renderer/components/app-shell/SessionStatusIcon.tsx": "f76b80298449bfc9ff4c36d519eaf3ae3b0a546eb13a195a2c4cee5d2d6467b8",
     "apps/electron/src/renderer/components/app-shell/chat-header/pr-watch/pr-watch-state.ts": "4733eb629d5e534f39ae63360913778f7c53cec810c1341f5fdb7247ddc7e0eb",
-    "apps/electron/src/renderer/App.tsx": "d2d0fc70589a59b8f639e41244462673dc52c24341ee9dc470a482096a7794bc",
+    "apps/electron/src/renderer/App.tsx": "ecc4bf248c7bd93947caaf92632682563cfa2922c845e87d943c47a986169e22",
     "apps/electron/src/renderer/components/app-shell/AppShell.tsx": "6876e409acda20e9b20bfee91e2a63c57b1011ec88950e2fceeda22edfab37c6",
     "apps/electron/src/renderer/components/app-shell/ChatDisplay.tsx": "cbd39288ce3458286a439d52ccf7d4860b1c785c7e3fa529d8531f02868d15f0",
     "apps/electron/src/renderer/components/app-shell/SessionList.tsx": "73b79e4b6cec06a366b04e6542c5cb3cb3bc9bb81c56a24c032245dbe85a124e",
@@ -128,7 +131,10 @@
     "apps/electron/src/renderer/components/app-shell/input/InputContainer.tsx": "47d3fa324623c7b1e56bdbcadd874d7b12250b6430aabf5714156150eeca7c3f",
     "packages/shared/src/pr-watch/rules.ts": "e37fffcaddfeff6855b7a23a94a7b621a4452a078a2c7c9783c80f0473e08182",
     "apps/electron/src/renderer/components/app-shell/conductor-status-icons.tsx": "b01b956487ff7deac59905b0db3d05410d44fc9451552e5fef8027a484e0d892",
-    "apps/electron/src/renderer/components/app-shell/session-run-state.ts": "7e4b4649c52f82122904a47fd329faf26d365564ba5bc54e80fdb0c6b79ed38f"
+    "apps/electron/src/renderer/components/app-shell/session-run-state.ts": "7e4b4649c52f82122904a47fd329faf26d365564ba5bc54e80fdb0c6b79ed38f",
+    "apps/electron/src/renderer/components/app-shell/background-task-chip-state.ts": "d6278f054685744980a6986a0f538e238a82cfde5887641aa1134ac63da10e03",
+    "apps/electron/src/renderer/components/app-shell/BackgroundTaskChip.tsx": "73fcee49633cedcf2ac0f5e8171fd09f1e3ee7f13100ff31e176ac8f96b2d884",
+    "apps/electron/src/renderer/components/app-shell/ActiveTasksBar.tsx": "a4175b19a2db02ca4ea25444bd5d91b9ef4f82d473fcdff3fb929a7a987049b5"
   },
   "compiledNativeFeatures": {
     "bootstrap-preload.cjs": [

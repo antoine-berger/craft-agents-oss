@@ -205,10 +205,10 @@ test('twenty sidebar rows and one open chat trigger only one foreground reconcil
 
 test('open PR details reload on pushes without repeated idle reads', async () => {
   const idleTicks: Array<() => void> = []
-  const timer = spyOn(globalThis, 'setInterval').mockImplementation(callback => {
-    idleTicks.push(callback as () => void)
+  const timer = spyOn(globalThis, 'setInterval').mockImplementation(((callback: () => void) => {
+    idleTicks.push(callback)
     return 0 as unknown as ReturnType<typeof setInterval>
-  })
+  }) as typeof setInterval)
   let detailReads = 0
   ;(window as any).electronAPI.prWatchGetDetails = async () => { detailReads++; return null }
   try {

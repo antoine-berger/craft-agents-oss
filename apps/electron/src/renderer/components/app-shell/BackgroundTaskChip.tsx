@@ -60,7 +60,7 @@ export function formatElapsed(seconds: number): string {
 }
 
 function isLive(task: BackgroundTask): boolean {
-  return task.status === 'running' || task.status === 'stale'
+  return task.status === 'running'
 }
 
 /** Elapsed seconds: ticking while the task runs, frozen at its end. */
@@ -91,7 +91,6 @@ function useStatusText(task: BackgroundTask): string {
     case 'failed': return t('chat.backgroundTask.failed')
     case 'stopped': return t('chat.backgroundTask.stopped')
     case 'orphaned': return t('chat.backgroundTask.interrupted')
-    case 'stale': return t('chat.backgroundTask.noSignal')
   }
 }
 
@@ -378,10 +377,10 @@ export function BackgroundTaskChip({ task, sessionId, open, onOpenChange, onStop
   const running = task.status === 'running' && !task.stopping
   const tone = task.status === 'failed'
     ? 'bg-destructive-tint text-destructive ring-[color:var(--destructive-border)]'
-    : task.status === 'orphaned' || task.status === 'stale'
+    : task.status === 'orphaned'
       ? 'bg-info-tint text-info ring-[color:var(--info-border)]'
       : undefined
-  const hint = task.status === 'orphaned' ? t('chat.taskOrphanedHint') : task.status === 'stale' ? t('chat.taskStaleHint') : undefined
+  const hint = task.status === 'orphaned' ? t('chat.taskOrphanedHint') : undefined
 
   return (
     <Popover open={open} onOpenChange={onOpenChange}>

@@ -260,7 +260,7 @@ function handleBackgroundTaskEvent(
     }
   } else if (event.type === 'complete' || event.type === 'interrupted' || event.type === 'error') {
     // Orphan backstop: without keep-alive, turn teardown is authoritative evidence
-    // that both running and uncertain/stale background tasks died with the SDK
+    // that running background tasks died with the SDK
     // subprocess. With keep-alive they may genuinely survive, so preserve them for
     // a later progress or task_completed signal.
     if (evt.backgroundTasksAlive === true) {

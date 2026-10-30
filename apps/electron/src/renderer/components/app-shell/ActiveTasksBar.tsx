@@ -33,8 +33,7 @@ export function ActiveTasksBar({ tasks, sessionId, onStopTask, onDismissTask, on
   const openTaskIdRef = React.useRef(openTaskId)
   openTaskIdRef.current = openTaskId
 
-  // Stop an unconfirmed chip from spinning forever without pretending the task died: old no-signal
-  // tasks become `stale`, terminal ones are pruned after their linger — except the one whose card is open.
+  // Only confirmed terminal tasks expire from this bar; silent running commands stay running.
   React.useEffect(() => {
     const interval = setInterval(() => {
       setTasks((prev) => advanceBackgroundTaskChips(prev, Date.now(), openTaskIdRef.current))

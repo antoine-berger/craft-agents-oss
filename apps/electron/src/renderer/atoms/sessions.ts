@@ -630,14 +630,12 @@ export const forceSessionMessagesReloadAtom = atom(
 /**
  * Lifecycle status of a background task chip.
  * - `running`  — backgrounded, no terminal signal yet (chip shows a spinner + live elapsed).
- * - `stale` — no lifecycle signal arrived within the renderer timeout. The task may
- *   still be running, so the chip shows an unknown state and remains recoverable.
  * - `completed`/`failed`/`stopped` — a real task_completed notification arrived.
  * - `orphaned` — the turn that owned the task ended before it finished, so it was
  *   terminated with that turn's subprocess. Shown distinctly instead of a false
  *   "running". Not produced once WS2 keep-alive is enabled.
  */
-export type BackgroundTaskStatus = 'running' | 'stale' | 'completed' | 'failed' | 'stopped' | 'orphaned'
+export type BackgroundTaskStatus = 'running' | 'completed' | 'failed' | 'stopped' | 'orphaned'
 
 export interface BackgroundTask {
   /** Task or shell ID */
