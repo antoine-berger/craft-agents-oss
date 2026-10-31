@@ -1955,7 +1955,8 @@ export class SessionManager implements ISessionManager {
   resumeFailedSession(sessionId: string): void {
     const managed = this.sessions.get(sessionId)
     if (this.shuttingDown || !managed || managed.isDeleting || !canResumeFailedSession(managed)) return
-    if (this.hasUnfinishedBackgroundWork(managed)) throw new Error('This chat still has running background work.')
+    const preserveRuntime = this.hasUnfinishedBackgroundWork(managed)
+    if (preserveRuntime && !managed.agent) throw new Error('Background work is still registered but its agent is unavailable.')
     const stopEpoch = managed.stopEpoch ?? 0
     if (!managed.messagesLoaded) this.hydrateMessagesForColdPersist(managed)
     const queuedIds = new Set(managed.messageQueue.map(entry => entry.messageId))
@@ -1967,7 +1968,7 @@ export class SessionManager implements ISessionManager {
     this.setSessionRecovery(managed, { status: 'running', at: Date.now() })
     void (async () => {
       try {
-        if (!await this.disposeManagedAgentRuntime(managed, 'resume failed request')) {
+        if (!preserveRuntime && !await this.disposeManagedAgentRuntime(managed, 'resume failed request')) {
           throw new Error('The previous agent could not be stopped. Try again.')
         }
         this.assertSessionRunnable(managed, stopEpoch)

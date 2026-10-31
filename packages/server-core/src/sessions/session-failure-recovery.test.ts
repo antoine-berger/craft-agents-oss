@@ -94,10 +94,24 @@ describe('interrupted session recovery', () => {
     expect(dequeues).toBe(1)
   })
 
-  it('does not dispose surviving background work when a sibling task fails', () => {
+  it('resumes in the existing agent without disposing surviving background commands', async () => {
     chat.recovery = { status: 'failed', at: 1 }
     chat.backgroundTaskRegistry.set('task', task())
-    expect(() => sm.resumeFailedSession(chat.id)).toThrow('running background work')
+    chat.agent = {}
+    let sends = 0
+    sm.disposeManagedAgentRuntime = async () => { throw new Error('Must preserve background commands') }
+    sm.sendMessage = async (id: string, text: string) => { expect(id).toBe(chat.id); expect(text).toBe('Continue.'); sends++ }
+    sm.resumeFailedSession(chat.id)
+    sm.resumeFailedSession(chat.id)
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(sends).toBe(1)
+    expect(chat.backgroundTaskRegistry.get('task').status).toBe('running')
+  })
+
+  it('does not replace an unavailable runtime while background work is still registered', () => {
+    chat.recovery = { status: 'failed', at: 1 }
+    chat.backgroundTaskRegistry.set('task', task())
+    expect(() => sm.resumeFailedSession(chat.id)).toThrow('agent is unavailable')
     expect(chat.recovery?.status).toBe('failed')
   })
 

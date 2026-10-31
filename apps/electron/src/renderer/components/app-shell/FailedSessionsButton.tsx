@@ -38,7 +38,11 @@ export function FailedSessionsButton({ workspaceId }: { workspaceId: string | nu
       // One owner click, one attempt per failed chat. A persistent quota error reappears here.
       const results = await Promise.allSettled(failed.map(session => window.electronAPI.sessionCommand(session.id, { type: 'resumeFailed' })))
       const errors = results.filter(result => result.status === 'rejected').length
-      if (errors) toast.error(t('sessionRecovery.retryFailed', { count: errors, defaultValue: 'Could not resume {{count}} chats.' }))
+      if (errors) {
+        const details = results.flatMap((result, index) => result.status === 'rejected'
+          ? [`${failed[index]!.name || failed[index]!.id}: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`] : [])
+        toast.error(t('sessionRecovery.retryFailed', { count: errors, defaultValue: 'Could not resume {{count}} chats.' }), { description: details.join('\n') })
+      }
     } finally { pending.current = false; setRestarting(false) }
   }
 

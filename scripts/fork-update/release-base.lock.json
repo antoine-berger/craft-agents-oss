@@ -14,7 +14,7 @@
     "apps/electron/src/renderer/hooks/pr-watch-snapshots.ts": "e4b6c4480bb60e3a8f40a673f4371959794ce7bfccf20937c404c5aa3022d67c",
     "apps/electron/src/renderer/atoms/sessions.ts": "bc7a7d4d6921365e5d7d7a7f4e9a4543c83e4ee6f33ff5f4c802bd7d992db1a3",
     "apps/electron/src/renderer/event-processor/handlers/text.ts": "e46a290e9ebb28b647d31799da3cc207e1e4d510a5cc1ddf6ce75f2567b104ca",
-    "packages/server-core/src/sessions/SessionManager.ts": "535c44d3b913338e20df0d6017634379631d6d2c1479ce5aea04cb365853c704",
+    "packages/server-core/src/sessions/SessionManager.ts": "adf50e822b99f31df7c4b95312d84a6c6ea75b18e1049c672148ef7da85b466b",
     "packages/shared/src/protocol/dto.ts": "089d26780b8c11b7b99e148467446f9a9264d20c4b7fb547bc4fc86d3a069489",
     "packages/core/src/types/message.ts": "01bf8d075648020549e22c326e9cf7ebcbabeadf41fa2632940006bf898d8c83",
     "packages/shared/src/agent/claude-agent.ts": "13cd05bd5849eb0a8d12c591a838ff005f225519a3c5e46ea81b3bfe7bd3f7b0",
@@ -100,7 +100,7 @@
     "apps/electron/src/renderer/components/app-shell/ActiveTasksBar.tsx": "a4175b19a2db02ca4ea25444bd5d91b9ef4f82d473fcdff3fb929a7a987049b5",
     "packages/shared/src/sessions/recovery.ts": "b260f70befdbe4dfbb72a47da299becef683211ad2f08fd9806854c22fe75432",
     "packages/shared/src/agent/backend/claude/persistent-input.ts": "d20da09bd9ae7ddbebebe5b87c5af9d3923832a2a6b1e2e855455c3e423d3531",
-    "apps/electron/src/renderer/components/app-shell/FailedSessionsButton.tsx": "7dd8a22ba028182c34e180a53152c99dcaa237501b1c56f357a901b99db697ea"
+    "apps/electron/src/renderer/components/app-shell/FailedSessionsButton.tsx": "98e3c7010e5314ab0e6418dfcfecc3bfa9799cd37f348d38817bc31bf95d4820"
   },
   "compiledClientFiles": {
     "apps/electron/src/renderer/hooks/usePrWatch.ts": "91a994442ba68a3e2db48865320e0d03da7feb1d2f095d752b8d29ebc5e608f3",
@@ -139,7 +139,7 @@
     "apps/electron/src/renderer/components/app-shell/BackgroundTaskChip.tsx": "73fcee49633cedcf2ac0f5e8171fd09f1e3ee7f13100ff31e176ac8f96b2d884",
     "apps/electron/src/renderer/components/app-shell/ActiveTasksBar.tsx": "a4175b19a2db02ca4ea25444bd5d91b9ef4f82d473fcdff3fb929a7a987049b5",
     "packages/shared/src/sessions/recovery.ts": "b260f70befdbe4dfbb72a47da299becef683211ad2f08fd9806854c22fe75432",
-    "apps/electron/src/renderer/components/app-shell/FailedSessionsButton.tsx": "7dd8a22ba028182c34e180a53152c99dcaa237501b1c56f357a901b99db697ea"
+    "apps/electron/src/renderer/components/app-shell/FailedSessionsButton.tsx": "98e3c7010e5314ab0e6418dfcfecc3bfa9799cd37f348d38817bc31bf95d4820"
   },
   "compiledNativeFeatures": {
     "bootstrap-preload.cjs": [

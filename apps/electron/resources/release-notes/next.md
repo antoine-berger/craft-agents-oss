@@ -67,3 +67,5 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 - **Usage meter** — Refresh the displayed account while the app is visible and after reconnection, and preserve the last known values across temporary errors and remounts without mixing accounts.
 
 - **Resume interrupted chats** — Keep unfinished requests recoverable after a server stop or an unexpected agent exit, including background work. The toolbar shows reasons and chat counts on hover and resumes eligible chats in parallel with one click, preserving their history and queued messages. Archived chats, active work and explicit owner stops remain protected.
+
+- **Resume with background commands** — Reuse the existing agent when resuming a failed chat that still has background work, keeping those commands alive. If a retry cannot start, show the affected chat and the precise error in the notification.

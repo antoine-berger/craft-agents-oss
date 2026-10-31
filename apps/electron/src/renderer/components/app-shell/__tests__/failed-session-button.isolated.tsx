@@ -7,7 +7,8 @@ const pass = ({ children }: any) => <>{children}</>
 mock.module('@craft-agent/ui', () => ({ Tooltip: pass, TooltipTrigger: pass, TooltipContent: pass }))
 mock.module('react-i18next', () => ({ useTranslation: () => ({ t: (_key: string, options: any) => options.defaultValue.replace('{{count}}', String(options.count)) }) }))
 const errors: string[] = []
-mock.module('sonner', () => ({ toast: { error: (message: string) => errors.push(message) } }))
+let errorDetails: string | undefined
+mock.module('sonner', () => ({ toast: { error: (message: string, options: any) => { errors.push(message); errorDetails = options?.description } } }))
 const { FailedSessionsButton } = await import('../FailedSessionsButton')
 const { sessionMetaMapAtom } = await import('@/atoms/sessions')
 let root: ReturnType<typeof create> | undefined
@@ -51,6 +52,7 @@ it('reports failed acknowledgements and allows another owner retry', async () =>
   await act(async () => { root = create(<Provider store={store}><FailedSessionsButton workspaceId="workspace" /></Provider>) })
   await act(async () => root!.root.findByType('button').props.onClick())
   expect(errors).toEqual(['Could not resume 1 chats.'])
+  expect(errorDetails).toBe('chat: offline')
   await act(async () => root!.root.findByType('button').props.onClick())
   expect(calls).toBe(2)
 })
