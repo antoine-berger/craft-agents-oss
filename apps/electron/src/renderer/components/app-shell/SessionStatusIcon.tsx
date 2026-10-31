@@ -31,11 +31,13 @@ export function SessionStatusIcon({ item, runState, attentionDescription }: Sess
     : iconState === 'checks-failing' ? t('chat.prWatch.checks.failure')
     : iconState === 'queued' ? t('chat.queuedBadge')
     : pr ? t(`chat.prWatch.state.${pr.state}`) : ''
-  const label = runState && !isActive ? attentionDescription || t("attention.needsYou")
+  const statusLabel = runState && !isActive ? attentionDescription || t("attention.needsYou")
     : runState === 'waiting' ? t("session.runState.subagents", { defaultValue: 'Waiting for subagents' })
     : isActive ? t("session.runState.working")
     : pr ? `#${pr.number} · ${prStateLabel} · ${pr.title}`
     : item.worktree?.owned?.branch ?? 'Git branch'
+  const label = pr?.attentionStale && !runState
+    ? `${statusLabel} · ${t('chat.prWatch.savedUnrefreshed')}` : statusLabel
 
   return (
     <span

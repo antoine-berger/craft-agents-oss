@@ -24,6 +24,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Bug Fixes
 
+- **Stable verified PR icons** — Preserve the last verified GitHub icon and color during webhook refreshes and when returning to a cached chat. Freshness remains visible in the tooltip and continues to block actions and automatic fixes until verified data returns.
+
 - **Fewer Ship commits** — Group known corrections from the same review, E2E or bot/CI round into coherent batches before committing and pushing. Preserve every required review and test, per-thread replies and existing published history.
 
 - **Chat input stays visible** — Switch the active composer immediately instead of retaining fading forms. An interrupted transition can no longer hide the new input outside the card; height animation and draft handling are preserved.

@@ -4,6 +4,9 @@ import { sessionRunState } from '../session-run-state'
 import type { SessionMeta } from '@/atoms/sessions'
 import type { SessionAttention, AttentionKind } from '@craft-agent/shared/protocol'
 import reference from './fixtures/conductor-status-icons.json'
+import { PrWatchSnapshots } from '@/hooks/pr-watch-snapshots'
+import { nextPrQuickAction } from '../chat-header/pr-watch/pr-quick-actions'
+import { autoFixApplies } from '@craft-agent/shared/pr-watch'
 
 const item = { id: 'session' } as SessionMeta
 function attention(...kinds: AttentionKind[]): SessionAttention {
@@ -15,10 +18,36 @@ describe('Conductor classic PR priorities', () => {
   for (const vector of reference.cases) {
     it(vector.name, () => expect(prIconState(vector.summary as PrSummary) as string).toBe(vector.expected))
   }
-  it('retains the freshness guard without claiming an old queue or ready state', () => {
-    for (const vector of reference.cases.filter(value => !['merged', 'closed'].includes(value.summary.state))) {
-      expect(prIconState({ ...vector.summary, attentionStale: true } as PrSummary) as string).toBe(vector.summary.state)
+  it('keeps every last verified icon while its summary is being refreshed', () => {
+    for (const vector of reference.cases) {
+      expect(prIconState({ ...vector.summary, attentionStale: true } as PrSummary) as string).toBe(vector.expected)
     }
+  })
+
+  it('keeps a cached ready icon while blocking stale actions, then displays the new verified status', () => {
+    const summary: PrSummary = {
+      ...reference.cases.find(vector => vector.expected === 'ready')!.summary as PrSummary,
+      headMatchesLocal: true,
+      checks: 'success', reviewDecision: 'approved',
+      quickActions: { canMerge: true, methods: ['squash'], defaultMethod: 'squash', mergeQueue: false },
+    }
+    const cache = new PrWatchSnapshots()
+    const entry = { id: 'repo#1', origin: 'branch' as const, summary }
+    cache.update('chat:checkout', { kind: 'ready', prs: [entry] })
+    expect(nextPrQuickAction({ kind: 'pr', summary }, 'branch')).toBe('merge')
+
+    const cached = cache.read('chat:checkout')
+    if (cached.kind !== 'ready') throw new Error('Expected cached PR')
+    const stale = cached.prs[0]!.summary
+    expect(stale.attentionStale).toBe(true)
+    expect(prIconState(stale)).toBe('ready')
+    expect(nextPrQuickAction({ kind: 'pr', summary: stale }, 'branch')).toBeNull()
+    expect(autoFixApplies({ ...stale, reviewDecision: 'changes_requested', unresolvedThreads: 1 })).toBe(false)
+
+    const updated = { ...summary, mergeState: 'conflicting' as const, mergeStateStatus: 'DIRTY' as const, fetchedAt: 2 }
+    const fresh = cache.update('chat:checkout', { kind: 'ready', prs: [{ ...entry, summary: updated }] })
+    if (fresh.kind !== 'ready') throw new Error('Expected updated PR')
+    expect(prIconState(fresh.prs[0]!.summary)).toBe('conflicting')
   })
 })
 

@@ -54,8 +54,9 @@ export type PrTone = 'success' | 'merged' | 'destructive' | 'info' | 'neutral'
 
 export type PrIconState = PrState | 'conflicting' | 'queued' | 'ready' | 'checks-failing'
 
+/** Display the last verified summary; freshness guards actions without changing its icon. */
 export function prIconState(summary: PrSummary): PrIconState {
-  if (summary.state === 'merged' || summary.state === 'closed' || summary.attentionStale) return summary.state
+  if (summary.state === 'merged' || summary.state === 'closed') return summary.state
   if (summary.quickActions?.queued) return 'queued'
   // Conductor's default treats optional checks as non-blocking; this is display only.
   if (summary.state === 'open' && summary.viewerCanMerge !== false
