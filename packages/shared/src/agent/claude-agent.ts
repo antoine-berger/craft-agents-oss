@@ -814,7 +814,12 @@ export class ClaudeAgent extends BaseAgent {
       try {
         while (true) {
           const { done, value } = await iterator.next();
-          if (done) break;
+          if (done) {
+            if (this.persistentIterator === iterator && !this.persistentInput?.isEnded && !this.activeTurnState?.aborted) {
+              throw new Error('Claude Code stopped before completing its response.');
+            }
+            break;
+          }
           // A newer query took over: this one's leftover messages belong to no turn.
           if (this.persistentIterator !== iterator) continue;
           if (this.stoppedTurn) {
@@ -862,6 +867,11 @@ export class ClaudeAgent extends BaseAgent {
         }
       } catch (err) {
         this.debug(`[bg-lifecycle] persistent consumer error: ${err instanceof Error ? err.message : String(err)}`);
+        if (this.persistentIterator === iterator) {
+          this.onBackgroundEvent?.({ type: 'error', message: err instanceof Error ? err.message : String(err) });
+          this.activeTurnChannel?.fail(err);
+          for (const turn of this.pendingBackgroundTurns ?? []) turn.channel.fail(err);
+        }
       } finally {
         // Tear down only the query this consumer served, never a newer one.
         if (this.persistentIterator === iterator) this.teardownPersistentQuery('consumer-exit');

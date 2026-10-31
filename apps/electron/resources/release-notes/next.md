@@ -65,3 +65,5 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 - **PR actions** — Use the numbered merge-queue glyph and shorter action messages, with current PR context and existing push boundaries. Refresh stale PR state without bypassing GitHub quota backoff.
 - **Project pilots** — Keep pilots outside global task groups and counters, including All Sessions grouped by status. Their dedicated project location, explicit search and archives stay available.
 - **Usage meter** — Refresh the displayed account while the app is visible and after reconnection, and preserve the last known values across temporary errors and remounts without mixing accounts.
+
+- **Resume interrupted chats** — Keep unfinished requests recoverable after a server stop or an unexpected agent exit, including background work. The toolbar shows reasons and chat counts on hover and resumes eligible chats in parallel with one click, preserving their history and queued messages. Archived chats, active work and explicit owner stops remain protected.

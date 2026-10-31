@@ -165,6 +165,7 @@ export interface SessionRecovery {
   status: 'running' | 'failed';
   at: number;
   message?: string;
+  reason?: 'server_restart';
   lastFinalMessageId?: string;
 }
 

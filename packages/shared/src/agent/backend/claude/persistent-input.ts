@@ -48,6 +48,8 @@ export interface PushableInputStream<T> {
   push(item: T): void;
   /** Signal end-of-input; the consumer's loop returns after draining the queue. */
   end(): void;
+  /** Drain already received output, then report an abnormal subprocess exit. */
+  fail(error: unknown): void;
   /** Whether `end()` has been called. */
   readonly isEnded: boolean;
 }
@@ -56,6 +58,7 @@ export function createPushableInputStream<T>(): PushableInputStream<T> {
   const queue: T[] = [];
   let wake: (() => void) | null = null;
   let ended = false;
+  let failure: unknown;
 
   const wakeConsumer = () => {
     const w = wake;
@@ -70,7 +73,10 @@ export function createPushableInputStream<T>(): PushableInputStream<T> {
       while (queue.length > 0) {
         yield queue.shift() as T;
       }
-      if (ended) return;
+      if (ended) {
+        if (failure !== undefined) throw failure;
+        return;
+      }
       // Nothing queued and not ended → suspend until push()/end() wakes us.
       await new Promise<void>((resolve) => {
         wake = resolve;
@@ -89,6 +95,12 @@ export function createPushableInputStream<T>(): PushableInputStream<T> {
     },
     end(): void {
       if (ended) return;
+      ended = true;
+      wakeConsumer();
+    },
+    fail(error: unknown): void {
+      if (ended) return;
+      failure = error ?? new Error('The subprocess stopped unexpectedly.');
       ended = true;
       wakeConsumer();
     },

@@ -27,6 +27,48 @@ describe('ClaudeAgent keep-alive Stop', () => {
     expect(turn.aborted).toBe(true)
   })
 
+  it('reports a killed persistent subprocess before closing the turn', async () => {
+    const agent = await agentInPersistentTurn()
+    const events: any[] = []
+    agent.debug = () => {}
+    agent.config = {}
+    agent.setBackgroundEventSink((event: any) => events.push(event))
+    agent.persistentIterator = { next: async () => { throw new Error('Claude Code process exited with code 143') } }
+    const channel = agent.activeTurnChannel
+    agent.startPersistentConsumer()
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(events).toEqual([{ type: 'error', message: 'Claude Code process exited with code 143' }])
+    expect(channel.isEnded).toBe(true)
+    await expect(async () => { for await (const _ of channel.stream) {} }).toThrow('Claude Code process exited with code 143')
+  })
+
+  it('does not turn an SDK iterator ending without a result into a successful reply', async () => {
+    const agent = await agentInPersistentTurn()
+    const events: any[] = []
+    agent.debug = () => {}
+    agent.config = {}
+    agent.setBackgroundEventSink((event: any) => events.push(event))
+    agent.persistentIterator = { next: async () => ({ done: true }) }
+    agent.startPersistentConsumer()
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(events[0]).toMatchObject({ type: 'error', message: 'Claude Code stopped before completing its response.' })
+  })
+
+  it('reports an idle subprocess exit so unfinished background tasks can be recovered', async () => {
+    const agent = await agentInPersistentTurn()
+    const events: any[] = []
+    agent.debug = () => {}
+    agent.config = {}
+    agent.activeTurnChannel = null
+    agent.activeTurnState = null
+    agent.setBackgroundEventSink((event: any) => events.push(event))
+    agent.persistentIterator = { next: async () => ({ done: true }) }
+    agent.startPersistentConsumer()
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(events[0]).toMatchObject({ type: 'error' })
+    expect(agent.currentQuery).toBeNull()
+  })
+
   it('starts every turn unaborted', async () => {
     const agent = await agentInPersistentTurn()
     agent.forceAbort(AbortReason.UserStop)

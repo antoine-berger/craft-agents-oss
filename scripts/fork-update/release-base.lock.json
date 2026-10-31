@@ -14,15 +14,15 @@
     "apps/electron/src/renderer/hooks/pr-watch-snapshots.ts": "e4b6c4480bb60e3a8f40a673f4371959794ce7bfccf20937c404c5aa3022d67c",
     "apps/electron/src/renderer/atoms/sessions.ts": "bc7a7d4d6921365e5d7d7a7f4e9a4543c83e4ee6f33ff5f4c802bd7d992db1a3",
     "apps/electron/src/renderer/event-processor/handlers/text.ts": "e46a290e9ebb28b647d31799da3cc207e1e4d510a5cc1ddf6ce75f2567b104ca",
-    "packages/server-core/src/sessions/SessionManager.ts": "6da15e38b44244e9f7f324c96e1146bd3126c9f154b2069ca425515930d95abb",
+    "packages/server-core/src/sessions/SessionManager.ts": "535c44d3b913338e20df0d6017634379631d6d2c1479ce5aea04cb365853c704",
     "packages/shared/src/protocol/dto.ts": "089d26780b8c11b7b99e148467446f9a9264d20c4b7fb547bc4fc86d3a069489",
     "packages/core/src/types/message.ts": "01bf8d075648020549e22c326e9cf7ebcbabeadf41fa2632940006bf898d8c83",
-    "packages/shared/src/agent/claude-agent.ts": "950aa03e1168fa6b2e00cd054c1447641f10c4ae4c3f9934b1b7206430212ae5",
+    "packages/shared/src/agent/claude-agent.ts": "13cd05bd5849eb0a8d12c591a838ff005f225519a3c5e46ea81b3bfe7bd3f7b0",
     "packages/shared/src/agent/backend/types.ts": "304e6e9f8191289209000e7db4c3325cd8fbd84d0cab3114a416c9d2bbc4e881",
     "packages/shared/src/agent/backend/claude/pending-steers.ts": "bfc0da3d2a924dce2bf3fcb2bd5b96659c391a3d93f43bb47576d627ccdf08d6",
     "packages/server-core/src/services/repositories/owned-worktree.ts": "966a71d9dd7e40dfb592778e0d22f3b35b383ca5b59220fcc0a3bb2fbd0c820d",
     "packages/server-core/src/services/checkpoints/session-checkpoints.ts": "e84b6b5e79b5ac6a2323f98ce0887a1484c5c5eb03de6428c3b814287c61273f",
-    "packages/shared/src/sessions/types.ts": "82bb7dd42ee662f1a1552469cd41824d04839751532a191aa70370d5c46f3472",
+    "packages/shared/src/sessions/types.ts": "e36f41f5b3ff5e8769644e16ee73937a15a8581f624b9972b8a78f0a3d1ba037",
     "apps/electron/src/main/index.ts": "8e1e5c696321786b95fbfe81484dafd9255eb6140cdf7a695cdede94ed71afb5",
     "apps/electron/src/main/fork-update.ts": "a2139e259944c76c91e32b3534a121e39890acb588fe8be0dca0beb64fb72cfb",
     "apps/electron/src/transport/thin-client-updates.ts": "bff4691a5a3752391c929f7498d0099731b078a7f67064a992087dd92779b953",
@@ -89,7 +89,7 @@
     "packages/shared/src/protocol/pr-watch.ts": "c5e2f38129daa43c3ab50433aa38c38e375470d10a97ad5cf4340338faa4ca62",
     "apps/electron/src/renderer/components/app-shell/session-activity/session-activity.css": "3ca5f10bd6f2e9c0d5215a937539572e63460510ecf6d1c63bb2e2d2d9818a82",
     "apps/electron/src/renderer/components/app-shell/chat-header/pr-watch/pr-watch-visuals.tsx": "6db7f3800107f3fffde6a979e9dbfb65f7392e96d30bc31f389417107d80aed9",
-    "packages/server/src/index.ts": "a342d880ea7ae0c0716f4201acf6cc12f457eeee535074324eef0eca79d3a060",
+    "packages/server/src/index.ts": "d0fe102d4d5f3f82b54eb1d7fccdc0926c0242b406a57d924534637df471bbac",
     "packages/server-core/src/services/index.ts": "1d3b28e857875d5cc910afeef609e1649f8fd3f507ca00ab079e91008dd8618d",
     "packages/server-core/src/services/github-webhooks/events.ts": "30eaa4cb9b774f24172e50a1ad5c3c7797f7311b03a8f13b19675f0c6b7e2a44",
     "packages/server-core/src/services/github-webhooks/receiver.ts": "ccb3f0614d86ba68634a53dafe6873ba3373b791bb3ec0228966bcc7a89ebb11",
@@ -97,7 +97,10 @@
     "packages/shared/src/sessions/jsonl.ts": "a3e915da30ee25d594d90f81f29e4b3bb89d4c1c54cf93bcaa7bc6d1105e93a8",
     "apps/electron/src/renderer/components/app-shell/background-task-chip-state.ts": "d6278f054685744980a6986a0f538e238a82cfde5887641aa1134ac63da10e03",
     "apps/electron/src/renderer/components/app-shell/BackgroundTaskChip.tsx": "73fcee49633cedcf2ac0f5e8171fd09f1e3ee7f13100ff31e176ac8f96b2d884",
-    "apps/electron/src/renderer/components/app-shell/ActiveTasksBar.tsx": "a4175b19a2db02ca4ea25444bd5d91b9ef4f82d473fcdff3fb929a7a987049b5"
+    "apps/electron/src/renderer/components/app-shell/ActiveTasksBar.tsx": "a4175b19a2db02ca4ea25444bd5d91b9ef4f82d473fcdff3fb929a7a987049b5",
+    "packages/shared/src/sessions/recovery.ts": "b260f70befdbe4dfbb72a47da299becef683211ad2f08fd9806854c22fe75432",
+    "packages/shared/src/agent/backend/claude/persistent-input.ts": "d20da09bd9ae7ddbebebe5b87c5af9d3923832a2a6b1e2e855455c3e423d3531",
+    "apps/electron/src/renderer/components/app-shell/FailedSessionsButton.tsx": "7dd8a22ba028182c34e180a53152c99dcaa237501b1c56f357a901b99db697ea"
   },
   "compiledClientFiles": {
     "apps/electron/src/renderer/hooks/usePrWatch.ts": "91a994442ba68a3e2db48865320e0d03da7feb1d2f095d752b8d29ebc5e608f3",
@@ -134,7 +137,9 @@
     "apps/electron/src/renderer/components/app-shell/session-run-state.ts": "7e4b4649c52f82122904a47fd329faf26d365564ba5bc54e80fdb0c6b79ed38f",
     "apps/electron/src/renderer/components/app-shell/background-task-chip-state.ts": "d6278f054685744980a6986a0f538e238a82cfde5887641aa1134ac63da10e03",
     "apps/electron/src/renderer/components/app-shell/BackgroundTaskChip.tsx": "73fcee49633cedcf2ac0f5e8171fd09f1e3ee7f13100ff31e176ac8f96b2d884",
-    "apps/electron/src/renderer/components/app-shell/ActiveTasksBar.tsx": "a4175b19a2db02ca4ea25444bd5d91b9ef4f82d473fcdff3fb929a7a987049b5"
+    "apps/electron/src/renderer/components/app-shell/ActiveTasksBar.tsx": "a4175b19a2db02ca4ea25444bd5d91b9ef4f82d473fcdff3fb929a7a987049b5",
+    "packages/shared/src/sessions/recovery.ts": "b260f70befdbe4dfbb72a47da299becef683211ad2f08fd9806854c22fe75432",
+    "apps/electron/src/renderer/components/app-shell/FailedSessionsButton.tsx": "7dd8a22ba028182c34e180a53152c99dcaa237501b1c56f357a901b99db697ea"
   },
   "compiledNativeFeatures": {
     "bootstrap-preload.cjs": [

@@ -1909,7 +1909,7 @@ export class SessionManager implements ISessionManager {
       managed.stopRequested = false
       this.setSessionRecovery(managed, { status: 'running', at: Date.now() })
     }
-    else if (!processing && managed.recovery?.status === 'running') this.setSessionRecovery(managed, null)
+    else if (!processing && managed.recovery?.status === 'running' && !this.hasUnfinishedBackgroundWork(managed)) this.setSessionRecovery(managed, null)
     getSessionAttentionService()?.setWorking(managed.id, processing || countBackgroundAgents(managed.backgroundTaskRegistry.values()) > 0)
     if (!was && processing) {
       sessionRuntimeHooks.onSessionStarted()
@@ -1926,15 +1926,36 @@ export class SessionManager implements ISessionManager {
   }
 
   private recordSessionFailure(managed: ManagedSession, message: string): void {
-    if (managed.stopRequested || managed.isArchived || managed.isDeleting) return
+    if (this.shuttingDown || managed.stopRequested || managed.isArchived || managed.isDeleting) return
     this.setSessionRecovery(managed, { status: 'failed', at: Date.now(), message: message.slice(0, 500),
       lastFinalMessageId: this.getLastFinalAssistantMessageId(managed.messages) })
+  }
+
+  private shuttingDown = false
+
+  private hasUnfinishedBackgroundWork(managed: ManagedSession): boolean {
+    return !!managed.agent?.hasPendingBackgroundTurn?.()
+      || [...managed.backgroundTaskRegistry.values()].some(task => task.status === 'running' && !task.untracked && !task.stopRequestedAt)
+  }
+
+  /** Preserve interrupted work before subprocess teardown can report a trailing complete. */
+  prepareForShutdown(): void {
+    if (this.shuttingDown) return
+    this.shuttingDown = true
+    for (const managed of this.sessions.values()) {
+      if (managed.isArchived || managed.hidden || managed.isDeleting || managed.stopRequested) continue
+      if (managed.isProcessing || managed.recovery?.status === 'running') {
+        this.setSessionRecovery(managed, { status: 'failed', reason: 'server_restart', at: Date.now(),
+          message: 'The server stopped before this request finished.' })
+      }
+    }
   }
 
   /** Owner-triggered continuation in the same session; claim synchronously to dedupe clicks. */
   resumeFailedSession(sessionId: string): void {
     const managed = this.sessions.get(sessionId)
-    if (!managed || managed.isDeleting || !canResumeFailedSession(managed)) return
+    if (this.shuttingDown || !managed || managed.isDeleting || !canResumeFailedSession(managed)) return
+    if (this.hasUnfinishedBackgroundWork(managed)) throw new Error('This chat still has running background work.')
     const stopEpoch = managed.stopEpoch ?? 0
     if (!managed.messagesLoaded) this.hydrateMessagesForColdPersist(managed)
     const queuedIds = new Set(managed.messageQueue.map(entry => entry.messageId))
@@ -6106,9 +6127,7 @@ export class SessionManager implements ISessionManager {
       // it lands while the session is idle. During a turn these events flow through
       // the chat() generator as usual; this only covers the idle gap. No-op unless
       // the backend supports a persistent cross-turn query (Claude keep-alive).
-      managed.agent.setBackgroundEventSink?.((event: AgentEvent) => {
-        void this.processEvent(managed, event)
-      })
+      managed.agent.setBackgroundEventSink?.((event: AgentEvent) => this.processBackgroundEvent(managed, event))
       managed.agent.setBackgroundTurnReadyHandler?.(() => this.resumeBackgroundTurn(managed))
 
       // Wire up onSourceActivationRequest to auto-enable sources when agent tries to use them
@@ -6260,6 +6279,7 @@ export class SessionManager implements ISessionManager {
   }
 
   private assertSessionRunnable(managed: ManagedSession, stopEpoch?: number): void {
+    if (this.shuttingDown) throw new Error('The server is shutting down. Resume this chat after it restarts.')
     if (managed.isArchived || this.archiveStops.has(managed.id)) {
       throw Object.assign(new Error('This chat is archived and cannot receive prompts or run. Only the owner can unarchive it.'), { code: 'SESSION_ARCHIVED' })
     }
@@ -8609,7 +8629,7 @@ export class SessionManager implements ISessionManager {
   /** Reserve the normal session lifecycle synchronously; never synthesize a user message. */
   private resumeBackgroundTurn(managed: ManagedSession): void {
     const agent = managed.agent
-    if (this.sessions.get(managed.id) !== managed || managed.isArchived || managed.isDeleting
+    if (this.shuttingDown || this.sessions.get(managed.id) !== managed || managed.isArchived || managed.isDeleting
       || managed.isProcessing || managed.stopRequested || managed.isRestoringCheckpoint
       || managed.checkpointPendingSends || this.backgroundTurnCleanups.get(managed)
       || !agent?.resumeBackgroundTurn || !agent.hasPendingBackgroundTurn?.()) return
@@ -8683,11 +8703,14 @@ export class SessionManager implements ISessionManager {
     try {
 
     sessionLog.info(`Processing stopped for session ${sessionId}: ${reason}`)
-    if (reason === 'interrupted') this.setSessionRecovery(managed, null)
+    if (this.shuttingDown) return
+    if (reason === 'interrupted') {
+      if (managed.stopRequested || managed.recovery?.status !== 'failed') this.setSessionRecovery(managed, null)
+    }
     else if (reason === 'error' || reason === 'timeout') {
       if (managed.recovery?.status !== 'failed') this.recordSessionFailure(managed, reason === 'timeout' ? 'The agent timed out.' : 'The request failed.')
-    } else if (managed.recovery?.status !== 'failed'
-        || this.getLastFinalAssistantMessageId(managed.messages) !== managed.recovery.lastFinalMessageId) {
+    } else if (!this.hasUnfinishedBackgroundWork(managed) && (managed.recovery?.status !== 'failed'
+        || this.getLastFinalAssistantMessageId(managed.messages) !== managed.recovery.lastFinalMessageId)) {
       this.setSessionRecovery(managed, null)
     }
     getSessionAttentionService()?.setAutoFixActive(sessionId, null)
@@ -9160,8 +9183,26 @@ export class SessionManager implements ISessionManager {
    * their completion wakes the idle session. Shells and other tasks are left out: a dev server or
    * a watcher may never end, and a task step must not wait for it.
    */
+  /** Terminal consumer errors retire all tasks of the dead subprocess, including between turns. */
+  private processBackgroundEvent(managed: ManagedSession, event: AgentEvent): void {
+    if (event.type !== 'error') { void this.processEvent(managed, event); return }
+    if (managed.isProcessing || managed.recovery) this.recordSessionFailure(managed, event.message)
+    // A terminal consumer error kills its tasks even if an earlier task already failed.
+    for (const task of managed.backgroundTaskRegistry.values()) {
+      if (task.status !== 'running') continue
+      task.status = 'orphaned'
+      task.completedAt = Date.now()
+      this.sendEvent({ type: 'task_completed', sessionId: managed.id, taskId: task.taskId,
+        toolUseId: task.toolUseId, status: 'failed' }, managed.workspace.id)
+    }
+    this.publishBackgroundActivity(managed)
+  }
+
   /** Publish activity from the same registry used by reconnect snapshots. */
   private publishBackgroundActivity(managed: ManagedSession): void {
+    if (!managed.isProcessing && managed.recovery?.status === 'running' && !this.hasUnfinishedBackgroundWork(managed)) {
+      this.setSessionRecovery(managed, null)
+    }
     const backgroundAgentCount = countBackgroundAgents(managed.backgroundTaskRegistry.values())
     this.sendEvent({ type: 'session_metadata_changed', sessionId: managed.id, changes: { backgroundAgentCount } }, managed.workspace.id)
     getSessionAttentionService()?.setWorking(managed.id, managed.isProcessing || backgroundAgentCount > 0)
@@ -10624,6 +10665,11 @@ export class SessionManager implements ISessionManager {
         const launchedHereAndRunning = priorEntry
           ? priorEntry.status === 'running' && !priorEntry.untracked
           : event.launchedHere === true
+
+        if (managed && (managed.isProcessing || managed.recovery?.status === 'running')
+          && launchedHereAndRunning && status !== 'completed' && !priorEntry?.stopRequestedAt) {
+          this.recordSessionFailure(managed, event.summary || `Background task ${status} before finishing.`)
+        }
 
         // Store the output file for the chip's card (getBackgroundTaskOutput) and the wake-up nudge
         if (managed) {

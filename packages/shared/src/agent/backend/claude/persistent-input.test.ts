@@ -72,6 +72,23 @@ describe('createPushableInputStream', () => {
     expect(s.isEnded).toBe(true);
   });
 
+  it('drains received output then rejects an abnormal exit, without turning it into end()', async () => {
+    const s = createPushableInputStream<number>();
+    const got: number[] = [];
+    s.push(1);
+    s.fail(new Error('process exited'));
+    s.end();
+    await expect(async () => { for await (const x of s.stream) got.push(x); }).toThrow('process exited');
+    expect(got).toEqual([1]);
+  });
+
+  it('does not change a normally completed result into a later failure', async () => {
+    const s = createPushableInputStream<number>();
+    s.end();
+    s.fail(new Error('late exit'));
+    expect(await s.stream[Symbol.asyncIterator]().next()).toEqual({ done: true, value: undefined });
+  });
+
   it('interleaves push and consume across await points', async () => {
     const s = createPushableInputStream<number>();
     const results: number[] = [];

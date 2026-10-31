@@ -380,6 +380,7 @@ if (!isLocalBind && instance.protocol === 'ws') {
 }
 
 const shutdown = async () => {
+  instance.sessionManager.prepareForShutdown()
   await webhookReceiver?.stop()
   await serverBrowser?.close()
   webuiHandler?.dispose()
