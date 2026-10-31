@@ -40,7 +40,7 @@
     "packages/server-core/src/services/pr-watch/session-title.ts": "760901dbc66b3bc39aaaae763fceec9515aa431646713fa4aca90225887aa870",
     "packages/server-core/src/services/session-attention/derived-status.ts": "22a5939cc38d4671226608ab8cbdc95c969b8cd1e7442b6b5b21c5403deb7347",
     "packages/shared/src/pr-watch/rules.ts": "e37fffcaddfeff6855b7a23a94a7b621a4452a078a2c7c9783c80f0473e08182",
-    "packages/shared/src/i18n/locales/en.json": "3aa74d0d2c1b5191c74a4789d38ee08a0f3f261debf174cbdcff01ed9fe27a47",
+    "packages/shared/src/i18n/locales/en.json": "273c031c3d84ad34ce162959e9c355582c0b0f1173f566942af855fb91f31d54",
     "apps/electron/src/renderer/components/app-shell/chat-header/pr-watch/ChatHeaderPrChip.tsx": "8b5d5c6ea2dfd16953c3206e34f6058c22dafd8a471969ff36be59c787432a03",
     "apps/electron/src/renderer/components/app-shell/chat-header/pr-watch/pr-quick-actions.ts": "1d9d4b6af5c61ee60e250f2a0431a797c56377fcd3a5cbf4c16ed4c5560f0762",
     "packages/server-core/src/pr-watch/operations.ts": "d5e22df7e2bfd075944f8e68abd808d15e83918eaa879221ed85e25313d0cb35",
